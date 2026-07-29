@@ -29,7 +29,7 @@ dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug -- --spee
 Result:
 
 - Build: 0 warnings, 0 errors.
-- Repository-owned host tests: 77/77 pass after resource-probe tests were added.
+- Repository-owned host tests: 87/87 pass after focused IPC and named-pipe tests were added.
 - Speech self-test: `speech_self_test_ok`.
 - No network, microphone, or Credential Manager secret is used by the self-test.
 
@@ -55,24 +55,24 @@ Covered behavior includes:
 Machine-specific environment:
 
 - Windows 10.0.26200 x64
-- .NET 8.0.29
+- .NET 10.0.10 LTS
 - 16 logical processors
 - Release build
 
 | Case | p99 | Allocation/op | Budget |
 |---|---:|---:|---:|
-| Speechmatics final JSON parse | 13.2 µs | 256 B | 50 µs / 512 B |
-| Partial transcript aggregation | 0.6 µs | 256 B | 50 µs / 512 B |
-| 30 ms 48 kHz stereo to 16 kHz mono PCM | 20.0 µs | 2,041 B | 1 ms / 4,096 B |
-| Final transcript IPC encode | 0.4 µs | 72 B | 50 µs / 128 B |
+| Speechmatics final JSON parse | 5.0 µs | 256 B | 50 µs / 512 B |
+| Partial transcript aggregation | 0.5 µs | 256 B | 50 µs / 512 B |
+| 30 ms 48 kHz stereo to 16 kHz mono PCM | 12.0 µs | 2,041 B | 1 ms / 4,096 B |
+| Final transcript IPC encode | 0.3 µs | 72 B | 50 µs / 128 B |
 
 All four cases passed both latency and allocation budgets. The benchmark process itself is not a resident-memory measurement because it retains sample arrays.
 
 Separate Release host resource probe over approximately three seconds:
 
-- working set: 22,159,360 bytes (about 21.1 MiB);
-- private memory: 6,971,392 bytes (about 6.6 MiB);
-- managed heap: 110,504 bytes;
+- working set: 22,081,536 bytes (about 21.1 MiB);
+- private memory: 6,860,800 bytes (about 6.5 MiB);
+- managed heap: 102,424 bytes;
 - threads: 12;
 - measured CPU time: 0 ms in the sample window.
 

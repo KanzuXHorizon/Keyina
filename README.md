@@ -17,7 +17,7 @@ Focused Windows application
         ↕ TSF composition/edit sessions
 KeyinaTsf.dll — C++20, native, offline hot path
         ↕ bounded versioned local IPC protocol
-Keyina.Host.exe — .NET 8 Windows resident process
+Keyina.Host.exe — .NET 10 LTS Windows resident process
   - tray and settings lifecycle
   - familiar input-mode hotkeys
   - deterministic snippets
@@ -42,7 +42,7 @@ Keyina.Host.exe — .NET 8 Windows resident process
 
 ### Host, productivity, and speech foundation
 
-- Deterministic .NET 8 host/core solution with warnings as errors and package lock files.
+- Deterministic .NET 10 LTS host/core solution with warnings as errors and package lock files.
 - Immutable tray/dictation reducers and named-mutex single-instance guard.
 - Familiar `Ctrl+Shift` input-mode state machine with left/right modifier, repeat, and shortcut contamination tests.
 - Scoped deterministic snippet matcher with secure-input bypass and built-ins such as `;kvi`, `;kvoice`, and `;kdate`.
@@ -130,7 +130,7 @@ git diff --exit-code -- docs/brand brand
 
 ## Status
 
-Keyina currently has a verified native engine, functional local TSF proof, deterministic brand assets, tested hotkey/snippet/IPC cores, and an offline-verified Speechmatics/audio pipeline. It is **not yet a production-ready installer**. Windows hotkey registration, named-pipe runtime, TSF final/snippet insertion, persistent tray/settings UI, signed packaging, live-provider validation, and the third-party compatibility matrix remain active implementation slices.
+Keyina currently has a verified native engine, focused TSF external edits, current-user IPC routing, deterministic brand assets, familiar Windows hotkeys, tested snippet/IPC cores, and an offline-verified Speechmatics/audio pipeline on .NET 10 LTS. It is **not yet a production-ready installer**. Persistent tray/settings UI, signed installation, elevated TSF registration, live-provider validation, and the third-party compatibility matrix remain active release gates.
 
 Design and execution documents:
 

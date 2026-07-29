@@ -6,7 +6,7 @@
 
 **Architecture:** All policy and state machines live in `Keyina.Host.Core` and are independently benchmarkable. Windows keyboard hooks and `RegisterHotKey` are isolated in `Keyina.Host.Windows`; they post immutable commands to the host event loop and perform no network, disk, JSON, IPC, or UI work in callbacks. Snippets are matched in the host core but inserted atomically by the TSF side through a versioned named-pipe protocol restricted to the current user.
 
-**Tech Stack:** .NET 8/C# 12, Windows P/Invoke, C++20 TSF adapter, JSON source generation or standard `System.Text.Json`, named pipes, repository-owned tests and benchmarks.
+**Tech Stack:** .NET 10 LTS/C# 14, Windows P/Invoke, C++20 TSF adapter, strict `System.Text.Json`, current-user named pipes, repository-owned tests and benchmarks.
 
 ## Global Constraints
 

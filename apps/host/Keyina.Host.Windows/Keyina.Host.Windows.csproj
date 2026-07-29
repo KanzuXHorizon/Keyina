@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <RootNamespace>Keyina.Host.Windows</RootNamespace>
     <AssemblyName>Keyina.Host.Windows</AssemblyName>
     <Description>Windows-specific host adapters for credentials, audio, hotkeys, tray, and IPC.</Description>

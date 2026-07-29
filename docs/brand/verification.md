@@ -1,7 +1,7 @@
 # Brand and host foundation verification
 
 **Verified:** 2026-07-29  
-**Reference environment:** Windows 10 build 26200, Intel x64, MSVC 19.44, .NET SDK 10.0.301 targeting .NET 8
+**Reference environment:** Windows build 26200, Intel x64, MSVC 19.44, .NET SDK 10.0.301 targeting .NET 10 LTS
 
 ## Brand evidence
 

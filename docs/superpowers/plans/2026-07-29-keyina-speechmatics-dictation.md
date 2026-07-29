@@ -4,9 +4,9 @@
 
 **Goal:** Add optional low-latency Vietnamese dictation using Speechmatics Realtime while preserving ordinary TSF typing performance, privacy, and fail-open behavior.
 
-**Architecture:** `Keyina.Speechmatics` is a platform-independent .NET 8 protocol/session library over an injectable WebSocket transport. `Keyina.Host.Windows` stores the API key in Windows Credential Manager and captures bounded microphone audio. Partials update only a non-activating overlay model; finals are encoded as `FinalTranscript` IPC frames and committed atomically by TSF. No Speechmatics, audio, credential, or WebSocket code is linked into `KeyinaTsf.dll`.
+**Architecture:** `Keyina.Speechmatics` is a platform-independent .NET 10 LTS protocol/session library over an injectable WebSocket transport. `Keyina.Host.Windows` stores the API key in Windows Credential Manager and captures bounded microphone audio. Partials update only a non-activating overlay model; finals are encoded as `FinalTranscript` IPC frames and committed atomically by TSF. No Speechmatics, audio, credential, or WebSocket code is linked into `KeyinaTsf.dll`.
 
-**Tech Stack:** .NET 8, `ClientWebSocket`, `System.Text.Json`, Windows Credential Manager P/Invoke, NAudio 2.3.0 stable for WASAPI capture, bounded `Channel<T>`, existing C#/C++ IPC protocol.
+**Tech Stack:** .NET 10 LTS, `ClientWebSocket`, `System.Text.Json`, Windows Credential Manager P/Invoke, NAudio 2.3.0 stable for WASAPI capture, bounded `Channel<T>`, existing C#/C++ IPC protocol.
 
 ## Global Constraints
 

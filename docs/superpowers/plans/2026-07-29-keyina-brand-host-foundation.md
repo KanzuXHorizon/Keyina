@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add deterministic production brand assets and a tested .NET 8 Windows host foundation without changing or slowing the existing TSF typing path.
+**Goal:** Add deterministic production brand assets and a tested .NET 10 LTS Windows host foundation without changing or slowing the existing TSF typing path.
 
 **Architecture:** Vector brand sources are checked in and a repository-owned .NET asset generator produces PNG/ICO files plus a SHA-256 manifest. `Keyina.Host.Core` contains dependency-free state/contracts, while `Keyina.Host` is a minimal Windows resident executable that consumes generated resources; UI, hotkeys, snippets, and Speechmatics are layered in later plans.
 
-**Tech Stack:** C++20/CMake existing build, .NET SDK 10.0.301 pinned by `global.json` while host binaries target .NET 8, C# 12, xUnit-free repository-owned test runner initially, SVG/XML, System.Drawing only inside the Windows asset generator.
+**Tech Stack:** C++20/CMake existing build, .NET SDK 10.0.301 pinned by `global.json`, .NET 10 LTS/C# 14, xUnit-free repository-owned test runner, SVG/XML, System.Drawing only inside the Windows asset generator.
 
 ## Global Constraints
 

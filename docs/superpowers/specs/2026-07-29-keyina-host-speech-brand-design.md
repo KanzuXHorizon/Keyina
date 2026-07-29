@@ -25,7 +25,7 @@ The speech, tray, configuration, and network layers must never run inside `Keyin
 Keyina uses two production processes:
 
 - `KeyinaTsf.dll`: C++20 COM in-process TSF service. It owns text composition in the focused application. It remains deterministic, offline, and allocation-conscious.
-- `Keyina.Host.exe`: .NET 8 Windows resident process. It owns the notification-area icon, global hotkeys, snippet configuration, microphone capture, Speechmatics WebSocket session, credentials, overlay state, diagnostics, and local IPC.
+- `Keyina.Host.exe`: .NET 10 LTS Windows resident process. It owns the notification-area icon, global hotkeys, snippet configuration, microphone capture, Speechmatics WebSocket session, credentials, overlay state, diagnostics, and local IPC.
 
 A third executable is allowed only for packaging or tests. Settings initially live in `Keyina.Host`; a separate WinUI 3 settings process may be introduced later only if startup/resource evidence justifies it.
 
