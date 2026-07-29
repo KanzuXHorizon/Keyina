@@ -119,12 +119,12 @@
 - Output manifest records source hash, output hash, width, height, role, and format.
 - ICO stores PNG-compressed frames at 16, 20, 24, 32, 40, 48, 64, 128, and 256 px.
 
-- [ ] **Step 1: Add failing tests that require app PNG dimensions, tray PNG dimensions, ICO frame sizes, non-empty alpha, and manifest hashes.**
-- [ ] **Step 2: Verify failure because generated assets are absent.**
-- [ ] **Step 3: Implement supersampled raster drawing from `BrandGeometry`, preserving small-icon stroke limits and transparent backgrounds.**
-- [ ] **Step 4: Implement ICO frame writer with stable size ordering and zero timestamps.**
-- [ ] **Step 5: Generate assets, run tests, delete outputs, regenerate, and verify every output SHA-256 is identical.**
-- [ ] **Step 6: Commit as `build(brand): generate deterministic Windows assets`.**
+- [x] **Step 1: Add failing tests that require app PNG dimensions, tray PNG dimensions, ICO frame sizes, non-empty alpha, and manifest hashes.**
+- [x] **Step 2: Verify failure because generated assets are absent.**
+- [x] **Step 3: Implement supersampled raster drawing from `BrandGeometry`, preserving small-icon stroke limits and transparent backgrounds.**
+- [x] **Step 4: Implement ICO frame writer with stable size ordering and zero timestamps.**
+- [x] **Step 5: Generate assets, run tests, delete outputs, regenerate, and verify every output SHA-256 is identical.**
+- [x] **Step 6: Commit as `build(brand): generate deterministic Windows assets`.**
 
 ### Task 5: Host lifecycle and tray state model
 

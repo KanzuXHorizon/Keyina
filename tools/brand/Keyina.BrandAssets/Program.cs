@@ -18,9 +18,15 @@ internal static class Program
                     SvgWriter.GenerateAll(root);
                     Console.WriteLine("Generated Keyina vector brand sources");
                     return 0;
+                case "generate":
+                    ConceptCatalog.Generate(root);
+                    SvgWriter.GenerateAll(root);
+                    RasterWriter.GenerateAll(root);
+                    Console.WriteLine("Generated complete Keyina brand asset set");
+                    return 0;
                 default:
                     Console.Error.WriteLine(
-                        "Usage: Keyina.BrandAssets <catalog|vectors> --root <repository-root>");
+                        "Usage: Keyina.BrandAssets <catalog|vectors|generate> --root <repository-root>");
                     return 2;
             }
         }
