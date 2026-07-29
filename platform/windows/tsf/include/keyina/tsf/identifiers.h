@@ -17,6 +17,7 @@ IKeyinaTsfTestControl : public IUnknown {
       ULONGLONG focus_generation,
       BSTR expected_suffix,
       BSTR insert_text) = 0;
+  virtual HRESULT STDMETHODCALLTYPE SetPipeNameForTests(BSTR pipe_name) = 0;
 };
 
 inline constexpr CLSID kTextServiceClsid = {

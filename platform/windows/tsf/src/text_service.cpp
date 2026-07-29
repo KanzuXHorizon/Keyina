@@ -1,9 +1,12 @@
 #include "text_service.h"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <keyina/tsf/edit_translator.h>
@@ -75,13 +78,20 @@ HRESULT TextService::ActivateEx(ITfThreadMgr* thread_manager,
   thread_manager_->AddRef();
   client_id_ = client_id;
   secure_mode_ = (flags & TF_TMAE_SECUREMODE) != 0;
+  foreground_ = false;
+  input_enabled_ = true;
   focus_generation_.fetch_add(1, std::memory_order_relaxed);
   bool manual_key_dispatch = false;
 #if defined(KEYINA_TSF_TEST_HOOKS)
   manual_key_dispatch = (flags & kManualKeyDispatchForTests) != 0;
 #endif
 
-  if (secure_mode_ || manual_key_dispatch) {
+  if (secure_mode_) {
+    return S_OK;
+  }
+
+  static_cast<void>(StartIpc());
+  if (manual_key_dispatch) {
     return S_OK;
   }
 
@@ -109,6 +119,10 @@ HRESULT TextService::Deactivate() {
   }
   key_sink_advised_ = false;
 
+  foreground_ = false;
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
+  UpdateIpcFocus(false);
+  StopIpc();
   AbandonComposition();
   engine_.Reset();
 
@@ -122,13 +136,15 @@ HRESULT TextService::Deactivate() {
   }
   client_id_ = TF_CLIENTID_NULL;
   secure_mode_ = false;
-  focus_generation_.fetch_add(1, std::memory_order_relaxed);
+  input_enabled_ = true;
   return result;
 }
 
 HRESULT TextService::OnSetFocus(BOOL foreground) {
+  foreground_ = foreground != FALSE;
   focus_generation_.fetch_add(1, std::memory_order_relaxed);
-  if (!foreground) {
+  UpdateIpcFocus(foreground_);
+  if (!foreground_) {
     bool applied = false;
     if (composition_context_ != nullptr) {
       static_cast<void>(RequestRoute(
@@ -148,12 +164,11 @@ HRESULT TextService::OnTestKeyDown(ITfContext* context, WPARAM virtual_key,
   if (eaten == nullptr) {
     return E_POINTER;
   }
-  if (context == nullptr || secure_mode_) {
+  if (context == nullptr || secure_mode_ || !input_enabled_) {
     *eaten = FALSE;
     return S_OK;
   }
 
-  focus_generation_.fetch_add(1, std::memory_order_relaxed);
   const KeyRoute route = RouteKey(BuildRoutingInput(virtual_key));
   *eaten = route.kind == KeyRouteKind::PassThrough ? FALSE : TRUE;
   return S_OK;
@@ -175,6 +190,12 @@ HRESULT TextService::OnKeyDown(ITfContext* context, WPARAM virtual_key,
   }
   *eaten = FALSE;
   if (context == nullptr || secure_mode_) {
+    return S_OK;
+  }
+
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
+  UpdateIpcFocus(foreground_);
+  if (!input_enabled_) {
     return S_OK;
   }
 
@@ -255,7 +276,224 @@ HRESULT TextService::ApplyExternalText(
       std::wstring(insert_text, insert_length),
       nullptr);
 }
+
+HRESULT TextService::SetPipeNameForTests(BSTR pipe_name) {
+  if (client_id_ != TF_CLIENTID_NULL) {
+    return E_UNEXPECTED;
+  }
+  if (pipe_name == nullptr || SysStringLen(pipe_name) == 0 ||
+      SysStringLen(pipe_name) > 240) {
+    return E_INVALIDARG;
+  }
+  std::wstring value(pipe_name, SysStringLen(pipe_name));
+  if (value.find_first_of(L"\\/:") != std::wstring::npos) {
+    return E_INVALIDARG;
+  }
+  test_pipe_name_ = std::move(value);
+  return S_OK;
+}
 #endif
+
+bool TextService::StartIpc() noexcept {
+  if (secure_mode_ || pipe_client_ != nullptr) {
+    return false;
+  }
+  if (!command_window_.Create([this] { DrainExternalEnvelopes(); })) {
+    return false;
+  }
+
+  ipc_session_id_ = CreateSessionId();
+  bool has_session_data = false;
+  for (const std::uint8_t value : ipc_session_id_.bytes) {
+    has_session_data = has_session_data || value != 0;
+  }
+  if (!has_session_data) {
+    command_window_.Destroy();
+    return false;
+  }
+
+  std::wstring pipe_name = DefaultPipeName();
+#if defined(KEYINA_TSF_TEST_HOOKS)
+  if (!test_pipe_name_.empty()) {
+    pipe_name = test_pipe_name_;
+  }
+#endif
+  if (pipe_name.empty()) {
+    command_window_.Destroy();
+    return false;
+  }
+
+  try {
+    pipe_client_ = std::make_unique<PipeClient>(
+        std::move(pipe_name), ipc_session_id_,
+        [this](ipc::Envelope envelope) {
+          QueueExternalEnvelope(std::move(envelope));
+        });
+  } catch (...) {
+    command_window_.Destroy();
+    return false;
+  }
+  if (!pipe_client_->Start()) {
+    pipe_client_.reset();
+    command_window_.Destroy();
+    return false;
+  }
+  UpdateIpcFocus(foreground_);
+  return true;
+}
+
+void TextService::StopIpc() noexcept {
+  if (pipe_client_ != nullptr) {
+    pipe_client_->SetFocused(false,
+                             focus_generation_.load(std::memory_order_relaxed));
+    pipe_client_->Stop();
+    pipe_client_.reset();
+  }
+  {
+    std::lock_guard lock(external_queue_mutex_);
+    external_queue_.clear();
+  }
+  command_window_.Destroy();
+}
+
+void TextService::UpdateIpcFocus(bool focused) noexcept {
+  if (pipe_client_ != nullptr) {
+    pipe_client_->SetFocused(
+        focused,
+        focus_generation_.load(std::memory_order_relaxed));
+  }
+}
+
+void TextService::QueueExternalEnvelope(ipc::Envelope envelope) noexcept {
+  try {
+    {
+      std::lock_guard lock(external_queue_mutex_);
+      constexpr std::size_t kMaximumQueuedEnvelopes = 32;
+      if (external_queue_.size() >= kMaximumQueuedEnvelopes) {
+        return;
+      }
+      external_queue_.push_back(std::move(envelope));
+    }
+    static_cast<void>(command_window_.Post());
+  } catch (...) {
+    // IPC commands are optional and must never affect ordinary typing.
+  }
+}
+
+void TextService::DrainExternalEnvelopes() noexcept {
+  while (true) {
+    ipc::Envelope envelope;
+    {
+      std::lock_guard lock(external_queue_mutex_);
+      if (external_queue_.empty()) {
+        return;
+      }
+      envelope = std::move(external_queue_.front());
+      external_queue_.pop_front();
+    }
+    ApplyExternalEnvelope(envelope);
+  }
+}
+
+void TextService::ApplyExternalEnvelope(
+    const ipc::Envelope& envelope) noexcept {
+  if (secure_mode_ || envelope.session_id != ipc_session_id_ ||
+      envelope.focus_generation !=
+          focus_generation_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
+  if (envelope.message_type == ipc::MessageType::ToggleInput) {
+    if (envelope.payload == "enabled") {
+      input_enabled_ = true;
+    } else if (envelope.payload == "disabled") {
+      input_enabled_ = false;
+      engine_.Reset();
+      AbandonComposition();
+    }
+    return;
+  }
+
+  std::wstring expected_suffix;
+  std::wstring insert_text;
+  if (envelope.message_type == ipc::MessageType::FinalTranscript) {
+    if (envelope.payload.find('\0') != std::string::npos ||
+        !Utf8ToWide(envelope.payload, insert_text)) {
+      return;
+    }
+  } else if (envelope.message_type == ipc::MessageType::SnippetExpansion) {
+    const std::size_t separator = envelope.payload.find('\0');
+    if (separator == std::string::npos ||
+        envelope.payload.find('\0', separator + 1) != std::string::npos ||
+        !Utf8ToWide(std::string_view(envelope.payload).substr(0, separator),
+                    expected_suffix) ||
+        !Utf8ToWide(std::string_view(envelope.payload).substr(separator + 1),
+                    insert_text)) {
+      return;
+    }
+  } else {
+    return;
+  }
+
+  if (insert_text.empty() || expected_suffix.size() > 256U ||
+      insert_text.size() > 32'768U) {
+    return;
+  }
+  static_cast<void>(RequestExternalText(
+      envelope.focus_generation,
+      std::move(expected_suffix),
+      std::move(insert_text),
+      nullptr));
+}
+
+bool TextService::Utf8ToWide(
+    std::string_view value,
+    std::wstring& output) noexcept {
+  output.clear();
+  if (value.empty()) {
+    return true;
+  }
+  if (value.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+    return false;
+  }
+  const int required = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS,
+      value.data(), static_cast<int>(value.size()), nullptr, 0);
+  if (required <= 0) {
+    return false;
+  }
+  try {
+    output.resize(static_cast<std::size_t>(required));
+  } catch (...) {
+    return false;
+  }
+  return MultiByteToWideChar(
+             CP_UTF8, MB_ERR_INVALID_CHARS,
+             value.data(), static_cast<int>(value.size()),
+             output.data(), required) == required;
+}
+
+ipc::SessionId TextService::CreateSessionId() noexcept {
+  ipc::SessionId session_id{};
+  GUID guid{};
+  if (SUCCEEDED(CoCreateGuid(&guid))) {
+    static_assert(sizeof(guid) == session_id.bytes.size());
+    std::memcpy(session_id.bytes.data(), &guid, sizeof(guid));
+  }
+  return session_id;
+}
+
+std::wstring TextService::DefaultPipeName() noexcept {
+  DWORD session_id = 0;
+  if (!ProcessIdToSessionId(GetCurrentProcessId(), &session_id)) {
+    return {};
+  }
+  try {
+    return L"Keyina.Host.v1.s" + std::to_wstring(session_id);
+  } catch (...) {
+    return {};
+  }
+}
 
 KeyRoutingInput TextService::BuildRoutingInput(WPARAM virtual_key) const
     noexcept {
@@ -412,6 +650,7 @@ HRESULT TextService::ApplyExternalTextInSession(
 
   if (SUCCEEDED(result)) {
     focus_generation_.fetch_add(1, std::memory_order_relaxed);
+    UpdateIpcFocus(foreground_);
   }
   return result;
 }

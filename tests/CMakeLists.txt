@@ -41,6 +41,20 @@ if(WIN32)
   keyina_configure_target(keyina_tsf_registration_probe)
   add_dependencies(keyina_tsf_registration_probe KeyinaTsf)
 
+  add_executable(keyina_pipe_client_test windows/pipe_client_test.cpp)
+  target_compile_features(keyina_pipe_client_test PRIVATE cxx_std_20)
+  target_link_libraries(keyina_pipe_client_test PRIVATE
+    keyina::tsf_support
+    ole32
+    uuid
+  )
+  keyina_configure_target(keyina_pipe_client_test)
+  add_test(NAME keyina.windows.pipe_client COMMAND keyina_pipe_client_test)
+  set_tests_properties(keyina.windows.pipe_client PROPERTIES
+    LABELS integration
+    TIMEOUT 15
+  )
+
   add_executable(keyina_tsf_integration
     windows/test_text_store.cpp
     windows/tsf_integration_test.cpp
@@ -56,7 +70,12 @@ if(WIN32)
   target_include_directories(keyina_tsf_integration PRIVATE
     "${PROJECT_SOURCE_DIR}/platform/windows/tsf/include"
   )
-  target_link_libraries(keyina_tsf_integration PRIVATE ole32 oleaut32 uuid)
+  target_link_libraries(keyina_tsf_integration PRIVATE
+    keyina::tsf_support
+    ole32
+    oleaut32
+    uuid
+  )
   keyina_configure_target(keyina_tsf_integration)
   add_dependencies(keyina_tsf_integration KeyinaTsfTest)
   add_test(

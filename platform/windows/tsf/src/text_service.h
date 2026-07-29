@@ -6,13 +6,19 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 
 #include <keyina/engine.h>
+#include <keyina/ipc_protocol.h>
 #include <keyina/tsf/identifiers.h>
 #include <keyina/tsf/key_router.h>
+#include <keyina/tsf/pipe_client.h>
 
+#include "activation_message_window.h"
 #include "key_edit_session.h"
 
 namespace keyina::tsf {
@@ -74,6 +80,7 @@ class TextService final : public ITfTextInputProcessorEx,
       ULONGLONG focus_generation,
       BSTR expected_suffix,
       BSTR insert_text) override;
+  HRESULT STDMETHODCALLTYPE SetPipeNameForTests(BSTR pipe_name) override;
 #endif
 
  private:
@@ -103,6 +110,17 @@ class TextService final : public ITfTextInputProcessorEx,
                                      std::wstring_view expected_suffix,
                                      std::wstring_view insert_text);
   HRESULT GetFocusedContext(ITfContext** context) const noexcept;
+  [[nodiscard]] bool StartIpc() noexcept;
+  void StopIpc() noexcept;
+  void UpdateIpcFocus(bool focused) noexcept;
+  void QueueExternalEnvelope(ipc::Envelope envelope) noexcept;
+  void DrainExternalEnvelopes() noexcept;
+  void ApplyExternalEnvelope(const ipc::Envelope& envelope) noexcept;
+  [[nodiscard]] static bool Utf8ToWide(
+      std::string_view value,
+      std::wstring& output) noexcept;
+  [[nodiscard]] static ipc::SessionId CreateSessionId() noexcept;
+  [[nodiscard]] static std::wstring DefaultPipeName() noexcept;
   HRESULT InsertBoundary(ITfContext* context, TfEditCookie edit_cookie,
                          char32_t character);
   HRESULT EndComposition(TfEditCookie edit_cookie) noexcept;
@@ -120,7 +138,17 @@ class TextService final : public ITfTextInputProcessorEx,
   TfClientId client_id_{TF_CLIENTID_NULL};
   bool key_sink_advised_{false};
   bool secure_mode_{false};
+  bool input_enabled_{true};
+  bool foreground_{false};
   std::atomic<std::uint64_t> focus_generation_{0};
+  ipc::SessionId ipc_session_id_{};
+  std::unique_ptr<PipeClient> pipe_client_;
+  ActivationMessageWindow command_window_;
+  std::mutex external_queue_mutex_;
+  std::deque<ipc::Envelope> external_queue_;
+#if defined(KEYINA_TSF_TEST_HOOKS)
+  std::wstring test_pipe_name_;
+#endif
   Engine engine_;
 };
 

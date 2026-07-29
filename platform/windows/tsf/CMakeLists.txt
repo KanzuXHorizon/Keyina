@@ -2,6 +2,7 @@ add_library(keyina_tsf_support STATIC
   src/edit_translator.cpp
   src/ipc_protocol.cpp
   src/key_router.cpp
+  src/pipe_client.cpp
 )
 add_library(keyina::tsf_support ALIAS keyina_tsf_support)
 
@@ -15,6 +16,7 @@ keyina_configure_target(keyina_tsf_support)
 function(keyina_add_tsf_dll target definition_file output_name)
   add_library(${target} SHARED
     ${definition_file}
+    src/activation_message_window.cpp
     src/dll_entry.cpp
     src/external_edit_session.cpp
     src/key_edit_session.cpp
