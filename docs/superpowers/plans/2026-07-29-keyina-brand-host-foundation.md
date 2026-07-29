@@ -70,12 +70,12 @@
 }
 ```
 
-- [ ] **Step 1: Add a failing test that loads `docs/brand/concept-assets.json`, requires exactly four unique assets, verifies file existence, SHA-256, and dimensions 1536×1024.**
-- [ ] **Step 2: Run the host test runner; verify failure because the catalog is absent.**
-- [ ] **Step 3: Implement catalog generation using SHA256 and `System.Drawing.Image` metadata, sorted by normalized repository-relative path.**
-- [ ] **Step 4: Generate `concept-assets.json`, write `docs/brand/README.md` explaining concept-only usage, and rerun tests.**
-- [ ] **Step 5: Run the generator twice and compare SHA-256 of the JSON output; verify identical results.**
-- [ ] **Step 6: Commit as `docs(brand): catalog approved Keyina concepts`.**
+- [x] **Step 1: Add a failing test that loads `docs/brand/concept-assets.json`, requires exactly four unique assets, verifies file existence, SHA-256, and dimensions 1536×1024.**
+- [x] **Step 2: Run the host test runner; verify failure because the catalog is absent.**
+- [x] **Step 3: Implement catalog generation using SHA256 and direct PNG IHDR metadata parsing, sorted by normalized repository-relative path.**
+- [x] **Step 4: Generate `concept-assets.json`, write `docs/brand/README.md` explaining concept-only usage, and rerun tests.**
+- [x] **Step 5: Run the generator twice and compare SHA-256 of the JSON output; verify identical results.**
+- [x] **Step 6: Commit as `docs(brand): catalog approved Keyina concepts`.**
 
 ### Task 3: Add the vector brand model and SVG sources
 

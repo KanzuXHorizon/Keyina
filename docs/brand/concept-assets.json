@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "path": "docs/image/ChatGPT Image 18_28_15 29 thg 7, 2026.png",
+      "sha256": "0FC2203FA6B894295AB712553A5792F8EBF15E5E683CF5F9919A7B83BC6F8644",
+      "width": 1536,
+      "height": 1024,
+      "role": "concept"
+    },
+    {
+      "path": "docs/image/ChatGPT Image 18_32_21 29 thg 7, 2026 (1).png",
+      "sha256": "9D5CE119E1464011A47C1F6B27C2A0D184B3C9399A728F4A04AD74FC137D70EB",
+      "width": 1536,
+      "height": 1024,
+      "role": "concept"
+    },
+    {
+      "path": "docs/image/ChatGPT Image 18_32_21 29 thg 7, 2026 (2).png",
+      "sha256": "343AC985C4F9F1FA9FF24934C4CB67AFEC79012B860AD0A3AFFBF6EB9BBFCBC3",
+      "width": 1536,
+      "height": 1024,
+      "role": "concept"
+    },
+    {
+      "path": "docs/image/ChatGPT Image 18_32_21 29 thg 7, 2026 (3).png",
+      "sha256": "0A9E12BB223BAD0BCECF3B00A71EC8A34BC220953133EE0680D00E23B93D27C0",
+      "width": 1536,
+      "height": 1024,
+      "role": "concept"
+    }
+  ]
+}
