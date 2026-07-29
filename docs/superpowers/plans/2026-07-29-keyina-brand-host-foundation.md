@@ -145,12 +145,12 @@ public abstract record HostEvent;
 public static HostState HostReducer.Reduce(HostState state, HostEvent @event);
 ```
 
-- [ ] **Step 1: Add failing reducer tests for initial state, input toggle, listening start/stop, error, recovery, and precedence of listening over input mode.**
-- [ ] **Step 2: Run tests and verify missing types.**
-- [ ] **Step 3: Implement immutable reducer and map every state to a generated tray asset.**
-- [ ] **Step 4: Add a named-mutex single-instance guard; a second instance exits with a documented code and performs no registry/network work.**
-- [ ] **Step 5: Run Debug/Release tests and verify host startup exits cleanly in `--self-test` mode without creating a tray icon.**
-- [ ] **Step 6: Commit as `feat(host): add lifecycle and tray state foundation`.**
+- [x] **Step 1: Add failing reducer tests for initial state, input toggle, listening start/stop, error, recovery, and precedence of listening over input mode.**
+- [x] **Step 2: Run tests and verify missing types.**
+- [x] **Step 3: Implement immutable reducer and map every state to a generated tray asset.**
+- [x] **Step 4: Add a named-mutex single-instance guard; a second instance exits with a documented code and performs no registry/network work.**
+- [x] **Step 5: Run Debug/Release tests and verify host startup exits cleanly in `--self-test` mode without creating a tray icon.**
+- [x] **Step 6: Commit as `feat(host): add lifecycle and tray state foundation`.**
 
 ### Task 6: CI and evidence
 

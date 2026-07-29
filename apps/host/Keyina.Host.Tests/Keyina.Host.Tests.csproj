@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
+    <ProjectReference Include="..\Keyina.Host\Keyina.Host.csproj" />
   </ItemGroup>
 </Project>

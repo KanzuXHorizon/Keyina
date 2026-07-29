@@ -5,8 +5,20 @@
     <RootNamespace>Keyina.Host</RootNamespace>
     <AssemblyName>Keyina.Host</AssemblyName>
     <Description>Resident Windows host for Keyina tray, hotkeys, snippets, and speech.</Description>
+    <ApplicationIcon>..\..\..\brand\generated\keyina.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\..\brand\generated\keyina-tray-active.ico"
+             Link="Assets\keyina-tray-active.ico"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\..\brand\generated\keyina-tray-inactive.ico"
+             Link="Assets\keyina-tray-inactive.ico"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\..\brand\generated\keyina-tray-listening.ico"
+             Link="Assets\keyina-tray-listening.ico"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
