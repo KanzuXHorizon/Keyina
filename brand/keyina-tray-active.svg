@@ -1,0 +1,17 @@
+<svg viewBox="0 0 16 16" role="img" aria-labelledby="title" shape-rendering="geometricPrecision" xmlns="http://www.w3.org/2000/svg">
+  <title id="title">Keyina tray icon — Vietnamese input enabled</title>
+  <rect x="3" y="4.5" width="10" height="7.5" rx="3" fill="none" stroke="#111827" stroke-width="2.2" />
+  <polyline points="4.5,11 4.5,13 6.5,11.8" fill="none" stroke="#111827" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="6" y1="7.5" x2="6" y2="9.5" fill="none" stroke="#111827" stroke-width="2.2" stroke-linecap="round" />
+  <line x1="8" y1="6" x2="8" y2="11" fill="none" stroke="#111827" stroke-width="2.2" stroke-linecap="round" />
+  <line x1="10" y1="7" x2="10" y2="10" fill="none" stroke="#111827" stroke-width="2.2" stroke-linecap="round" />
+  <line x1="8.7" y1="3.5" x2="9.7" y2="3" fill="none" stroke="#111827" stroke-width="2.2" stroke-linecap="round" />
+  <circle cx="8" cy="3.5" r="0.45" fill="#111827" stroke="none" />
+  <rect x="3" y="4.5" width="10" height="7.5" rx="3" fill="none" stroke="#F8FAFC" stroke-width="1.15" />
+  <polyline points="4.5,11 4.5,13 6.5,11.8" fill="none" stroke="#F8FAFC" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="6" y1="7.5" x2="6" y2="9.5" fill="none" stroke="#F8FAFC" stroke-width="1.15" stroke-linecap="round" />
+  <line x1="8" y1="6" x2="8" y2="11" fill="none" stroke="#F8FAFC" stroke-width="1.15" stroke-linecap="round" />
+  <line x1="10" y1="7" x2="10" y2="10" fill="none" stroke="#F8FAFC" stroke-width="1.15" stroke-linecap="round" />
+  <line x1="8.7" y1="3.5" x2="9.7" y2="3" fill="none" stroke="#F8FAFC" stroke-width="1.15" stroke-linecap="round" />
+  <circle cx="8" cy="3.5" r="0.45" fill="#F8FAFC" stroke="none" />
+</svg>

@@ -1,0 +1,35 @@
+<svg viewBox="0 0 840 256" role="img" aria-labelledby="title" shape-rendering="geometricPrecision" xmlns="http://www.w3.org/2000/svg">
+  <title id="title">Keyina logo</title>
+  <defs>
+    <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1677FF" />
+      <stop offset="52%" stop-color="#6D28D9" />
+      <stop offset="100%" stop-color="#FF3D5A" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#brandGradient)" stroke="none" />
+  <rect x="48" y="70" width="160" height="116" rx="44" fill="none" stroke="#F8FAFC" stroke-width="14" />
+  <polyline points="72,178 72,216 108,184" fill="none" stroke="#F8FAFC" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+  <line x1="76" y1="122" x2="76" y2="140" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="94" y1="108" x2="94" y2="154" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="112" y1="92" x2="112" y2="170" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="130" y1="80" x2="130" y2="182" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="148" y1="96" x2="148" y2="166" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="166" y1="108" x2="166" y2="154" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="184" y1="120" x2="184" y2="142" fill="none" stroke="#F8FAFC" stroke-width="11" stroke-linecap="round" />
+  <line x1="60" y1="132" x2="68" y2="132" fill="none" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round" />
+  <line x1="192" y1="132" x2="200" y2="132" fill="none" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round" />
+  <line x1="136" y1="42" x2="154" y2="22" fill="none" stroke="#F8FAFC" stroke-width="13" stroke-linecap="round" />
+  <circle cx="128" cy="52" r="7" fill="#F8FAFC" stroke="none" />
+  <polyline points="320,70 320,184" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="320,128 374,70" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="320,128 378,184" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="410,132 486,132 478,105 458,89 432,89 411,104 402,130 409,156 430,174 458,174 482,158" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="512,94 542,151 572,94" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="542,151 525,190" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <polyline points="606,108 606,174" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="606" cy="82" r="9" fill="#111827" stroke="none" />
+  <polyline points="646,174 646,104 673,104 700,126 700,174" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="752" cy="139" r="35" fill="none" stroke="#111827" stroke-width="22" />
+  <polyline points="787,105 787,174" fill="none" stroke="#111827" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

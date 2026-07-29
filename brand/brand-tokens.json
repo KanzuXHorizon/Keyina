@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "Keyina",
+  "colors": {
+    "blue": "#1677FF",
+    "violet": "#6D28D9",
+    "red": "#FF3D5A",
+    "ink": "#111827",
+    "paper": "#F8FAFC",
+    "muted": "#9CA3AF"
+  },
+  "mark": {
+    "viewBox": "0 0 256 256",
+    "cornerRadius": 52,
+    "safeArea": 20
+  },
+  "tray": {
+    "viewBox": "0 0 16 16",
+    "safeArea": 2,
+    "maximumStrokeWidth": 2.2
+  }
+}

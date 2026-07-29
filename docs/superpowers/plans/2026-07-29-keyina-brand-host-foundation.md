@@ -95,12 +95,12 @@
 - `BrandGeometry` is the single geometry source used by both `SvgWriter` and raster generation.
 - Every SVG uses an explicit `viewBox`, contains no embedded raster image, external URL, script, filter, blur, or font dependency.
 
-- [ ] **Step 1: Add failing tests that require five SVG sources, parse them as XML, and reject `<image>`, `<script>`, `<filter>`, external hrefs, missing `viewBox`, and missing accessible `<title>`.**
-- [ ] **Step 2: Run tests; verify failure because vector sources are absent.**
-- [ ] **Step 3: Implement `BrandGeometry` primitives for rounded-square mark, speech/input outline, waveform, accent, and tray states.**
-- [ ] **Step 4: Implement deterministic SVG serialization and generate the five checked-in SVG files from the geometry model.**
-- [ ] **Step 5: Add checks that tray assets use no gradient or shadow and remain within a 2 px safe area in a 16×16 viewBox.**
-- [ ] **Step 6: Run all tests and commit as `feat(brand): add vector-first Keyina identity`.**
+- [x] **Step 1: Add failing tests that require five SVG sources, parse them as XML, and reject `<image>`, `<script>`, `<filter>`, external hrefs, missing `viewBox`, and missing accessible `<title>`.**
+- [x] **Step 2: Run tests; verify failure because vector sources are absent.**
+- [x] **Step 3: Implement `BrandGeometry` primitives for rounded-square mark, speech/input outline, waveform, accent, and tray states.**
+- [x] **Step 4: Implement deterministic SVG serialization and generate the five checked-in SVG files from the geometry model.**
+- [x] **Step 5: Add checks that tray assets use no gradient or shadow and remain within a 2 px safe area in a 16×16 viewBox.**
+- [x] **Step 6: Run all tests and commit as `feat(brand): add vector-first Keyina identity`.**
 
 ### Task 4: Deterministically generate PNG and ICO assets
 

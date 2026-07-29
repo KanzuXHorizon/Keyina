@@ -14,9 +14,13 @@ internal static class Program
                     ConceptCatalog.Generate(root);
                     Console.WriteLine("Generated docs/brand/concept-assets.json");
                     return 0;
+                case "vectors":
+                    SvgWriter.GenerateAll(root);
+                    Console.WriteLine("Generated Keyina vector brand sources");
+                    return 0;
                 default:
                     Console.Error.WriteLine(
-                        "Usage: Keyina.BrandAssets catalog --root <repository-root>");
+                        "Usage: Keyina.BrandAssets <catalog|vectors> --root <repository-root>");
                     return 2;
             }
         }
