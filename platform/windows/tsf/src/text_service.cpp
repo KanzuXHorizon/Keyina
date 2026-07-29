@@ -5,6 +5,7 @@
 #include <string>
 
 #include <keyina/tsf/edit_translator.h>
+#include <keyina/tsf/identifiers.h>
 
 #include "module_state.h"
 
@@ -65,8 +66,12 @@ HRESULT TextService::ActivateEx(ITfThreadMgr* thread_manager,
   thread_manager_->AddRef();
   client_id_ = client_id;
   secure_mode_ = (flags & TF_TMAE_SECUREMODE) != 0;
+  bool manual_key_dispatch = false;
+#if defined(KEYINA_TSF_TEST_HOOKS)
+  manual_key_dispatch = (flags & kManualKeyDispatchForTests) != 0;
+#endif
 
-  if (secure_mode_) {
+  if (secure_mode_ || manual_key_dispatch) {
     return S_OK;
   }
 

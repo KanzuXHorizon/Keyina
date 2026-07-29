@@ -39,6 +39,33 @@ if(WIN32)
   target_compile_features(keyina_tsf_registration_probe PRIVATE cxx_std_20)
   keyina_configure_target(keyina_tsf_registration_probe)
   add_dependencies(keyina_tsf_registration_probe KeyinaTsf)
+
+  add_executable(keyina_tsf_integration
+    windows/test_text_store.cpp
+    windows/tsf_integration_test.cpp
+  )
+  target_compile_features(keyina_tsf_integration PRIVATE cxx_std_20)
+  target_compile_definitions(keyina_tsf_integration PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    KEYINA_TSF_TEST_HOOKS
+  )
+  target_include_directories(keyina_tsf_integration PRIVATE
+    "${PROJECT_SOURCE_DIR}/platform/windows/tsf/include"
+  )
+  target_link_libraries(keyina_tsf_integration PRIVATE ole32 uuid)
+  keyina_configure_target(keyina_tsf_integration)
+  add_dependencies(keyina_tsf_integration KeyinaTsfTest)
+  add_test(
+    NAME keyina.windows.tsf_integration
+    COMMAND keyina_tsf_integration "$<TARGET_FILE:KeyinaTsfTest>"
+  )
+  set_tests_properties(keyina.windows.tsf_integration PROPERTIES
+    LABELS integration
+    TIMEOUT 30
+  )
 endif()
 
 target_compile_definitions(keyina_tests PRIVATE

@@ -7,7 +7,7 @@ include(KeyinaCompilerOptions)
 
 option(KEYINA_BUILD_BENCHMARKS "Build native latency benchmarks" ON)
 
-enable_testing()
+include(CTest)
 
 add_subdirectory(core)
 if(WIN32)

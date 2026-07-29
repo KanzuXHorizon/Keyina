@@ -55,12 +55,12 @@
 - Create: `tests/windows/tsf_integration_test.cpp`
 - Modify: `tests/CMakeLists.txt`
 
-- [ ] Implement the minimum correct `ITextStoreACP` contract required by `ITfDocumentMgr::CreateContext`.
-- [ ] Activate a real `ITfThreadMgr`, create a document/context, instantiate Keyina through its class factory, and activate it without global registration.
-- [ ] Type `tieengs`, `dduowngf`, Backspace, a boundary, and a protected technical token through `ITfKeyEventSink`.
-- [ ] Assert resulting UTF-16 text, selection, composition cleanup, secure-mode pass-through, and DLL unloadability.
-- [ ] Run the integration test repeatedly in Debug and Release.
-- [ ] Commit as `test(windows): verify functional TSF input locally`.
+- [x] Implement the minimum correct `ITextStoreACP` contract required by `ITfDocumentMgr::CreateContext`.
+- [x] Activate a real `ITfThreadMgr`, create a document/context, instantiate Keyina through its class factory, and activate it without global registration.
+- [x] Type `tieengs`, `dduowngf`, Backspace, a boundary, and a protected technical token through `ITfKeyEventSink`.
+- [x] Assert resulting UTF-16 text, selection, composition cleanup, secure-mode pass-through, and DLL unloadability.
+- [x] Run the integration test repeatedly in Debug and Release.
+- [x] Commit as `test(windows): verify functional TSF input locally`.
 
 ### Task 4: Sanitizer and reliability lanes
 
