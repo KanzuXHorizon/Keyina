@@ -122,12 +122,12 @@
 - Consumes: public `Engine` API.
 - Produces: a documented TSV schema with raw sequence, expected output, expected rollback, and guard expectation.
 
-- [ ] **Step 1: Add a parser test for comments, UTF-8 fields, and malformed row rejection.**
-- [ ] **Step 2: Verify malformed data fails clearly.**
-- [ ] **Step 3: Add at least 100 curated vectors spanning Vietnamese syllables, uppercase, punctuation, code, URL, email, path, and shell cases.**
-- [ ] **Step 4: Run golden-vector tests and fix only production behavior that contradicts the approved specification.**
-- [ ] **Step 5: Add deterministic generated sequences up to length six and assert edit-size, visible-state, rollback, and reset invariants.**
-- [ ] **Step 6: Run the full suite repeatedly and commit as `test(core): add golden vectors and invariants`.**
+- [x] **Step 1: Add a parser test for comments, UTF-8 fields, and malformed row rejection.**
+- [x] **Step 2: Verify malformed data fails clearly.**
+- [x] **Step 3: Add at least 100 curated vectors spanning Vietnamese syllables, uppercase, punctuation, code, URL, email, path, and shell cases.**
+- [x] **Step 4: Run golden-vector tests and fix only production behavior that contradicts the approved specification.**
+- [x] **Step 5: Add deterministic generated sequences up to length six and assert edit-size, visible-state, rollback, and reset invariants.**
+- [x] **Step 6: Run the full suite repeatedly and commit as `test(core): add golden vectors and invariants`.**
 
 ### Task 6: Benchmark and regression budgets
 
