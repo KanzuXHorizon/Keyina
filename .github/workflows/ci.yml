@@ -30,6 +30,8 @@ jobs:
         run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --self-test
       - name: Speech self-test (offline)
         run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --speech-self-test
+      - name: Hotkey self-test
+        run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --hotkey-self-test
       - name: Build .NET host (Release)
         run: dotnet build Keyina.slnx -c Release
       - name: Test .NET host (Release)

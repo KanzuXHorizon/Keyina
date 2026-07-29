@@ -147,11 +147,11 @@ public sealed class SnippetMatcher
 - `WH_KEYBOARD_LL` handles bare Ctrl+Shift release semantics only.
 - Both adapters expose bounded command events and registration diagnostics without key content.
 
-- [ ] **Step 1: Add P/Invoke contract tests and a fake native API for successful registration, conflict, duplicate configuration, dispose, and hook callback transitions.**
-- [ ] **Step 2: Implement hidden message window and deterministic registration lifecycle.**
-- [ ] **Step 3: Implement low-level hook that delegates only modifier transitions to `ModifierToggleStateMachine` and posts commands.**
-- [ ] **Step 4: Add `--hotkey-self-test` that registers unique temporary chords, dispatches a message, unregisters, and exits without modifying user settings.**
-- [ ] **Step 5: Run tests and commit as `feat(windows): register Keyina hotkeys safely`.**
+- [x] **Step 1: Add P/Invoke contract tests and a fake native API for successful registration, conflict, duplicate configuration, dispose, and hook callback transitions.**
+- [x] **Step 2: Implement hidden message window and deterministic registration lifecycle.**
+- [x] **Step 3: Implement low-level hook that delegates only modifier transitions to `ModifierToggleStateMachine` and posts commands.**
+- [x] **Step 4: Add `--hotkey-self-test` that registers unique temporary chords, dispatches a message, unregisters, and exits without modifying user settings.**
+- [x] **Step 5: Run tests and commit as `feat(windows): register Keyina hotkeys safely`.**
 
 ### Task 6: Snippet and IPC benchmarks
 

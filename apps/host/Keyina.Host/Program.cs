@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Keyina.Host.Core;
 using Keyina.Host.Diagnostics;
+using Keyina.Host.Hotkeys;
 using Keyina.Host.Speech;
 
 namespace Keyina.Host;
@@ -41,6 +42,13 @@ internal static class Program
                 .GetResult();
             Console.WriteLine(JsonSerializer.Serialize(snapshot, ResourceJsonOptions));
             return 0;
+        }
+
+        if (args.Contains("--hotkey-self-test", StringComparer.Ordinal))
+        {
+            var result = HotkeySelfTest.Run();
+            Console.WriteLine(result.Code);
+            return result.Success ? 0 : 1;
         }
 
         if (!SingleInstanceGuard.TryAcquire(HostMutexName, out var guard))
