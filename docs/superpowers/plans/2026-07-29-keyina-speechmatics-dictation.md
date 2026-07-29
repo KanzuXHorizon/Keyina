@@ -63,10 +63,10 @@
 - Create: `apps/host/Keyina.Host.Tests/DictationReducerTests.cs`
 - Create: `apps/host/Keyina.Host.Tests/TranscriptAggregatorTests.cs`
 
-- [ ] **Step 1: Add failing tests for connecting/listening/finalizing/inserted/error/cancelled states and invalid transitions.**
-- [ ] **Step 2: Add partial revision tests proving partials replace overlay text while finals append once and clear the partial.**
-- [ ] **Step 3: Implement immutable reducer and transcript aggregator.**
-- [ ] **Step 4: Map each final segment to one existing `FinalTranscript` IPC envelope and commit as `feat(speech): aggregate stable dictation finals`.**
+- [x] **Step 1: Add failing tests for connecting/listening/finalizing/inserted/error/cancelled states and invalid transitions.**
+- [x] **Step 2: Add partial revision tests proving partials replace overlay text while finals append once and clear the partial.**
+- [x] **Step 3: Implement immutable reducer and transcript aggregator.**
+- [x] **Step 4: Map each final segment to one existing `FinalTranscript` IPC envelope and commit as `feat(speech): aggregate stable dictation finals`.**
 
 ### Task 4: Windows Credential Manager vault
 
