@@ -167,12 +167,12 @@
 - Consumes: `keyina::TextEdit` and `keyina::Engine`.
 - Produces: a pure edit-translation function testable without registering TSF, then the COM DLL lifecycle and registration exports.
 
-- [ ] **Step 1: Add a failing Windows-only test translating code-point erasure into validated UTF-16 composition edits.**
-- [ ] **Step 2: Implement the pure UTF-16 translator and verify it independently.**
-- [ ] **Step 3: Add minimal COM DLL exports and a text-service class whose key path delegates to `Engine`.**
-- [ ] **Step 4: Add scripts that install documented Build Tools prerequisites and register/unregister only developer builds.**
-- [ ] **Step 5: Configure and compile x64 on Windows; do not claim runtime compatibility yet.**
-- [ ] **Step 6: Commit as `feat(windows): scaffold TSF input service`.**
+- [x] **Step 1: Add a failing Windows-only test translating code-point erasure into validated UTF-16 composition edits.**
+- [x] **Step 2: Implement the pure UTF-16 translator and verify it independently.**
+- [x] **Step 3: Add minimal COM DLL exports and a secure-aware, deliberately pass-through text-service lifecycle; functional edit sessions remain a separate verified slice.**
+- [x] **Step 4: Add scripts that install documented Build Tools prerequisites and register/unregister only developer builds.**
+- [x] **Step 5: Configure and compile x64 Debug and Release on Windows; runtime registration remains blocked until an elevated developer session is explicitly used.**
+- [x] **Step 6: Commit as `feat(windows): scaffold TSF input service`.**
 
 ### Task 8: Verification and release evidence
 

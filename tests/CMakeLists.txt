@@ -14,6 +14,30 @@ target_link_libraries(keyina_tests PRIVATE keyina::core)
 target_include_directories(keyina_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(WIN32)
+  target_sources(keyina_tests PRIVATE windows/edit_translator_test.cpp)
+  target_link_libraries(keyina_tests PRIVATE keyina::tsf_support)
+
+  add_executable(keyina_tsf_dll_smoke windows/dll_smoke_test.cpp)
+  target_compile_features(keyina_tsf_dll_smoke PRIVATE cxx_std_20)
+  target_include_directories(keyina_tsf_dll_smoke PRIVATE
+    "${PROJECT_SOURCE_DIR}/platform/windows/tsf/include"
+  )
+  target_link_libraries(keyina_tsf_dll_smoke PRIVATE ole32 uuid)
+  keyina_configure_target(keyina_tsf_dll_smoke)
+  add_dependencies(keyina_tsf_dll_smoke KeyinaTsf)
+  add_test(
+    NAME keyina.windows.tsf_dll_smoke
+    COMMAND keyina_tsf_dll_smoke "$<TARGET_FILE:KeyinaTsf>"
+  )
+  set_tests_properties(keyina.windows.tsf_dll_smoke PROPERTIES LABELS integration)
+
+  add_executable(keyina_tsf_registration_probe windows/registration_probe.cpp)
+  target_compile_features(keyina_tsf_registration_probe PRIVATE cxx_std_20)
+  keyina_configure_target(keyina_tsf_registration_probe)
+  add_dependencies(keyina_tsf_registration_probe KeyinaTsf)
+endif()
+
 target_compile_definitions(keyina_tests PRIVATE
   KEYINA_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
