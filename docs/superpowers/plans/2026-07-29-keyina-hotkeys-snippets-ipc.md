@@ -46,11 +46,11 @@ public sealed class ModifierToggleStateMachine
 }
 ```
 
-- [ ] **Step 1: Add failing tests for left/right Ctrl+Shift press/release, either release order, auto-repeat, unrelated key cancellation, Alt/Windows contamination, lost-key reset, and no double-toggle.**
-- [ ] **Step 2: Run tests and verify missing contracts.**
-- [ ] **Step 3: Implement a finite-state machine with no heap allocation after construction.**
-- [ ] **Step 4: Add validation for default registered chords: `Ctrl+Alt+Space`, `Ctrl+Alt+V`, and `Escape`.**
-- [ ] **Step 5: Run tests and commit as `feat(hotkeys): add familiar input toggle state machine`.**
+- [x] **Step 1: Add failing tests for left/right Ctrl+Shift press/release, either release order, auto-repeat, unrelated key cancellation, Alt/Windows contamination, lost-key reset, and no double-toggle.**
+- [x] **Step 2: Run tests and verify missing contracts.**
+- [x] **Step 3: Implement a finite-state machine with no heap allocation after construction.**
+- [x] **Step 4: Add validation for default registered chords: `Ctrl+Alt+Space`, `Ctrl+Alt+V`, and `Escape`.**
+- [x] **Step 5: Run tests and commit as `feat(hotkeys): add familiar input toggle state machine`.**
 
 ### Task 2: Snippet schema, matcher, and dynamic variables
 
