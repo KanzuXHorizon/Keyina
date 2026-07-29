@@ -1,5 +1,6 @@
 add_executable(keyina_tests
   test_main.cpp
+  vietnamese_test.cpp
 )
 
 target_compile_features(keyina_tests PRIVATE cxx_std_20)

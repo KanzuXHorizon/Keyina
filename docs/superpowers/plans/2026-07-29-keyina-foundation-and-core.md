@@ -59,12 +59,12 @@
   - `std::optional<char32_t> ComposeVietnamese(const VietnameseLetter&);`
   - `bool IsVietnameseVowel(char32_t);`
 
-- [ ] **Step 1: Add failing table-driven tests for all lower- and uppercase Vietnamese precomposed vowels plus `đ/Đ`.**
-- [ ] **Step 2: Run only `vietnamese_test.cpp`; verify missing-symbol failures.**
-- [ ] **Step 3: Implement explicit constexpr composition tables and binary or bounded linear lookup.**
-- [ ] **Step 4: Run the focused tests and then all tests.**
-- [ ] **Step 5: Add round-trip invariants: compose(decompose(x)) equals x for every supported scalar.**
-- [ ] **Step 6: Commit as `feat(core): add Vietnamese Unicode model`.**
+- [x] **Step 1: Add failing table-driven tests for all lower- and uppercase Vietnamese precomposed vowels plus `đ/Đ`.**
+- [x] **Step 2: Run only `vietnamese_test.cpp`; verify missing-symbol failures.**
+- [x] **Step 3: Implement explicit constexpr composition tables and binary or bounded linear lookup.**
+- [x] **Step 4: Run the focused tests and then all tests.**
+- [x] **Step 5: Add round-trip invariants: compose(decompose(x)) equals x for every supported scalar.**
+- [x] **Step 6: Commit as `feat(core): add Vietnamese Unicode model`.**
 
 ### Task 3: Context Guard with stable reason codes
 
