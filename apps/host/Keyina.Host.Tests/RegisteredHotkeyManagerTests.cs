@@ -89,6 +89,52 @@ internal static class RegisteredHotkeyManagerTests
         ]));
     }
 
+    [KeyinaTest("modifier keyboard hook emits one push-to-talk release without swallowing input")]
+    private static void ModifierHookEmitsPushToTalkRelease()
+    {
+        var native = new FakeKeyboardHookNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var hook = new ModifierKeyboardHook(native);
+        hook.CommandReceived += (_, command) => commands.Add(command);
+        hook.Start();
+
+        _ = native.Callback!(new RawKeyboardEvent(VirtualKey.LeftControl, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftAlt, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.Space, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.Space, true, false));
+        AssertEx.Equal(0, commands.Count);
+
+        AssertEx.True(
+            !native.Callback(new RawKeyboardEvent(VirtualKey.Space, false, false)),
+            "Push-to-talk release was swallowed.");
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftAlt, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftControl, false, false));
+        AssertEx.True(
+            commands.SequenceEqual([HotkeyCommand.PushToTalkReleased]),
+            "Push-to-talk release was not emitted exactly once.");
+    }
+
+    [KeyinaTest("modifier keyboard hook releases push-to-talk when a chord modifier is released first")]
+    private static void ModifierHookReleasesOnModifierUp()
+    {
+        var native = new FakeKeyboardHookNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var hook = new ModifierKeyboardHook(native);
+        hook.CommandReceived += (_, command) => commands.Add(command);
+        hook.Start();
+
+        _ = native.Callback!(new RawKeyboardEvent(VirtualKey.LeftControl, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftAlt, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.Space, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftAlt, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.Space, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftControl, false, false));
+
+        AssertEx.True(
+            commands.SequenceEqual([HotkeyCommand.PushToTalkReleased]),
+            "Modifier-first release did not emit exactly one stop command.");
+    }
+
     [KeyinaTest("modifier keyboard hook delegates transitions without swallowing input")]
     private static void ModifierHookPostsOnlyCommands()
     {

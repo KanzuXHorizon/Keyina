@@ -20,6 +20,7 @@ public sealed class ModifierKeyboardHook : IDisposable
     private readonly ModifierToggleStateMachine stateMachine = new();
     private readonly bool[] pressedKeys = new bool[256];
     private IDisposable? installation;
+    private bool pushToTalkActive;
     private bool disposed;
 
     public ModifierKeyboardHook(IKeyboardHookNativeApi? nativeApi = null)
@@ -43,6 +44,7 @@ public sealed class ModifierKeyboardHook : IDisposable
     public void Reset()
     {
         Array.Clear(pressedKeys);
+        pushToTalkActive = false;
         _ = stateMachine.Process(KeyboardTransition.Reset);
     }
 
@@ -66,12 +68,34 @@ public sealed class ModifierKeyboardHook : IDisposable
         }
 
         var keyIndex = (int)rawEvent.Key;
-        var isRepeat = rawEvent.IsKeyDown &&
-            (uint)keyIndex < (uint)pressedKeys.Length &&
+        var wasPressed = (uint)keyIndex < (uint)pressedKeys.Length &&
             pressedKeys[keyIndex];
+        var isRepeat = rawEvent.IsKeyDown && wasPressed;
+        var controlPressedBefore = IsPressed(VirtualKey.LeftControl) ||
+            IsPressed(VirtualKey.RightControl);
+        var altPressedBefore = IsPressed(VirtualKey.LeftAlt) ||
+            IsPressed(VirtualKey.RightAlt);
+
+        if (rawEvent.IsKeyDown && !isRepeat && rawEvent.Key == VirtualKey.Space &&
+            controlPressedBefore && altPressedBefore)
+        {
+            pushToTalkActive = true;
+        }
+
+        var releasePushToTalk = !rawEvent.IsKeyDown && pushToTalkActive &&
+            rawEvent.Key is VirtualKey.Space or
+                VirtualKey.LeftControl or VirtualKey.RightControl or
+                VirtualKey.LeftAlt or VirtualKey.RightAlt;
+
         if ((uint)keyIndex < (uint)pressedKeys.Length)
         {
             pressedKeys[keyIndex] = rawEvent.IsKeyDown;
+        }
+
+        if (releasePushToTalk)
+        {
+            pushToTalkActive = false;
+            CommandReceived?.Invoke(this, HotkeyCommand.PushToTalkReleased);
         }
 
         var transition = new KeyboardTransition(
@@ -87,6 +111,12 @@ public sealed class ModifierKeyboardHook : IDisposable
         }
 
         return false;
+    }
+
+    private bool IsPressed(VirtualKey key)
+    {
+        var index = (int)key;
+        return (uint)index < (uint)pressedKeys.Length && pressedKeys[index];
     }
 
     private sealed class WindowsKeyboardHookNativeApi : IKeyboardHookNativeApi
