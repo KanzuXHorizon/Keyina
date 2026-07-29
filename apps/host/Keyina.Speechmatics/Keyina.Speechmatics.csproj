@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Keyina.Speechmatics</RootNamespace>
+    <AssemblyName>Keyina.Speechmatics</AssemblyName>
+    <Description>Deterministic Speechmatics Realtime protocol and session client for Keyina.</Description>
+  </PropertyGroup>
+</Project>

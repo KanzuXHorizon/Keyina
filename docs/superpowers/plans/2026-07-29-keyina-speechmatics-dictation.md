@@ -35,10 +35,10 @@
 - Modify: `Keyina.slnx`
 - Modify: `apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj`
 
-- [ ] **Step 1: Add failing tests for exact StartRecognition JSON, EndOfStream JSON, Vietnamese defaults, option validation, partial/final parsing, error parsing, malformed JSON, and unknown messages.**
-- [ ] **Step 2: Verify missing project/contracts.**
-- [ ] **Step 3: Implement deterministic UTF-8 JSON writer and strict server-message parser.**
-- [ ] **Step 4: Run tests and commit as `feat(speech): add Speechmatics realtime protocol`.**
+- [x] **Step 1: Add failing tests for exact StartRecognition JSON, EndOfStream JSON, Vietnamese defaults, option validation, partial/final parsing, error parsing, malformed JSON, and unknown messages.**
+- [x] **Step 2: Verify missing project/contracts.**
+- [x] **Step 3: Implement deterministic UTF-8 JSON writer and strict server-message parser.**
+- [x] **Step 4: Run tests and commit as `feat(speech): add Speechmatics realtime protocol`.**
 
 ### Task 2: Injectable WebSocket session
 
