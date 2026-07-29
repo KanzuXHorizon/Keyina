@@ -92,11 +92,11 @@
 - Create: `apps/host/Keyina.Host.Tests/Pcm16MonoConverterTests.cs`
 - Create: `apps/host/Keyina.Host.Tests/AudioQueueTests.cs`
 
-- [ ] **Step 1: Pin stable `NAudio` 2.3.0 and record license/source in dependency documentation.**
-- [ ] **Step 2: Add pure conversion tests for float/PCM source formats, clipping, channel mixing, resampling continuity, and even chunk boundaries.**
-- [ ] **Step 3: Implement WASAPI capture with 20–100 ms chunks and a two-second bounded channel.**
-- [ ] **Step 4: Add no-device, permission denial, device removal, overflow-cancel, and stop/dispose tests using adapters/fakes.**
-- [ ] **Step 5: Commit as `feat(audio): capture bounded Speechmatics PCM`.**
+- [x] **Step 1: Pin stable `NAudio` 2.3.0 and record license/source in dependency documentation.**
+- [x] **Step 2: Add pure conversion tests for float/PCM source formats, clipping, channel mixing, resampling continuity, and even chunk boundaries.**
+- [x] **Step 3: Implement WASAPI capture with 20–100 ms chunks and a two-second bounded channel.**
+- [x] **Step 4: Add no-device, permission denial, device removal, overflow-cancel, and stop/dispose tests using adapters/fakes.**
+- [x] **Step 5: Commit as `feat(audio): capture bounded Speechmatics PCM`.**
 
 ### Task 6: Host orchestration and IPC finals
 

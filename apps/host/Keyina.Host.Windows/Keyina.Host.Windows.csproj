@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
   </ItemGroup>
 </Project>
