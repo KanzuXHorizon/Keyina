@@ -27,7 +27,7 @@ public sealed class SpeechmaticsSessionException : Exception
     }
 }
 
-public sealed class SpeechmaticsRealtimeSession : IAsyncDisposable
+public sealed class SpeechmaticsRealtimeSession : ISpeechmaticsRealtimeSession
 {
     public const int MaximumOutstandingAudioChunks = 500;
 

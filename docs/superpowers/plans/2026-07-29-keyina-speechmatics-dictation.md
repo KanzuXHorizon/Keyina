@@ -106,11 +106,11 @@
 - Create: `apps/host/Keyina.Host.Tests/DictationCoordinatorTests.cs`
 - Modify: `apps/host/Keyina.Host/Program.cs`
 
-- [ ] **Step 1: Add integration tests with fake audio and fake Speechmatics transport proving partials stay overlay-only and finals produce exactly one IPC frame.**
-- [ ] **Step 2: Implement push-to-talk and toggle-session lifecycle with cancellation and finalization timeout.**
-- [ ] **Step 3: Ensure provider/network failure changes only host speech state and does not disable native input.**
-- [ ] **Step 4: Add `--speech-self-test` using fake transport, no microphone, no credential, no network.**
-- [ ] **Step 5: Commit as `feat(host): orchestrate optional Vietnamese dictation`.**
+- [x] **Step 1: Add integration tests with fake audio and fake Speechmatics transport proving partials stay overlay-only and finals produce exactly one IPC frame.**
+- [x] **Step 2: Implement push-to-talk and toggle-session lifecycle with cancellation and finalization timeout.**
+- [x] **Step 3: Ensure provider/network failure changes only host speech state and does not disable native input.**
+- [x] **Step 4: Add `--speech-self-test` using fake transport, no microphone, no credential, no network.**
+- [x] **Step 5: Commit as `feat(host): orchestrate optional Vietnamese dictation`.**
 
 ### Task 7: Speech benchmarks and evidence
 
