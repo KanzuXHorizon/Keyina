@@ -1,4 +1,4 @@
-name: native-ci
+name: keyina-ci
 
 on:
   push:
@@ -9,24 +9,49 @@ permissions:
   contents: read
 
 jobs:
-  windows-msvc:
+  windows:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
-      - name: Configure
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Build .NET host (Debug)
+        run: dotnet build Keyina.slnx -c Debug
+      - name: Test .NET host (Debug)
+        run: dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
+      - name: Host self-test
+        run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --self-test
+      - name: Build .NET host (Release)
+        run: dotnet build Keyina.slnx -c Release
+      - name: Regenerate brand assets
+        run: dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root ${{ github.workspace }}
+      - name: Verify deterministic brand tree
+        shell: pwsh
+        run: git diff --exit-code -- docs/brand brand
+
+      - name: Configure native Debug
         run: cmake --preset windows-msvc-debug
-      - name: Build
+      - name: Build native Debug
         run: cmake --build --preset windows-msvc-debug
-      - name: Test
-        run: ctest --preset windows-msvc-debug
+      - name: Test native Debug
+        run: ctest --preset windows-msvc-debug --output-on-failure
       - name: Validate golden vectors
         run: python tools/check_vectors.py
       - name: Test benchmark comparator
         run: python tools/test_compare_benchmark.py
-      - name: Configure release benchmark
+
+      - name: Configure native Release
         run: cmake --preset windows-msvc-release
-      - name: Build release benchmark
+      - name: Build native Release
         run: cmake --build --preset windows-msvc-release
+      - name: Test native Release
+        run: ctest --preset windows-msvc-release --output-on-failure
       - name: Run release benchmark
         shell: pwsh
         run: |
@@ -50,4 +75,4 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: ctest --preset linux-clang-asan
+        run: ctest --preset linux-clang-asan --output-on-failure

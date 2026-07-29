@@ -159,8 +159,8 @@ public static HostState HostReducer.Reduce(HostState state, HostEvent @event);
 - Modify: `README.md`
 - Create: `docs/brand/verification.md`
 
-- [ ] **Step 1: Add Windows CI commands for `dotnet build`, host tests, brand generation, and clean-tree verification after regeneration.**
-- [ ] **Step 2: Run all native Debug tests, .NET Debug/Release tests, and brand deterministic checks locally.**
-- [ ] **Step 3: Inspect `git diff`, generated file sizes, hashes, binary formats, and repository secret scan.**
-- [ ] **Step 4: Record exact evidence and blocked items without claiming tray UI or installer completion.**
-- [ ] **Step 5: Commit as `ci: verify host and brand foundation`.**
+- [x] **Step 1: Add Windows CI commands for `dotnet build`, host tests, brand generation, and clean-tree verification after regeneration.**
+- [x] **Step 2: Run all native Debug tests, .NET Debug/Release tests, and brand deterministic checks locally.**
+- [x] **Step 3: Inspect `git diff`, generated file sizes, hashes, binary formats, and repository secret scan.**
+- [x] **Step 4: Record exact evidence and blocked items without claiming tray UI or installer completion.**
+- [x] **Step 5: Commit as `ci: verify host and brand foundation`.**
