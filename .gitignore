@@ -1,0 +1,32 @@
+# Connector bootstrap file; not part of the product repository.
+Start-DevSpace-MCP-Cloudflared.ps1
+
+# Build outputs
+/build/
+/out/
+/artifacts/
+CMakeUserPresets.json
+
+# IDE and OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Windows packaging/signing
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.pfx
+*.cer
+
+# Test and benchmark outputs
+Testing/
+coverage/
+benchmark-results/
+*.profraw
+*.profdata
