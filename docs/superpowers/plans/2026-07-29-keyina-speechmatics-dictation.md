@@ -49,10 +49,10 @@
 - Create: `apps/host/Keyina.Host.Tests/FakeSpeechmaticsTransport.cs`
 - Create: `apps/host/Keyina.Host.Tests/SpeechmaticsSessionTests.cs`
 
-- [ ] **Step 1: Add failing scripted tests for connect/auth header, wait-for-start, binary audio, sequence acknowledgements, outstanding-chunk limit, EndOfStream, final-before-end ordering, provider error, connection close, cancellation, and disposal.**
-- [ ] **Step 2: Implement transport abstraction and production `ClientWebSocket` adapter.**
-- [ ] **Step 3: Implement session state machine with bounded semaphore and no transcript logging.**
-- [ ] **Step 4: Run repeated fake-server tests and commit as `feat(speech): stream Speechmatics sessions safely`.**
+- [x] **Step 1: Add failing scripted tests for connect/auth header, wait-for-start, binary audio, sequence acknowledgements, outstanding-chunk limit, EndOfStream, final-before-end ordering, provider error, connection close, cancellation, and disposal.**
+- [x] **Step 2: Implement transport abstraction and production `ClientWebSocket` adapter.**
+- [x] **Step 3: Implement session state machine with bounded semaphore and no transcript logging.**
+- [x] **Step 4: Run repeated fake-server tests and commit as `feat(speech): stream Speechmatics sessions safely`.**
 
 ### Task 3: Transcript aggregation and dictation state
 
