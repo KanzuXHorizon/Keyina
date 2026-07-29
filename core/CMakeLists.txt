@@ -1,5 +1,6 @@
 add_library(keyina_core STATIC
   src/context_guard.cpp
+  src/engine.cpp
   src/vietnamese.cpp
 )
 add_library(keyina::core ALIAS keyina_core)

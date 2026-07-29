@@ -113,6 +113,7 @@ struct TextEdit {
   std::size_t erase_codepoints;
   std::u32string insert;
   bool consumed;
+  bool commit_before;
 };
 
 class Engine {
@@ -140,7 +141,7 @@ The engine stores at most 64 key records for the active token. Each record conta
 - transformation reason;
 - guard decision.
 
-A token boundary commits and clears the journal. The journal is memory-only and never written to disk.
+A token boundary commits and clears the journal. When the 64-key ownership limit is reached, the next edit sets `commit_before`, starts a fresh owned token, and never rewrites text from the committed token. The journal is memory-only and never written to disk.
 
 ### 5.3 Context Guard
 

@@ -99,16 +99,16 @@
 - Produces the `KeyKind`, `KeyEvent`, `TextEdit`, `EngineConfig`, `TonePlacement`, and `Engine` interfaces defined in the design specification.
 - Consumes: Vietnamese composition helpers and Context Guard.
 
-- [ ] **Step 1: Add failing tests for `aa→â`, `aw→ă`, `ee→ê`, `oo→ô`, `ow→ơ`, `uw→ư`, `dd→đ`, uppercase preservation, and literal boundaries.**
-- [ ] **Step 2: Verify the tests fail because `Engine` is absent.**
-- [ ] **Step 3: Implement raw-key capture, visible-token state, minimal suffix edits, and letter modifiers.**
-- [ ] **Step 4: Run letter tests and all tests.**
-- [ ] **Step 5: Add failing tone tests for `as→á`, `aaf→ầ`, `tieengs→tiếng`, `duowngf→đường`, tone replacement, and tone preservation while changing vowel shape.**
-- [ ] **Step 6: Implement vowel-nucleus detection and configurable modern/traditional tone placement.**
-- [ ] **Step 7: Run tone tests and all tests.**
-- [ ] **Step 8: Add failing history tests proving backspace, reset, commit, and exact `RawKeys()` rollback.**
-- [ ] **Step 9: Implement the bounded journal and history transitions.**
-- [ ] **Step 10: Run all tests and commit as `feat(core): implement reversible Telex composition`.**
+- [x] **Step 1: Add failing tests for `aa→â`, `aw→ă`, `ee→ê`, `oo→ô`, `ow→ơ`, `uw→ư`, `dd→đ`, uppercase preservation, and literal boundaries.**
+- [x] **Step 2: Verify the tests fail because `Engine` is absent.**
+- [x] **Step 3: Implement raw-key capture, visible-token state, minimal suffix edits, and letter modifiers.**
+- [x] **Step 4: Run letter tests and all tests.**
+- [x] **Step 5: Add failing tone tests for `as→á`, `aaf→ầ`, `tieengs→tiếng`, `dduowngf→đường`, tone replacement, and tone preservation while changing vowel shape.**
+- [x] **Step 6: Implement vowel-nucleus detection and configurable modern/traditional tone placement.**
+- [x] **Step 7: Run tone tests and all tests.**
+- [x] **Step 8: Add failing history tests proving backspace, reset, commit, and exact `RawKeys()` rollback.**
+- [x] **Step 9: Implement the bounded journal and history transitions.**
+- [x] **Step 10: Run all tests and commit as `feat(core): implement reversible Telex composition`.**
 
 ### Task 5: Golden vectors and invariant runner
 
