@@ -16,7 +16,7 @@ Keyina is a privacy-first Vietnamese input platform for Windows. It is not a vis
 Focused Windows application
         ↕ TSF composition/edit sessions
 KeyinaTsf.dll — C++20, native, offline hot path
-        ↕ bounded local IPC (planned next slice)
+        ↕ bounded versioned local IPC protocol
 Keyina.Host.exe — .NET 8 Windows resident process
   - tray and settings lifecycle
   - familiar input-mode hotkeys
@@ -40,15 +40,17 @@ Keyina.Host.exe — .NET 8 Windows resident process
 - Real local `ITfThreadMgr`/`ITfContext`/`ITextStoreACP` integration tests.
 - Secure-mode pass-through.
 
-### Host and brand foundation
+### Host, productivity, and speech foundation
 
-- Deterministic .NET 8 host/core solution with warnings as errors.
-- Immutable tray-state reducer and named-mutex single-instance guard.
-- Multi-resolution Windows application icon.
-- Active, inactive, and listening tray icons.
-- Five vector-first SVG sources generated from one geometry model.
-- 42 generated PNG/ICO assets with SHA-256 manifest verification.
-- Four user-approved concept images preserved in `docs/image/` as design provenance.
+- Deterministic .NET 8 host/core solution with warnings as errors and package lock files.
+- Immutable tray/dictation reducers and named-mutex single-instance guard.
+- Familiar `Ctrl+Shift` input-mode state machine with left/right modifier, repeat, and shortcut contamination tests.
+- Scoped deterministic snippet matcher with secure-input bypass and built-ins such as `;kvi`, `;kvoice`, and `;kdate`.
+- Cross-language C#/C++ IPC codec with a shared golden frame, strict UTF-8, 64 KiB frame limit, session ID, and focus generation.
+- Optional Speechmatics Realtime protocol/session with 500-chunk backpressure, final ordering, fake-server tests, and offline `--speech-self-test`.
+- Windows Credential Manager API-key storage.
+- WASAPI microphone adapter, streaming source conversion, and strict 64,000-byte audio buffer.
+- Multi-resolution app/tray icons, five vector sources, and 42 generated PNG/ICO assets with SHA-256 verification.
 
 ## Verification snapshot
 
@@ -56,7 +58,7 @@ Fresh local verification on 2026-07-29:
 
 - Native Debug: 3/3 tests pass.
 - Native Release: 3/3 tests pass.
-- Host/brand: 11/11 tests pass.
+- Host/.NET: 77/77 tests pass before benchmark-only additions.
 - Golden Telex vectors: 100 validated.
 - Benchmark comparator: 4/4 tests pass.
 - Brand regeneration: byte-identical output and no Git diff.
@@ -67,14 +69,21 @@ Fresh local verification on 2026-07-29:
   - protected URL path: 7.5 µs
   - 64-code-point Context Guard: 0.7 µs
 
-See `docs/brand/verification.md` for exact commands and remaining blocked gates.
+- Release speech/host benchmarks:
+  - Speechmatics final JSON parse: 13.2 µs p99, 256 B/op
+  - transcript partial update: 0.6 µs p99, 256 B/op
+  - 30 ms audio conversion: 20.0 µs p99, 2,041 B/op
+  - final IPC encode: 0.4 µs p99, 72 B/op
+- Release idle host probe: about 21.1 MiB working set, 6.6 MiB private memory, and no measured CPU time over approximately three seconds on the test machine.
+
+See `docs/brand/verification.md` and `docs/compatibility/speechmatics.md` for commands, environment, limits, and blocked gates.
 
 ## Repository layout
 
 ```text
 core/                       Deterministic platform-independent input engine
 platform/windows/tsf/       Windows TSF/COM adapter and integration contracts
-apps/host/                  .NET host, core state, and tests
+apps/host/                  .NET host, Windows adapters, speech client, tests, and benchmarks
 brand/                      Vector sources and generated Windows assets
 benchmarks/                 Native latency benchmarks
 tests/                      Native unit, invariant, and TSF integration tests
@@ -102,6 +111,9 @@ ctest --preset windows-msvc-release --output-on-failure
 dotnet build Keyina.slnx -c Debug
 dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
 dotnet build Keyina.slnx -c Release
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --speech-self-test
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --resource-self-test
+dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build
 dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root F:\Keyina
 git diff --exit-code -- docs/brand brand
 ```
@@ -118,7 +130,7 @@ git diff --exit-code -- docs/brand brand
 
 ## Status
 
-Keyina currently has a verified native engine, functional local TSF proof, deterministic brand assets, and a tested host foundation. It is **not yet a production-ready installer**. Hotkeys, snippets, IPC, Speechmatics dictation, persistent tray UI, signing, and the third-party compatibility matrix remain active implementation slices.
+Keyina currently has a verified native engine, functional local TSF proof, deterministic brand assets, tested hotkey/snippet/IPC cores, and an offline-verified Speechmatics/audio pipeline. It is **not yet a production-ready installer**. Windows hotkey registration, named-pipe runtime, TSF final/snippet insertion, persistent tray/settings UI, signed packaging, live-provider validation, and the third-party compatibility matrix remain active implementation slices.
 
 Design and execution documents:
 

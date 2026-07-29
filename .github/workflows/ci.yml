@@ -18,6 +18,7 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: |
+            **/packages.lock.json
             **/*.csproj
             global.json
 
@@ -27,8 +28,24 @@ jobs:
         run: dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
       - name: Host self-test
         run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --self-test
+      - name: Speech self-test (offline)
+        run: dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --speech-self-test
       - name: Build .NET host (Release)
         run: dotnet build Keyina.slnx -c Release
+      - name: Test .NET host (Release)
+        run: dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Release --no-build
+      - name: Host resource probe
+        shell: pwsh
+        run: |
+          dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --resource-self-test |
+            Out-File -Encoding utf8 host-resource-result.json
+          Get-Content host-resource-result.json -Raw | ConvertFrom-Json | Out-Null
+      - name: Run host and speech benchmarks
+        shell: pwsh
+        run: |
+          dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build |
+            Out-File -Encoding utf8 host-benchmark-result.json
+          Get-Content host-benchmark-result.json -Raw | ConvertFrom-Json | Out-Null
       - name: Regenerate brand assets
         run: dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root ${{ github.workspace }}
       - name: Verify deterministic brand tree
@@ -60,8 +77,11 @@ jobs:
           python -m json.tool benchmark-result.json | Out-Null
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-benchmark-result
-          path: benchmark-result.json
+          name: windows-performance-evidence
+          path: |
+            benchmark-result.json
+            host-benchmark-result.json
+            host-resource-result.json
 
   linux-clang-sanitizers:
     runs-on: ubuntu-24.04

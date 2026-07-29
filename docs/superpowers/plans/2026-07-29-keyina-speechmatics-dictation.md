@@ -120,8 +120,8 @@
 - Create: `docs/compatibility/speechmatics.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Benchmark protocol parse, transcript aggregation, audio conversion, and IPC final encode.**
-- [ ] **Step 2: Run fake-server contract tests repeatedly and publish no transcript/audio artifacts.**
+- [x] **Step 1: Benchmark protocol parse, transcript aggregation, audio conversion, and IPC final encode.**
+- [x] **Step 2: Run fake-server contract tests repeatedly and publish no transcript/audio artifacts.**
 - [ ] **Step 3: Add opt-in live Vietnamese smoke test that reads only Credential Manager and redacts all content.**
-- [ ] **Step 4: Record live test as blocked until the developer supplies a valid credential and explicitly runs it.**
+- [x] **Step 4: Record live test as blocked until the developer supplies a valid credential and explicitly runs it.**
 - [ ] **Step 5: Commit as `docs: record Speechmatics dictation evidence`.**
