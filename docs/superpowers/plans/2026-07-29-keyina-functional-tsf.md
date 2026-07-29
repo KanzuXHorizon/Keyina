@@ -26,10 +26,10 @@
 - Create: `platform/windows/tsf/src/key_router.cpp`
 - Create: `tests/windows/key_router_test.cpp`
 
-- [ ] Add failing tests for ASCII letter case, Backspace, whitespace boundaries, punctuation boundaries, modifier chords, unsupported keys, and active-composition dependence.
-- [ ] Implement a deterministic allocation-free router independent from `GetKeyboardState`.
-- [ ] Verify focused and full Windows tests.
-- [ ] Commit as `feat(windows): add deterministic TSF key routing`.
+- [x] Add failing tests for ASCII letter case, Backspace, whitespace boundaries, punctuation boundaries, modifier chords, unsupported keys, and active-composition dependence.
+- [x] Implement a deterministic allocation-free router independent from `GetKeyboardState`.
+- [x] Verify focused and full Windows tests.
+- [x] Commit as `feat(windows): add deterministic TSF key routing`.
 
 ### Task 2: Functional edit sessions and composition ownership
 
