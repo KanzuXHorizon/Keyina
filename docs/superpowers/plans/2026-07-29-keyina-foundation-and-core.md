@@ -79,12 +79,12 @@
   - `struct GuardResult { bool transform; GuardReason reason; };`
   - `GuardResult ClassifyToken(std::u32string_view token, const GuardContext&);`
 
-- [ ] **Step 1: Add failing examples for Vietnamese prose, `https://example.com`, `name@example.com`, `C:\\Temp`, `snake_case`, `camelCase`, `v2.3.1`, `--help`, and explicit app bypass.**
-- [ ] **Step 2: Run the focused tests and verify the classifier is missing.**
-- [ ] **Step 3: Implement the ordered deterministic rules from the design specification without regex or heap allocation.**
-- [ ] **Step 4: Run focused and full tests.**
-- [ ] **Step 5: Add precedence tests proving URL/email/path rules win over generic identifier classification.**
-- [ ] **Step 6: Commit as `feat(core): add deterministic context guard`.**
+- [x] **Step 1: Add failing examples for Vietnamese prose, `https://example.com`, `name@example.com`, `C:\\Temp`, `snake_case`, `camelCase`, `v2.3.1`, `--help`, and explicit app bypass.**
+- [x] **Step 2: Run the focused tests and verify the classifier is missing.**
+- [x] **Step 3: Implement the ordered deterministic rules from the design specification without regex or heap allocation.**
+- [x] **Step 4: Run focused and full tests.**
+- [x] **Step 5: Add precedence tests proving URL/email/path rules win over generic identifier classification.**
+- [x] **Step 6: Commit as `feat(core): add deterministic context guard`.**
 
 ### Task 4: Reversible Telex engine
 

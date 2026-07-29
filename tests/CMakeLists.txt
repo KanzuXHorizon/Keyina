@@ -1,4 +1,5 @@
 add_executable(keyina_tests
+  context_guard_test.cpp
   test_main.cpp
   vietnamese_test.cpp
 )
