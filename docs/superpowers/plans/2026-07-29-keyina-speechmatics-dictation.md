@@ -77,10 +77,10 @@
 - Create: `apps/host/Keyina.Host.Tests/WindowsCredentialVaultTests.cs`
 - Modify: `Keyina.slnx`
 
-- [ ] **Step 1: Add argument/lifecycle tests using a unique test target and random non-production secret.**
-- [ ] **Step 2: Implement `CredWriteW`, `CredReadW`, `CredDeleteW`, `CredFree` with `CRED_TYPE_GENERIC` and current-user persistence.**
-- [ ] **Step 3: Verify read/write/delete and ensure test cleanup in `finally`.**
-- [ ] **Step 4: Scan process arguments/config output for the test secret and commit as `feat(security): store Speechmatics key in Credential Manager`.**
+- [x] **Step 1: Add argument/lifecycle tests using a unique test target and random non-production secret.**
+- [x] **Step 2: Implement `CredWriteW`, `CredReadW`, `CredDeleteW`, `CredFree` with `CRED_TYPE_GENERIC` and current-user persistence.**
+- [x] **Step 3: Verify read/write/delete and ensure test cleanup in `finally`.**
+- [x] **Step 4: Scan process arguments/config output for the test secret and commit as `feat(security): store Speechmatics key in Credential Manager`.**
 
 ### Task 5: Bounded microphone capture
 

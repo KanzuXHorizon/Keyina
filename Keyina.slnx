@@ -3,6 +3,7 @@
     <Project Path="apps/host/Keyina.Host.Core/Keyina.Host.Core.csproj" />
     <Project Path="apps/host/Keyina.Host/Keyina.Host.csproj" />
     <Project Path="apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj" />
+    <Project Path="apps/host/Keyina.Host.Windows/Keyina.Host.Windows.csproj" />
     <Project Path="apps/host/Keyina.Speechmatics/Keyina.Speechmatics.csproj" />
   </Folder>
   <Folder Name="/tools/brand/">
