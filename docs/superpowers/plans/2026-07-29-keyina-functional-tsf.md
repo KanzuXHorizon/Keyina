@@ -40,12 +40,12 @@
 - Create: `platform/windows/tsf/src/key_edit_session.cpp`
 - Modify: `platform/windows/tsf/CMakeLists.txt`
 
-- [ ] Add a compile-time RED by requiring `ITfCompositionSink` and the edit-session class from `TextService`.
-- [ ] Implement synchronous `ITfContext::RequestEditSession` handling.
-- [ ] Start one TSF composition at the caret, apply only validated UTF-16 edits, and keep selection at composition end.
-- [ ] Commit/reset composition on boundaries, backspace-to-empty, `commit_before`, focus loss, external termination, and deactivation.
-- [ ] Keep all unsupported paths pass-through and verify DLL smoke tests.
-- [ ] Commit as `feat(windows): apply engine edits through TSF compositions`.
+- [x] Add a compile-time RED by requiring `ITfCompositionSink` and the edit-session class from `TextService`.
+- [x] Implement synchronous `ITfContext::RequestEditSession` handling.
+- [x] Start one TSF composition at the caret, apply only validated UTF-16 edits, and keep selection at composition end.
+- [x] Commit/reset composition on boundaries, backspace-to-empty, `commit_before`, focus loss, external termination, and deactivation.
+- [x] Keep all unsupported paths pass-through and verify DLL smoke tests.
+- [x] Commit as `feat(windows): apply engine edits through TSF compositions`.
 
 ### Task 3: Real local TSF integration host
 

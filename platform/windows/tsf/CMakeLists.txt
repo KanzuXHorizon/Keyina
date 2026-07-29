@@ -14,6 +14,7 @@ keyina_configure_target(keyina_tsf_support)
 add_library(KeyinaTsf SHARED
   KeyinaTsf.def
   src/dll_entry.cpp
+  src/key_edit_session.cpp
   src/text_service.cpp
 )
 
@@ -30,6 +31,7 @@ target_include_directories(KeyinaTsf PRIVATE
 )
 target_link_libraries(KeyinaTsf PRIVATE
   keyina::core
+  keyina::tsf_support
   advapi32
   ole32
   uuid

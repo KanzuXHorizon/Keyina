@@ -1,6 +1,10 @@
 #include "text_service.h"
 
+#include <limits>
 #include <new>
+#include <string>
+
+#include <keyina/tsf/edit_translator.h>
 
 #include "module_state.h"
 
@@ -25,6 +29,8 @@ HRESULT TextService::QueryInterface(REFIID interface_id, void** object) {
     *object = static_cast<ITfTextInputProcessorEx*>(this);
   } else if (IsEqualIID(interface_id, IID_ITfKeyEventSink)) {
     *object = static_cast<ITfKeyEventSink*>(this);
+  } else if (IsEqualIID(interface_id, IID_ITfCompositionSink)) {
+    *object = static_cast<ITfCompositionSink*>(this);
   } else {
     return E_NOINTERFACE;
   }
@@ -87,6 +93,10 @@ HRESULT TextService::Deactivate() {
     result = keystroke_manager_->UnadviseKeyEventSink(client_id_);
   }
   key_sink_advised_ = false;
+
+  AbandonComposition();
+  engine_.Reset();
+
   if (keystroke_manager_ != nullptr) {
     keystroke_manager_->Release();
     keystroke_manager_ = nullptr;
@@ -97,23 +107,38 @@ HRESULT TextService::Deactivate() {
   }
   client_id_ = TF_CLIENTID_NULL;
   secure_mode_ = false;
-  engine_.Reset();
   return result;
 }
 
 HRESULT TextService::OnSetFocus(BOOL foreground) {
   if (!foreground) {
-    engine_.Reset();
+    bool applied = false;
+    if (composition_context_ != nullptr) {
+      static_cast<void>(RequestRoute(
+          composition_context_, {KeyRouteKind::Reset, U'\0'}, &applied));
+    }
+    if (!applied) {
+      engine_.Reset();
+      AbandonComposition();
+    }
   }
   return S_OK;
 }
 
 HRESULT TextService::OnTestKeyDown(ITfContext* context, WPARAM virtual_key,
                                    LPARAM key_data, BOOL* eaten) {
-  static_cast<void>(context);
-  static_cast<void>(virtual_key);
   static_cast<void>(key_data);
-  return PassThrough(eaten);
+  if (eaten == nullptr) {
+    return E_POINTER;
+  }
+  if (context == nullptr || secure_mode_) {
+    *eaten = FALSE;
+    return S_OK;
+  }
+
+  const KeyRoute route = RouteKey(BuildRoutingInput(virtual_key));
+  *eaten = route.kind == KeyRouteKind::PassThrough ? FALSE : TRUE;
+  return S_OK;
 }
 
 HRESULT TextService::OnTestKeyUp(ITfContext* context, WPARAM virtual_key,
@@ -126,10 +151,26 @@ HRESULT TextService::OnTestKeyUp(ITfContext* context, WPARAM virtual_key,
 
 HRESULT TextService::OnKeyDown(ITfContext* context, WPARAM virtual_key,
                                LPARAM key_data, BOOL* eaten) {
-  static_cast<void>(context);
-  static_cast<void>(virtual_key);
   static_cast<void>(key_data);
-  return PassThrough(eaten);
+  if (eaten == nullptr) {
+    return E_POINTER;
+  }
+  *eaten = FALSE;
+  if (context == nullptr || secure_mode_) {
+    return S_OK;
+  }
+
+  const KeyRoute route = RouteKey(BuildRoutingInput(virtual_key));
+  if (route.kind == KeyRouteKind::PassThrough) {
+    return S_OK;
+  }
+
+  bool applied = false;
+  static_cast<void>(RequestRoute(context, route, &applied));
+  if (route.kind != KeyRouteKind::Reset && applied) {
+    *eaten = TRUE;
+  }
+  return S_OK;
 }
 
 HRESULT TextService::OnKeyUp(ITfContext* context, WPARAM virtual_key,
@@ -145,6 +186,308 @@ HRESULT TextService::OnPreservedKey(ITfContext* context, REFGUID command,
   static_cast<void>(context);
   static_cast<void>(command);
   return PassThrough(eaten);
+}
+
+HRESULT TextService::OnCompositionTerminated(
+    TfEditCookie edit_cookie, ITfComposition* composition) {
+  static_cast<void>(edit_cookie);
+  if (composition_ != nullptr && composition_ == composition) {
+    composition_->Release();
+    composition_ = nullptr;
+    if (composition_context_ != nullptr) {
+      composition_context_->Release();
+      composition_context_ = nullptr;
+    }
+  }
+  engine_.Reset();
+  return S_OK;
+}
+
+KeyRoutingInput TextService::BuildRoutingInput(WPARAM virtual_key) const
+    noexcept {
+  return KeyRoutingInput{
+      .virtual_key = static_cast<std::uint32_t>(virtual_key),
+      .shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+      .caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0,
+      .control = (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+      .alt = (GetKeyState(VK_MENU) & 0x8000) != 0,
+      .windows = (GetKeyState(VK_LWIN) & 0x8000) != 0 ||
+                 (GetKeyState(VK_RWIN) & 0x8000) != 0,
+      .active_composition = !engine_.RawKeys().empty(),
+  };
+}
+
+HRESULT TextService::RequestRoute(ITfContext* context, KeyRoute route,
+                                  bool* applied) noexcept {
+  if (context == nullptr || applied == nullptr ||
+      client_id_ == TF_CLIENTID_NULL) {
+    return E_INVALIDARG;
+  }
+  *applied = false;
+
+  auto* session = new (std::nothrow) KeyEditSession(this, context, route);
+  if (session == nullptr) {
+    return E_OUTOFMEMORY;
+  }
+
+  HRESULT session_result = E_FAIL;
+  const HRESULT request_result = context->RequestEditSession(
+      client_id_, session, TF_ES_SYNC | TF_ES_READWRITE, &session_result);
+  session->Release();
+
+  if (SUCCEEDED(request_result) && SUCCEEDED(session_result)) {
+    *applied = true;
+    return S_OK;
+  }
+
+  engine_.Reset();
+  AbandonComposition();
+  return FAILED(request_result) ? request_result : session_result;
+}
+
+HRESULT TextService::ApplyRoute(ITfContext* context,
+                                TfEditCookie edit_cookie,
+                                const KeyRoute& route) {
+  if (context == nullptr) {
+    return E_POINTER;
+  }
+  if (composition_context_ != nullptr && composition_context_ != context) {
+    engine_.Reset();
+    AbandonComposition();
+  }
+
+  if (route.kind == KeyRouteKind::Reset) {
+    const HRESULT result = EndComposition(edit_cookie);
+    engine_.Reset();
+    return result;
+  }
+
+  if (route.kind == KeyRouteKind::Boundary) {
+    HRESULT result = EndComposition(edit_cookie);
+    engine_.Reset();
+    if (FAILED(result)) {
+      return result;
+    }
+    return InsertBoundary(context, edit_cookie, route.character);
+  }
+
+  if (route.kind != KeyRouteKind::Character &&
+      route.kind != KeyRouteKind::Backspace) {
+    return S_FALSE;
+  }
+
+  const std::u32string previous_visible{engine_.VisibleText()};
+  const KeyEvent event = route.kind == KeyRouteKind::Backspace
+                             ? KeyEvent{KeyKind::Backspace}
+                             : KeyEvent{KeyKind::Character, route.character};
+  const TextEdit edit = engine_.Process(event);
+  if (!edit.consumed) {
+    return S_FALSE;
+  }
+
+  if (edit.commit_before) {
+    const HRESULT result = EndComposition(edit_cookie);
+    if (FAILED(result)) {
+      engine_.Reset();
+      return result;
+    }
+  }
+
+  HRESULT result = ApplyEngineEdit(context, edit_cookie, edit,
+                                   edit.commit_before
+                                       ? std::u32string_view{}
+                                       : std::u32string_view{previous_visible});
+  if (FAILED(result)) {
+    engine_.Reset();
+    return result;
+  }
+
+  if (engine_.VisibleText().empty()) {
+    result = EndComposition(edit_cookie);
+  }
+  return result;
+}
+
+HRESULT TextService::EnsureComposition(ITfContext* context,
+                                       TfEditCookie edit_cookie) {
+  if (composition_ != nullptr && composition_context_ == context) {
+    return S_OK;
+  }
+  if (composition_ != nullptr || composition_context_ != nullptr) {
+    AbandonComposition();
+  }
+
+  TF_SELECTION selection{};
+  ULONG fetched = 0;
+  HRESULT result = context->GetSelection(
+      edit_cookie, TF_DEFAULT_SELECTION, 1, &selection, &fetched);
+  if (FAILED(result) || fetched != 1 || selection.range == nullptr) {
+    return FAILED(result) ? result : E_FAIL;
+  }
+
+  BOOL empty = FALSE;
+  result = selection.range->IsEmpty(edit_cookie, &empty);
+  if (FAILED(result) || !empty) {
+    selection.range->Release();
+    return FAILED(result) ? result : S_FALSE;
+  }
+
+  ITfContextComposition* context_composition = nullptr;
+  result = context->QueryInterface(
+      IID_ITfContextComposition,
+      reinterpret_cast<void**>(&context_composition));
+  if (SUCCEEDED(result)) {
+    result = context_composition->StartComposition(
+        edit_cookie, selection.range, this, &composition_);
+  }
+  if (context_composition != nullptr) {
+    context_composition->Release();
+  }
+  selection.range->Release();
+
+  if (SUCCEEDED(result) && composition_ != nullptr) {
+    composition_context_ = context;
+    composition_context_->AddRef();
+    return S_OK;
+  }
+  composition_ = nullptr;
+  return FAILED(result) ? result : E_FAIL;
+}
+
+HRESULT TextService::ApplyEngineEdit(
+    ITfContext* context, TfEditCookie edit_cookie, const TextEdit& edit,
+    std::u32string_view previous_visible) {
+  const auto translated = TranslateEdit(edit, previous_visible);
+  if (!translated.has_value() ||
+      translated->erase_utf16_units >
+          static_cast<std::size_t>(std::numeric_limits<LONG>::max()) ||
+      translated->insert.size() >
+          static_cast<std::size_t>(std::numeric_limits<LONG>::max())) {
+    return E_INVALIDARG;
+  }
+
+  HRESULT result = EnsureComposition(context, edit_cookie);
+  if (FAILED(result)) {
+    return result;
+  }
+
+  ITfRange* range = nullptr;
+  result = composition_->GetRange(&range);
+  if (FAILED(result) || range == nullptr) {
+    return FAILED(result) ? result : E_FAIL;
+  }
+
+  result = range->Collapse(edit_cookie, TF_ANCHOR_END);
+  if (SUCCEEDED(result) && translated->erase_utf16_units != 0) {
+    const LONG requested =
+        -static_cast<LONG>(translated->erase_utf16_units);
+    LONG shifted = 0;
+    result = range->ShiftStart(edit_cookie, requested, &shifted, nullptr);
+    if (SUCCEEDED(result) && shifted != requested) {
+      result = E_FAIL;
+    }
+  }
+  if (SUCCEEDED(result)) {
+    result = range->SetText(
+        edit_cookie, 0,
+        translated->insert.empty() ? nullptr : translated->insert.data(),
+        static_cast<LONG>(translated->insert.size()));
+  }
+  range->Release();
+
+  if (SUCCEEDED(result)) {
+    result = SetCaretAtCompositionEnd(context, edit_cookie);
+  }
+  return result;
+}
+
+HRESULT TextService::InsertBoundary(ITfContext* context,
+                                    TfEditCookie edit_cookie,
+                                    char32_t character) {
+  const TextEdit source{0, std::u32string{character}, true, false};
+  const auto translated = TranslateEdit(source, {});
+  if (!translated.has_value() ||
+      translated->insert.size() >
+          static_cast<std::size_t>(std::numeric_limits<LONG>::max())) {
+    return E_INVALIDARG;
+  }
+
+  TF_SELECTION selection{};
+  ULONG fetched = 0;
+  HRESULT result = context->GetSelection(
+      edit_cookie, TF_DEFAULT_SELECTION, 1, &selection, &fetched);
+  if (FAILED(result) || fetched != 1 || selection.range == nullptr) {
+    return FAILED(result) ? result : E_FAIL;
+  }
+
+  result = selection.range->SetText(
+      edit_cookie, 0,
+      translated->insert.empty() ? nullptr : translated->insert.data(),
+      static_cast<LONG>(translated->insert.size()));
+  if (SUCCEEDED(result)) {
+    result = selection.range->Collapse(edit_cookie, TF_ANCHOR_END);
+  }
+  if (SUCCEEDED(result)) {
+    selection.style.ase = TF_AE_NONE;
+    selection.style.fInterimChar = FALSE;
+    result = context->SetSelection(edit_cookie, 1, &selection);
+  }
+  selection.range->Release();
+  return result;
+}
+
+HRESULT TextService::EndComposition(TfEditCookie edit_cookie) noexcept {
+  if (composition_ == nullptr) {
+    if (composition_context_ != nullptr) {
+      composition_context_->Release();
+      composition_context_ = nullptr;
+    }
+    return S_OK;
+  }
+
+  ITfComposition* ending = composition_;
+  composition_ = nullptr;
+  const HRESULT result = ending->EndComposition(edit_cookie);
+  ending->Release();
+  if (composition_context_ != nullptr) {
+    composition_context_->Release();
+    composition_context_ = nullptr;
+  }
+  return result;
+}
+
+HRESULT TextService::SetCaretAtCompositionEnd(ITfContext* context,
+                                              TfEditCookie edit_cookie) {
+  if (composition_ == nullptr) {
+    return E_UNEXPECTED;
+  }
+
+  ITfRange* caret = nullptr;
+  HRESULT result = composition_->GetRange(&caret);
+  if (FAILED(result) || caret == nullptr) {
+    return FAILED(result) ? result : E_FAIL;
+  }
+  result = caret->Collapse(edit_cookie, TF_ANCHOR_END);
+  if (SUCCEEDED(result)) {
+    TF_SELECTION selection{};
+    selection.range = caret;
+    selection.style.ase = TF_AE_NONE;
+    selection.style.fInterimChar = FALSE;
+    result = context->SetSelection(edit_cookie, 1, &selection);
+  }
+  caret->Release();
+  return result;
+}
+
+void TextService::AbandonComposition() noexcept {
+  if (composition_ != nullptr) {
+    composition_->Release();
+    composition_ = nullptr;
+  }
+  if (composition_context_ != nullptr) {
+    composition_context_->Release();
+    composition_context_ = nullptr;
+  }
 }
 
 void TextService::ReleaseActivationState() noexcept {
