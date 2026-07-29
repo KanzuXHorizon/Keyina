@@ -85,11 +85,11 @@ public sealed class SnippetMatcher
 }
 ```
 
-- [ ] **Step 1: Add failing tests for exact trigger, delimiter, case policy, secure input, allow/deny apps, maximum lengths, duplicate triggers, Unicode triggers, built-ins, and date/time variables.**
-- [ ] **Step 2: Verify missing implementation.**
-- [ ] **Step 3: Implement indexed lookup without regex and validate all definitions at construction.**
-- [ ] **Step 4: Add built-ins `;kvi`, `;kvoice`, `;kdate`, `;ktime`, and `;kdatetime` as commands or expansions without hardcoding provider/network behavior.**
-- [ ] **Step 5: Run tests and commit as `feat(snippets): add deterministic scoped expansion`.**
+- [x] **Step 1: Add failing tests for exact trigger, delimiter, case policy, secure input, allow/deny apps, maximum lengths, duplicate triggers, Unicode triggers, built-ins, and date/time variables.**
+- [x] **Step 2: Verify missing implementation.**
+- [x] **Step 3: Implement indexed lookup without regex and validate all definitions at construction.**
+- [x] **Step 4: Add built-ins `;kvi`, `;kvoice`, `;kdate`, `;ktime`, and `;kdatetime` as commands or expansions without hardcoding provider/network behavior.**
+- [x] **Step 5: Run tests and commit as `feat(snippets): add deterministic scoped expansion`.**
 
 ### Task 3: Versioned snippet configuration and atomic storage
 
