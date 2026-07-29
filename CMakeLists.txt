@@ -5,7 +5,12 @@ project(Keyina VERSION 0.1.0 LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(KeyinaCompilerOptions)
 
+option(KEYINA_BUILD_BENCHMARKS "Build native latency benchmarks" ON)
+
 enable_testing()
 
 add_subdirectory(core)
 add_subdirectory(tests)
+if(KEYINA_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()

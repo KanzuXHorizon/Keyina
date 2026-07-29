@@ -141,12 +141,12 @@
 **Interfaces:**
 - Produces: executable `keyina_bench`, JSON result format containing environment metadata and latency percentiles, and comparator exit code `1` for a regression greater than 20%.
 
-- [ ] **Step 1: Add failing comparator tests for accepted, rejected, missing, and incompatible baselines.**
-- [ ] **Step 2: Implement strict benchmark JSON parsing in the Python comparator.**
-- [ ] **Step 3: Add benchmark cases for ASCII pass-through, letter modifier, tone update, guard-protected URL, and 64-code-point classification.**
-- [ ] **Step 4: Build optimized binaries, run warm-up and measured iterations, and write the first machine-specific evidence file outside Git.**
-- [ ] **Step 5: Verify no benchmark is used as a correctness test and document measurement limitations.**
-- [ ] **Step 6: Commit as `perf(core): add reproducible latency benchmarks`.**
+- [x] **Step 1: Add failing comparator tests for accepted, rejected, missing, and incompatible baselines.**
+- [x] **Step 2: Implement strict benchmark JSON parsing in the Python comparator.**
+- [x] **Step 3: Add benchmark cases for ASCII pass-through, letter modifier, tone update, guard-protected URL, and 64-code-point classification.**
+- [x] **Step 4: Build optimized binaries, run warm-up and measured iterations, and write the first machine-specific evidence file outside Git.**
+- [x] **Step 5: Verify no benchmark is used as a correctness test and document measurement limitations.**
+- [x] **Step 6: Commit as `perf(core): add reproducible latency benchmarks`.**
 
 ### Task 7: Windows TSF contract scaffold
 

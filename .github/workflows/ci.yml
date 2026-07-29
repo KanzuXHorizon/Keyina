@@ -19,6 +19,24 @@ jobs:
         run: cmake --build --preset windows-msvc-debug
       - name: Test
         run: ctest --preset windows-msvc-debug
+      - name: Validate golden vectors
+        run: python tools/check_vectors.py
+      - name: Test benchmark comparator
+        run: python tools/test_compare_benchmark.py
+      - name: Configure release benchmark
+        run: cmake --preset windows-msvc-release
+      - name: Build release benchmark
+        run: cmake --build --preset windows-msvc-release
+      - name: Run release benchmark
+        shell: pwsh
+        run: |
+          .\build\windows-msvc-release\benchmarks\Release\keyina_bench.exe |
+            Out-File -Encoding utf8 benchmark-result.json
+          python -m json.tool benchmark-result.json | Out-Null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-benchmark-result
+          path: benchmark-result.json
 
   linux-clang-sanitizers:
     runs-on: ubuntu-24.04

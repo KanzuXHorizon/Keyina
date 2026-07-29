@@ -30,3 +30,7 @@ coverage/
 benchmark-results/
 *.profraw
 *.profdata
+
+# Python tooling caches
+__pycache__/
+*.py[cod]
