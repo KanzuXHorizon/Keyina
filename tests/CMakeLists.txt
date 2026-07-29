@@ -1,0 +1,13 @@
+add_executable(keyina_tests
+  test_main.cpp
+)
+
+target_compile_features(keyina_tests PRIVATE cxx_std_20)
+target_link_libraries(keyina_tests PRIVATE keyina::core)
+target_include_directories(keyina_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+keyina_configure_target(keyina_tests)
+
+add_test(NAME keyina.unit COMMAND keyina_tests)
+set_tests_properties(keyina.unit PROPERTIES LABELS unit)

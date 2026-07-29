@@ -35,13 +35,13 @@
 **Interfaces:**
 - Produces: CMake target `keyina_core`, test executable `keyina_tests`, CTest label `unit`, and preset names `windows-msvc-debug`, `windows-msvc-release`, `linux-clang-debug`, and `linux-clang-asan`.
 
-- [ ] **Step 1: Write a smoke test that includes `<keyina/version.h>` and asserts `keyina::kVersionMajor == 0`.**
-- [ ] **Step 2: Configure the test target and run the build; verify it fails because the header and core target do not exist.**
-- [ ] **Step 3: Add the minimal root/core/test CMake files and `core/include/keyina/version.h`.**
-- [ ] **Step 4: Configure, build, and run CTest; verify the smoke test passes.**
-- [ ] **Step 5: Add warnings-as-errors, sanitizer options, deterministic output directories, and Windows/Linux CI jobs.**
-- [ ] **Step 6: Re-run configure, build, and CTest with the available local compiler.**
-- [ ] **Step 7: Commit as `build: establish reproducible native toolchain`.**
+- [x] **Step 1: Write a smoke test that includes `<keyina/version.h>` and asserts `keyina::kVersionMajor == 0`.**
+- [x] **Step 2: Configure the test target and run the build; verify it fails because the header and core target do not exist.**
+- [x] **Step 3: Add the minimal root/core/test CMake files and `core/include/keyina/version.h`.**
+- [x] **Step 4: Configure, build, and run CTest; verify the smoke test passes.**
+- [x] **Step 5: Add warnings-as-errors, sanitizer options, deterministic output directories, and Windows/Linux CI jobs.**
+- [x] **Step 6: Re-run configure, build, and CTest with the available local compiler.**
+- [x] **Step 7: Commit as `build: establish reproducible native toolchain`.**
 
 ### Task 2: Unicode scalar and Vietnamese letter model
 
