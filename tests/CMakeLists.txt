@@ -56,7 +56,7 @@ if(WIN32)
   target_include_directories(keyina_tsf_integration PRIVATE
     "${PROJECT_SOURCE_DIR}/platform/windows/tsf/include"
   )
-  target_link_libraries(keyina_tsf_integration PRIVATE ole32 uuid)
+  target_link_libraries(keyina_tsf_integration PRIVATE ole32 oleaut32 uuid)
   keyina_configure_target(keyina_tsf_integration)
   add_dependencies(keyina_tsf_integration KeyinaTsfTest)
   add_test(

@@ -1,10 +1,23 @@
 #pragma once
 
 #include <guiddef.h>
+#include <oaidl.h>
+#include <unknwn.h>
 
 #include <cstdint>
 
 namespace keyina::tsf {
+
+MIDL_INTERFACE("DD3E0E6F-738B-41DA-8736-104DCD94BE54")
+IKeyinaTsfTestControl : public IUnknown {
+ public:
+  virtual HRESULT STDMETHODCALLTYPE GetFocusGeneration(
+      ULONGLONG* generation) = 0;
+  virtual HRESULT STDMETHODCALLTYPE ApplyExternalText(
+      ULONGLONG focus_generation,
+      BSTR expected_suffix,
+      BSTR insert_text) = 0;
+};
 
 inline constexpr CLSID kTextServiceClsid = {
     0xD66D2599,

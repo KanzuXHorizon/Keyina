@@ -120,6 +120,7 @@ int wmain(int argc, wchar_t** argv) {
   IClassFactory* factory = nullptr;
   ITfTextInputProcessorEx* service = nullptr;
   ITfKeyEventSink* key_sink = nullptr;
+  keyina::tsf::IKeyinaTsfTestControl* test_control = nullptr;
   TfClientId client_id = TF_CLIENTID_NULL;
   bool service_active = false;
   bool thread_manager_active = false;
@@ -198,6 +199,13 @@ int wmain(int argc, wchar_t** argv) {
       Fail(L"Keyina does not expose ITfKeyEventSink", result);
       break;
     }
+    result = service->QueryInterface(
+        __uuidof(keyina::tsf::IKeyinaTsfTestControl),
+        reinterpret_cast<void**>(&test_control));
+    if (FAILED(result)) {
+      Fail(L"Keyina test DLL does not expose external text control", result);
+      break;
+    }
     result = service->ActivateEx(
         thread_manager, client_id,
         keyina::tsf::kManualKeyDispatchForTests);
@@ -240,6 +248,59 @@ int wmain(int argc, wchar_t** argv) {
       break;
     }
 
+    ULONGLONG focus_generation = 0;
+    result = test_control->GetFocusGeneration(&focus_generation);
+    if (FAILED(result) || focus_generation == 0) {
+      Fail(L"Keyina did not expose a valid focus generation", result);
+      break;
+    }
+
+    BSTR empty_suffix = SysAllocStringLen(nullptr, 0);
+    BSTR final_text = SysAllocString(L"xin chào");
+    result = test_control->ApplyExternalText(
+        focus_generation, empty_suffix, final_text);
+    SysFreeString(empty_suffix);
+    SysFreeString(final_text);
+    if (result != S_OK || store->Text() != L"tiếng đương as_ xin chào") {
+      Fail(L"final transcript was not inserted atomically", result);
+      break;
+    }
+
+    BSTR stale_suffix = SysAllocStringLen(nullptr, 0);
+    BSTR stale_text = SysAllocString(L" lỗi");
+    result = test_control->ApplyExternalText(
+        focus_generation, stale_suffix, stale_text);
+    SysFreeString(stale_suffix);
+    SysFreeString(stale_text);
+    if (result != S_FALSE || store->Text() != L"tiếng đương as_ xin chào") {
+      Fail(L"stale focus generation was not rejected", result);
+      break;
+    }
+
+    if (!SendRaw(key_sink, context, "abc")) {
+      Fail(L"could not prepare snippet trigger text");
+      break;
+    }
+    ULONGLONG snippet_generation = 0;
+    result = test_control->GetFocusGeneration(&snippet_generation);
+    if (FAILED(result) || snippet_generation <= focus_generation) {
+      Fail(L"typing did not advance focus generation", result);
+      break;
+    }
+
+    BSTR expected_trigger = SysAllocString(L"abc");
+    BSTR snippet_text = SysAllocString(L"XYZ");
+    result = test_control->ApplyExternalText(
+        snippet_generation, expected_trigger, snippet_text);
+    SysFreeString(expected_trigger);
+    SysFreeString(snippet_text);
+    if (result != S_OK ||
+        store->Text() != L"tiếng đương as_ xin chàoXYZ" ||
+        HasActiveComposition(context, true)) {
+      Fail(L"snippet trigger was not replaced atomically", result);
+      break;
+    }
+
     result = service->Deactivate();
     service_active = false;
     if (FAILED(result)) {
@@ -255,6 +316,23 @@ int wmain(int argc, wchar_t** argv) {
     service_active = true;
 
     const std::wstring before_secure{store->Text()};
+    ULONGLONG secure_generation = 0;
+    result = test_control->GetFocusGeneration(&secure_generation);
+    if (FAILED(result)) {
+      Fail(L"could not read secure focus generation", result);
+      break;
+    }
+    BSTR secure_suffix = SysAllocStringLen(nullptr, 0);
+    BSTR secure_text = SysAllocString(L"blocked");
+    result = test_control->ApplyExternalText(
+        secure_generation, secure_suffix, secure_text);
+    SysFreeString(secure_suffix);
+    SysFreeString(secure_text);
+    if (result != E_ACCESSDENIED || store->Text() != before_secure) {
+      Fail(L"secure mode allowed external text insertion", result);
+      break;
+    }
+
     BOOL secure_test_eaten = TRUE;
     result = key_sink->OnTestKeyDown(context, 'A', 0, &secure_test_eaten);
     if (FAILED(result) || secure_test_eaten ||
@@ -270,6 +348,8 @@ int wmain(int argc, wchar_t** argv) {
       break;
     }
 
+    test_control->Release();
+    test_control = nullptr;
     key_sink->Release();
     key_sink = nullptr;
     service->Release();
@@ -287,6 +367,7 @@ int wmain(int argc, wchar_t** argv) {
   if (service_active && service != nullptr) {
     static_cast<void>(service->Deactivate());
   }
+  if (test_control != nullptr) test_control->Release();
   if (key_sink != nullptr) key_sink->Release();
   if (service != nullptr) service->Release();
   if (factory != nullptr) factory->Release();

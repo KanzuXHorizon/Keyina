@@ -5,9 +5,12 @@
 #include <msctf.h>
 
 #include <atomic>
+#include <cstdint>
+#include <string>
 #include <string_view>
 
 #include <keyina/engine.h>
+#include <keyina/tsf/identifiers.h>
 #include <keyina/tsf/key_router.h>
 
 #include "key_edit_session.h"
@@ -16,7 +19,11 @@ namespace keyina::tsf {
 
 class TextService final : public ITfTextInputProcessorEx,
                           public ITfKeyEventSink,
-                          public ITfCompositionSink {
+                          public ITfCompositionSink
+#if defined(KEYINA_TSF_TEST_HOOKS)
+                          , public IKeyinaTsfTestControl
+#endif
+{
  public:
   TextService() noexcept;
 
@@ -60,7 +67,17 @@ class TextService final : public ITfTextInputProcessorEx,
       TfEditCookie edit_cookie,
       ITfComposition* composition) override;
 
+#if defined(KEYINA_TSF_TEST_HOOKS)
+  HRESULT STDMETHODCALLTYPE GetFocusGeneration(
+      ULONGLONG* generation) override;
+  HRESULT STDMETHODCALLTYPE ApplyExternalText(
+      ULONGLONG focus_generation,
+      BSTR expected_suffix,
+      BSTR insert_text) override;
+#endif
+
  private:
+  friend class ExternalEditSession;
   friend class KeyEditSession;
 
   ~TextService();
@@ -76,6 +93,16 @@ class TextService final : public ITfTextInputProcessorEx,
   HRESULT ApplyEngineEdit(ITfContext* context, TfEditCookie edit_cookie,
                           const TextEdit& edit,
                           std::u32string_view previous_visible);
+  HRESULT RequestExternalText(std::uint64_t focus_generation,
+                              std::wstring expected_suffix,
+                              std::wstring insert_text,
+                              bool* applied) noexcept;
+  HRESULT ApplyExternalTextInSession(ITfContext* context,
+                                     TfEditCookie edit_cookie,
+                                     std::uint64_t focus_generation,
+                                     std::wstring_view expected_suffix,
+                                     std::wstring_view insert_text);
+  HRESULT GetFocusedContext(ITfContext** context) const noexcept;
   HRESULT InsertBoundary(ITfContext* context, TfEditCookie edit_cookie,
                          char32_t character);
   HRESULT EndComposition(TfEditCookie edit_cookie) noexcept;
@@ -93,6 +120,7 @@ class TextService final : public ITfTextInputProcessorEx,
   TfClientId client_id_{TF_CLIENTID_NULL};
   bool key_sink_advised_{false};
   bool secure_mode_{false};
+  std::atomic<std::uint64_t> focus_generation_{0};
   Engine engine_;
 };
 

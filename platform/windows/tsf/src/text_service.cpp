@@ -1,12 +1,15 @@
 #include "text_service.h"
 
+#include <algorithm>
 #include <limits>
 #include <new>
 #include <string>
+#include <vector>
 
 #include <keyina/tsf/edit_translator.h>
 #include <keyina/tsf/identifiers.h>
 
+#include "external_edit_session.h"
 #include "module_state.h"
 
 namespace keyina::tsf {
@@ -32,6 +35,12 @@ HRESULT TextService::QueryInterface(REFIID interface_id, void** object) {
     *object = static_cast<ITfKeyEventSink*>(this);
   } else if (IsEqualIID(interface_id, IID_ITfCompositionSink)) {
     *object = static_cast<ITfCompositionSink*>(this);
+#if defined(KEYINA_TSF_TEST_HOOKS)
+  } else if (IsEqualIID(
+                 interface_id,
+                 __uuidof(IKeyinaTsfTestControl))) {
+    *object = static_cast<IKeyinaTsfTestControl*>(this);
+#endif
   } else {
     return E_NOINTERFACE;
   }
@@ -66,6 +75,7 @@ HRESULT TextService::ActivateEx(ITfThreadMgr* thread_manager,
   thread_manager_->AddRef();
   client_id_ = client_id;
   secure_mode_ = (flags & TF_TMAE_SECUREMODE) != 0;
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
   bool manual_key_dispatch = false;
 #if defined(KEYINA_TSF_TEST_HOOKS)
   manual_key_dispatch = (flags & kManualKeyDispatchForTests) != 0;
@@ -112,10 +122,12 @@ HRESULT TextService::Deactivate() {
   }
   client_id_ = TF_CLIENTID_NULL;
   secure_mode_ = false;
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
   return result;
 }
 
 HRESULT TextService::OnSetFocus(BOOL foreground) {
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
   if (!foreground) {
     bool applied = false;
     if (composition_context_ != nullptr) {
@@ -141,6 +153,7 @@ HRESULT TextService::OnTestKeyDown(ITfContext* context, WPARAM virtual_key,
     return S_OK;
   }
 
+  focus_generation_.fetch_add(1, std::memory_order_relaxed);
   const KeyRoute route = RouteKey(BuildRoutingInput(virtual_key));
   *eaten = route.kind == KeyRouteKind::PassThrough ? FALSE : TRUE;
   return S_OK;
@@ -208,6 +221,42 @@ HRESULT TextService::OnCompositionTerminated(
   return S_OK;
 }
 
+#if defined(KEYINA_TSF_TEST_HOOKS)
+HRESULT TextService::GetFocusGeneration(ULONGLONG* generation) {
+  if (generation == nullptr) {
+    return E_POINTER;
+  }
+  *generation = focus_generation_.load(std::memory_order_relaxed);
+  return S_OK;
+}
+
+HRESULT TextService::ApplyExternalText(
+    ULONGLONG focus_generation,
+    BSTR expected_suffix,
+    BSTR insert_text) {
+  if (secure_mode_) {
+    return E_ACCESSDENIED;
+  }
+  if (insert_text == nullptr || SysStringLen(insert_text) == 0) {
+    return E_INVALIDARG;
+  }
+
+  const UINT suffix_length =
+      expected_suffix == nullptr ? 0U : SysStringLen(expected_suffix);
+  const UINT insert_length = SysStringLen(insert_text);
+  if (suffix_length > 256U || insert_length > 32'768U) {
+    return E_INVALIDARG;
+  }
+
+  return RequestExternalText(
+      focus_generation,
+      std::wstring(expected_suffix == nullptr ? L"" : expected_suffix,
+                   suffix_length),
+      std::wstring(insert_text, insert_length),
+      nullptr);
+}
+#endif
+
 KeyRoutingInput TextService::BuildRoutingInput(WPARAM virtual_key) const
     noexcept {
   return KeyRoutingInput{
@@ -220,6 +269,170 @@ KeyRoutingInput TextService::BuildRoutingInput(WPARAM virtual_key) const
                  (GetKeyState(VK_RWIN) & 0x8000) != 0,
       .active_composition = !engine_.RawKeys().empty(),
   };
+}
+
+HRESULT TextService::RequestExternalText(
+    std::uint64_t focus_generation,
+    std::wstring expected_suffix,
+    std::wstring insert_text,
+    bool* applied) noexcept {
+  if (applied != nullptr) {
+    *applied = false;
+  }
+  if (secure_mode_) {
+    return E_ACCESSDENIED;
+  }
+  if (client_id_ == TF_CLIENTID_NULL || insert_text.empty()) {
+    return E_INVALIDARG;
+  }
+  if (focus_generation !=
+      focus_generation_.load(std::memory_order_relaxed)) {
+    return S_FALSE;
+  }
+
+  ITfContext* context = nullptr;
+  HRESULT result = GetFocusedContext(&context);
+  if (FAILED(result) || context == nullptr) {
+    return FAILED(result) ? result : S_FALSE;
+  }
+
+  auto* session = new (std::nothrow) ExternalEditSession(
+      this,
+      context,
+      focus_generation,
+      std::move(expected_suffix),
+      std::move(insert_text));
+  if (session == nullptr) {
+    context->Release();
+    return E_OUTOFMEMORY;
+  }
+
+  HRESULT session_result = E_FAIL;
+  result = context->RequestEditSession(
+      client_id_,
+      session,
+      TF_ES_SYNC | TF_ES_READWRITE,
+      &session_result);
+  context->Release();
+  session->Release();
+
+  if (FAILED(result)) {
+    return result;
+  }
+  if (session_result == S_OK && applied != nullptr) {
+    *applied = true;
+  }
+  return session_result;
+}
+
+HRESULT TextService::ApplyExternalTextInSession(
+    ITfContext* context,
+    TfEditCookie edit_cookie,
+    std::uint64_t focus_generation,
+    std::wstring_view expected_suffix,
+    std::wstring_view insert_text) {
+  if (context == nullptr) {
+    return E_POINTER;
+  }
+  if (secure_mode_) {
+    return E_ACCESSDENIED;
+  }
+  if (focus_generation !=
+      focus_generation_.load(std::memory_order_relaxed)) {
+    return S_FALSE;
+  }
+  if (insert_text.empty() ||
+      insert_text.size() >
+          static_cast<std::size_t>(std::numeric_limits<LONG>::max()) ||
+      expected_suffix.size() >
+          static_cast<std::size_t>(std::numeric_limits<LONG>::max())) {
+    return E_INVALIDARG;
+  }
+
+  TF_SELECTION selection{};
+  ULONG fetched = 0;
+  HRESULT result = context->GetSelection(
+      edit_cookie, TF_DEFAULT_SELECTION, 1, &selection, &fetched);
+  if (FAILED(result) || fetched != 1 || selection.range == nullptr) {
+    return FAILED(result) ? result : E_FAIL;
+  }
+
+  BOOL empty = FALSE;
+  result = selection.range->IsEmpty(edit_cookie, &empty);
+  if (FAILED(result) || !empty) {
+    selection.range->Release();
+    return FAILED(result) ? result : S_FALSE;
+  }
+
+  if (!expected_suffix.empty()) {
+    const LONG requested = -static_cast<LONG>(expected_suffix.size());
+    LONG shifted = 0;
+    result = selection.range->ShiftStart(
+        edit_cookie, requested, &shifted, nullptr);
+    if (FAILED(result) || shifted != requested) {
+      selection.range->Release();
+      return FAILED(result) ? result : S_FALSE;
+    }
+
+    std::vector<WCHAR> observed(expected_suffix.size());
+    ULONG observed_length = 0;
+    result = selection.range->GetText(
+        edit_cookie,
+        0,
+        observed.data(),
+        static_cast<ULONG>(observed.size()),
+        &observed_length);
+    if (FAILED(result) ||
+        observed_length != expected_suffix.size() ||
+        !std::equal(observed.begin(), observed.end(),
+                    expected_suffix.begin(), expected_suffix.end())) {
+      selection.range->Release();
+      return FAILED(result) ? result : S_FALSE;
+    }
+  }
+
+  result = EndComposition(edit_cookie);
+  engine_.Reset();
+  if (SUCCEEDED(result)) {
+    result = selection.range->SetText(
+        edit_cookie,
+        0,
+        insert_text.data(),
+        static_cast<LONG>(insert_text.size()));
+  }
+  if (SUCCEEDED(result)) {
+    result = selection.range->Collapse(edit_cookie, TF_ANCHOR_END);
+  }
+  if (SUCCEEDED(result)) {
+    selection.style.ase = TF_AE_NONE;
+    selection.style.fInterimChar = FALSE;
+    result = context->SetSelection(edit_cookie, 1, &selection);
+  }
+  selection.range->Release();
+
+  if (SUCCEEDED(result)) {
+    focus_generation_.fetch_add(1, std::memory_order_relaxed);
+  }
+  return result;
+}
+
+HRESULT TextService::GetFocusedContext(ITfContext** context) const noexcept {
+  if (context == nullptr) {
+    return E_POINTER;
+  }
+  *context = nullptr;
+  if (thread_manager_ == nullptr) {
+    return E_UNEXPECTED;
+  }
+
+  ITfDocumentMgr* document = nullptr;
+  HRESULT result = thread_manager_->GetFocus(&document);
+  if (FAILED(result) || document == nullptr) {
+    return FAILED(result) ? result : S_FALSE;
+  }
+  result = document->GetTop(context);
+  document->Release();
+  return result;
 }
 
 HRESULT TextService::RequestRoute(ITfContext* context, KeyRoute route,

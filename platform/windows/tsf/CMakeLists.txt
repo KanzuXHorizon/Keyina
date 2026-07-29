@@ -16,6 +16,7 @@ function(keyina_add_tsf_dll target definition_file output_name)
   add_library(${target} SHARED
     ${definition_file}
     src/dll_entry.cpp
+    src/external_edit_session.cpp
     src/key_edit_session.cpp
     src/text_service.cpp
   )
@@ -36,6 +37,7 @@ function(keyina_add_tsf_dll target definition_file output_name)
     keyina::tsf_support
     advapi32
     ole32
+    oleaut32
     uuid
   )
   keyina_configure_target(${target})
