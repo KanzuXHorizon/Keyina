@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Keyina.Host.Tests</RootNamespace>
+    <AssemblyName>Keyina.Host.Tests</AssemblyName>
+    <Description>Repository-owned unit and contract test runner for Keyina host components.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
+  </ItemGroup>
+</Project>

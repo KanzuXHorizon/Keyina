@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Keyina.Host.Core</RootNamespace>
+    <AssemblyName>Keyina.Host.Core</AssemblyName>
+    <Description>Dependency-free host state and contracts for Keyina.</Description>
+  </PropertyGroup>
+</Project>

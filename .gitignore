@@ -5,6 +5,8 @@ Start-DevSpace-MCP-Cloudflared.ps1
 /build/
 /out/
 /artifacts/
+**/bin/
+**/obj/
 CMakeUserPresets.json
 
 # IDE and OS

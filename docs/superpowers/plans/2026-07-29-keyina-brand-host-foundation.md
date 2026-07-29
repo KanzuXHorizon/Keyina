@@ -6,7 +6,7 @@
 
 **Architecture:** Vector brand sources are checked in and a repository-owned .NET asset generator produces PNG/ICO files plus a SHA-256 manifest. `Keyina.Host.Core` contains dependency-free state/contracts, while `Keyina.Host` is a minimal Windows resident executable that consumes generated resources; UI, hotkeys, snippets, and Speechmatics are layered in later plans.
 
-**Tech Stack:** C++20/CMake existing build, .NET SDK 8.0.423 pinned by `global.json`, C# 12, xUnit-free repository-owned test runner initially, SVG/XML, System.Drawing only inside the Windows asset generator.
+**Tech Stack:** C++20/CMake existing build, .NET SDK 10.0.301 pinned by `global.json` while host binaries target .NET 8, C# 12, xUnit-free repository-owned test runner initially, SVG/XML, System.Drawing only inside the Windows asset generator.
 
 ## Global Constraints
 
@@ -36,11 +36,11 @@
 - Produces solution projects `Keyina.Host.Core`, `Keyina.Host`, and `Keyina.Host.Tests`.
 - `Keyina.Host.Tests` is a console test runner returning exit code 1 on any failure.
 
-- [ ] **Step 1: Create a failing host test that references `Keyina.Host.Core.BuildInfo.ProductName` and expects `"Keyina"`.**
-- [ ] **Step 2: Run `dotnet build Keyina.slnx -c Debug`; verify failure because `BuildInfo` is absent.**
-- [ ] **Step 3: Add `BuildInfo` with constants `ProductName`, `ProductVersion`, and `ProtocolVersion`, plus the minimal WinExe entry point.**
-- [ ] **Step 4: Run Debug build and `dotnet run --project apps/host/Keyina.Host.Tests -c Debug`; verify the test passes.**
-- [ ] **Step 5: Run Release build and commit as `build(host): establish deterministic .NET foundation`.**
+- [x] **Step 1: Create a failing host test that references `Keyina.Host.Core.BuildInfo.ProductName` and expects `"Keyina"`.**
+- [x] **Step 2: Run `dotnet build Keyina.slnx -c Debug`; verify failure because `BuildInfo` is absent.**
+- [x] **Step 3: Add `BuildInfo` with constants `ProductName`, `ProductVersion`, and `ProtocolVersion`, plus the minimal WinExe entry point.**
+- [x] **Step 4: Run Debug build and `dotnet run --project apps/host/Keyina.Host.Tests -c Debug`; verify the test passes.**
+- [x] **Step 5: Run Release build and commit as `build(host): establish deterministic .NET foundation`.**
 
 ### Task 2: Catalog concept images without modifying them
 

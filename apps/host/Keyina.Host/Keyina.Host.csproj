@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>Keyina.Host</RootNamespace>
+    <AssemblyName>Keyina.Host</AssemblyName>
+    <Description>Resident Windows host for Keyina tray, hotkeys, snippets, and speech.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
+  </ItemGroup>
+</Project>
