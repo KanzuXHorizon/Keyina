@@ -17,6 +17,7 @@ target_include_directories(keyina_tests PRIVATE
 if(WIN32)
   target_sources(keyina_tests PRIVATE
     windows/edit_translator_test.cpp
+    windows/ipc_protocol_test.cpp
     windows/key_router_test.cpp
   )
   target_link_libraries(keyina_tests PRIVATE keyina::tsf_support)

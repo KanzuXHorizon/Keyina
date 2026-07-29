@@ -126,11 +126,11 @@ public sealed class SnippetMatcher
 - Maximum complete frame: 65,536 bytes.
 - C# and C++ test vectors must be byte-identical.
 
-- [ ] **Step 1: Add failing C# tests for round-trip, partial buffers, invalid magic/version/type/UTF-8, oversize, stale session, and focus generation.**
-- [ ] **Step 2: Implement allocation-bounded C# codec using spans and explicit little-endian fields.**
-- [ ] **Step 3: Check in shared binary vectors and add failing C++ decoder tests.**
-- [ ] **Step 4: Implement C++ decoder/encoder and verify byte identity with the C# vectors.**
-- [ ] **Step 5: Run .NET/native tests and commit as `feat(ipc): add bounded host TSF protocol`.**
+- [x] **Step 1: Add failing C# tests for round-trip, partial buffers, invalid magic/version/type/UTF-8, oversize, stale session, and focus generation.**
+- [x] **Step 2: Implement allocation-bounded C# codec using spans and explicit little-endian fields.**
+- [x] **Step 3: Check in one shared golden frame vector and add failing C++ decoder tests.**
+- [x] **Step 4: Implement C++ decoder/encoder and verify byte identity with the C# vector.**
+- [x] **Step 5: Run .NET/native tests and commit as `feat(ipc): add bounded host TSF protocol`.**
 
 ### Task 5: Windows hotkey adapters
 

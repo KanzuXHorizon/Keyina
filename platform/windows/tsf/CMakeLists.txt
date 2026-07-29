@@ -1,5 +1,6 @@
 add_library(keyina_tsf_support STATIC
   src/edit_translator.cpp
+  src/ipc_protocol.cpp
   src/key_router.cpp
 )
 add_library(keyina::tsf_support ALIAS keyina_tsf_support)
