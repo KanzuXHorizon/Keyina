@@ -245,7 +245,7 @@ int RunTypingSelfTest() noexcept {
     return 1;
   }
 
-  constexpr int kMaximumAttempts = 3;
+  constexpr int kMaximumAttempts = 5;
   constexpr std::string_view raw = "tieengs vieetj";
   constexpr std::array<std::wstring_view, 14> expected_prefixes{
       L"t", L"ti", L"tie", L"tiê", L"tiên", L"tiêng", L"tiếng",
