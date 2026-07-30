@@ -1,0 +1,98 @@
+name: Windows release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version. Leave empty to use Directory.Build.props.
+        required: false
+        type: string
+      sign:
+        description: Require Authenticode signing with repository secrets.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      KEYINA_SIGN_TIMESTAMP_URL: http://timestamp.digicert.com
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: apps/host/**/packages.lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+
+      - name: Configure signing identity
+        if: ${{ inputs.sign }}
+        shell: powershell
+        env:
+          KEYINA_SIGN_PFX_BASE64: ${{ secrets.KEYINA_SIGN_PFX_BASE64 }}
+          KEYINA_SIGN_PFX_PASSWORD_SECRET: ${{ secrets.KEYINA_SIGN_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:KEYINA_SIGN_PFX_BASE64)) {
+            throw 'KEYINA_SIGN_PFX_BASE64 is required for a signed release candidate.'
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'keyina-code-signing.pfx'
+          [IO.File]::WriteAllBytes(
+            $pfxPath,
+            [Convert]::FromBase64String($env:KEYINA_SIGN_PFX_BASE64))
+          "KEYINA_SIGN_PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "KEYINA_SIGN_PFX_PASSWORD=$env:KEYINA_SIGN_PFX_PASSWORD_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build and verify release candidate
+        shell: powershell
+        run: |
+          $arguments = @('-File', 'scripts/windows/build-release.ps1')
+          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.version }}')) {
+            $arguments += @('-Version', '${{ inputs.version }}')
+          }
+          if ('${{ inputs.sign }}' -eq 'true') {
+            $arguments += @('-Sign', '-RequireSignature')
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $verifyArguments = @('-File', 'scripts/windows/verify-release.ps1')
+          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.version }}')) {
+            $verifyArguments += @('-Version', '${{ inputs.version }}')
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass @verifyArguments
+          exit $LASTEXITCODE
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyina-windows-release-candidate
+          path: artifacts/release/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove temporary signing material
+        if: ${{ always() && inputs.sign }}
+        shell: powershell
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:KEYINA_SIGN_PFX_PATH) -and
+              (Test-Path -LiteralPath $env:KEYINA_SIGN_PFX_PATH)) {
+            Remove-Item -LiteralPath $env:KEYINA_SIGN_PFX_PATH -Force
+          }

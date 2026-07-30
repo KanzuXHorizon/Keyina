@@ -45,6 +45,12 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Contains("--version", StringComparer.Ordinal))
+        {
+            Console.WriteLine(BuildInfo.ProductVersion);
+            return 0;
+        }
+
         if (args.Contains("--self-test", StringComparer.Ordinal))
         {
             Console.WriteLine($"{BuildInfo.ProductName} {BuildInfo.ProductVersion}");

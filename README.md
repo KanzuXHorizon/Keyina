@@ -16,7 +16,7 @@
 </p>
 
 > [!IMPORTANT]
-> Keyina is an active **public preview**. The source, tests, benchmarks, and Windows host are available, but a signed installer and stable compatibility promise are not. Build from source for evaluation; do not treat the current branch as a production release.
+> Keyina is an active **public preview**. The repository includes a reproducible Windows installer and portable-release pipeline, but locally generated artifacts remain unsigned until a trusted code-signing identity is configured. Do not publish unsigned artifacts as a trusted public release, and do not treat the current branch as a stable compatibility promise.
 
 ## Why Keyina
 
@@ -83,13 +83,14 @@ The older Windows Text Services Framework implementation remains optional behind
 ### Windows host
 
 - Resident WinForms host on .NET 10 with a Fluent-inspired light, dark, and high-contrast interface.
-- Familiar `Ctrl + Shift` Vietnamese input toggle.
+- Familiar, fully configurable global shortcuts with transactional conflict rollback.
 - Native-engine bridge and low-level keyboard hook with injection-loop protection.
-- Deterministic snippets and secure-input bypass.
+- Deterministic snippets, secure-input bypass, onboarding, and credential-free settings import/export.
+- Per-application exclusions for typing, speech, translation, and visual feedback.
 - Tray lifecycle, startup registration, diagnostics, and self-tests.
 - Optional Speechmatics Vietnamese dictation with Windows Credential Manager storage.
-- Optional DeepL API Free selection translation with `Ctrl + Alt + T`, automatic source detection, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and Credential Manager storage.
-- Deterministic generated icons, lockups, and screenshot gallery.
+- Provider-neutral selection translation using DeepL and an optional user-configured LibreTranslate fallback, with preview, one-shot undo, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and separate Credential Manager storage.
+- Deterministic generated icons, lockups, screenshot gallery, portable ZIP, and per-user Windows installer pipeline.
 
 ## Privacy and security model
 
@@ -136,6 +137,19 @@ dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-buil
 ```
 
 The development host is unsigned. Windows or security software may warn about locally built keyboard-hook software. Review the source and build it yourself; do not bypass organizational security policy.
+
+### Build an installer and portable release
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/windows/build-release.ps1
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File scripts/windows/verify-release.ps1 `
+  -Version 0.1.0
+```
+
+Artifacts are written under `artifacts/release/<version>/`. Signing is fail-closed when `-Sign -RequireSignature` is used. Certificate-store and PFX configuration, silent installation, upgrade behavior, checksums, and versioning are documented in [`docs/releasing.md`](docs/releasing.md).
 
 ## Verification lanes
 
@@ -195,11 +209,11 @@ docs/                       Architecture, compatibility, evidence, specs, and pl
 
 The project is public before it is production-ready. A stable release still requires:
 
-- A signed, reproducible installer and uninstall path.
+- A trusted public code-signing identity and signed public artifacts; the reproducible installer, portable ZIP, checksums, manifest, and signing hooks are implemented.
 - Wider manual compatibility coverage across browsers, editors, terminals, Office applications, accessibility tools, Remote Desktop, and elevated applications.
-- Accessibility and keyboard-navigation verification for the settings interface.
+- Clean-VM install, upgrade, uninstall, SmartScreen, and accessibility verification for every public release candidate.
 - Live opt-in speech-provider validation without exposing credentials.
-- Release artifact provenance, checksums, and a documented update strategy.
+- A hosted update-discovery mechanism; current updates use versioned installers with a stable AppId and documented in-place upgrade path.
 
 Open work is tracked through GitHub issues and the design/implementation documents under [`docs/superpowers/`](docs/superpowers/).
 

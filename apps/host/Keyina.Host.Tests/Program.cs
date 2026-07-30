@@ -76,10 +76,14 @@ internal static class Program
         return failures == 0 ? 0 : 1;
     }
 
-    [KeyinaTest("build info exposes the product name")]
-    private static void BuildInfoExposesProductName()
+    [KeyinaTest("build info exposes product identity and semantic version")]
+    private static void BuildInfoExposesProductIdentity()
     {
         AssertEx.Equal("Keyina", BuildInfo.ProductName);
+        var numericVersion = BuildInfo.ProductVersion.Split('-', 2)[0];
+        AssertEx.True(
+            Version.TryParse(numericVersion, out var version) && version.Major >= 0,
+            "Build version does not start with a valid numeric semantic version.");
     }
 
     private static void ValidateSignature(MethodInfo method)

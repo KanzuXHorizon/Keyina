@@ -1,5 +1,13 @@
 <Project>
   <PropertyGroup>
+    <KeyinaVersion>0.1.0</KeyinaVersion>
+    <Version Condition="'$(Version)' == ''">$(KeyinaVersion)</Version>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">0.1.0.0</AssemblyVersion>
+    <FileVersion Condition="'$(FileVersion)' == ''">0.1.0.0</FileVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
+    <Product>Keyina</Product>
+    <Company>Keyina contributors</Company>
+    <Copyright>Copyright © 2026 Keyina contributors</Copyright>
     <LangVersion>12.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
