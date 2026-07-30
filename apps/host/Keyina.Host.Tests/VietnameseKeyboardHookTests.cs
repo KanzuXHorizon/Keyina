@@ -67,6 +67,92 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("á", injector.Text);
     }
 
+    [KeyinaTest("disabled resident hook bypasses foreground probing")]
+    private static void DisabledHookBypassesForegroundProbe()
+    {
+        var native = new FakeHookNativeApi();
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            new TextModelInjector(),
+            native);
+        hook.Start(enabledInitially: false);
+        var probesAfterStartup = native.TypingContextProbeCount;
+
+        _ = native.SendLetter('A', 'a');
+
+        AssertEx.Equal(
+            probesAfterStartup,
+            native.TypingContextProbeCount,
+            "Disabled typing performed foreground Win32 work for an ordinary key.");
+    }
+
+    [KeyinaTest("Keyina injected events bypass physical hotkey observers")]
+    private static void InjectedEventsBypassPhysicalObservers()
+    {
+        var native = new FakeHookNativeApi();
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            new TextModelInjector(),
+            native);
+        var observed = 0;
+        using var subscription = hook.SubscribePhysicalEvents(_ => observed++);
+        hook.Start(enabledInitially: true);
+
+        var handled = native.KeyboardCallback!(new VietnameseKeyboardEvent(
+            VirtualKey: 'A',
+            IsKeyDown: true,
+            IsInjected: true,
+            UnicodeInputInjector.InjectionMarker,
+            Shift: false,
+            Control: false,
+            Alt: false,
+            Windows: false,
+            new Rune('a')));
+
+        AssertEx.False(handled, "Keyina injected events must fail open.");
+        AssertEx.Equal(0, observed, "Injected edits reached the physical hotkey observer.");
+    }
+
+    [KeyinaTest("pointer observation is active only while a composition exists")]
+    private static void PointerObservationFollowsCompositionLifetime()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+
+        AssertEx.False(
+            native.PointerObservationActive,
+            "Pointer observation started before a composition existed.");
+        _ = native.SendLetter('A', 'a');
+        AssertEx.True(
+            native.PointerObservationActive,
+            "Typing the first composition character did not arm pointer observation.");
+
+        var injectionsBeforePointer = injector.ApplyCount;
+        native.PointerResetCallback!();
+        AssertEx.False(
+            native.PointerObservationActive,
+            "A pointer reset left raw mouse observation armed.");
+        AssertEx.Equal(
+            injectionsBeforePointer,
+            injector.ApplyCount,
+            "A pointer reset injected keyboard or pointer input.");
+
+        _ = native.SendLetter('S', 's');
+        AssertEx.True(
+            native.PointerObservationActive,
+            "A new composition did not re-arm pointer observation.");
+        _ = native.SendSpace();
+        AssertEx.False(
+            native.PointerObservationActive,
+            "A commit boundary left pointer observation active.");
+    }
+
     [KeyinaTest("resident hook ignores injected edits and resets on asynchronous pointer interaction")]
     private static void HookAvoidsLoopsAndResetsOnPointerInteraction()
     {
@@ -301,9 +387,11 @@ internal static class VietnameseKeyboardHookTests
     private sealed class TextModelInjector : IUnicodeInputInjector
     {
         public string Text { get; set; } = string.Empty;
+        public int ApplyCount { get; private set; }
 
         public void Apply(HookEdit edit)
         {
+            ApplyCount++;
             var end = Text.Length;
             for (var index = 0; index < edit.BackspaceCount; index++)
             {
@@ -344,6 +432,8 @@ internal static class VietnameseKeyboardHookTests
         }
         public bool ThrowOnPointerInstall { get; set; }
         public bool KeyboardInstallationDisposed { get; private set; }
+        public bool PointerObservationActive { get; private set; }
+        public int TypingContextProbeCount { get; private set; }
         public TextModelInjector? Target { get; set; }
 
         public IDisposable Install(Func<VietnameseKeyboardEvent, bool> callback)
@@ -356,17 +446,27 @@ internal static class VietnameseKeyboardHookTests
             });
         }
 
-        public IDisposable InstallPointerReset(Action callback)
+        public IPointerResetLease InstallPointerReset(Action callback)
         {
             if (ThrowOnPointerInstall)
             {
                 throw new InvalidOperationException("Pointer observer unavailable.");
             }
-            PointerResetCallback = callback;
-            return new DelegateDisposable(() => PointerResetCallback = null);
+            PointerResetCallback = () =>
+            {
+                PointerObservationActive = false;
+                callback();
+            };
+            return new FakePointerResetLease(
+                active => PointerObservationActive = active,
+                () => PointerResetCallback = null);
         }
 
-        public VietnameseTypingContext GetTypingContext() => TypingContext;
+        public VietnameseTypingContext GetTypingContext()
+        {
+            TypingContextProbeCount++;
+            return TypingContext;
+        }
 
         public bool SendCharacter(
             char virtualKey,
@@ -461,6 +561,23 @@ internal static class VietnameseKeyboardHookTests
                 new Rune(' ')));
             AssertEx.Equal(down, up);
             return down;
+        }
+    }
+
+    private sealed class FakePointerResetLease(
+        Action<bool> setActive,
+        Action dispose) : IPointerResetLease
+    {
+        private Action<bool>? setActiveAction = setActive;
+        private Action? disposeAction = dispose;
+
+        public void SetActive(bool active) =>
+            Volatile.Read(ref setActiveAction)?.Invoke(active);
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref setActiveAction, null);
+            Interlocked.Exchange(ref disposeAction, null)?.Invoke();
         }
     }
 

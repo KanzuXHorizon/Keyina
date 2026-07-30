@@ -47,6 +47,12 @@ internal static class Program
             inputInjector,
             hookNativeApi);
         benchmarkHook.Start(enabledInitially: true);
+        var disabledHookNativeApi = new BenchmarkHookNativeApi();
+        using var disabledHook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            inputInjector,
+            disabledHookNativeApi);
+        disabledHook.Start(enabledInitially: false);
 
         var cases = new List<BenchmarkCase>
         {
@@ -169,6 +175,12 @@ internal static class Program
                 inputInjector.Apply(transformEdit);
                 return inputSender.LastCount;
             }));
+        cases.Add(Measure(
+            "typing_hook_disabled",
+            iterations: 200_000,
+            budgetP99Nanoseconds: 1_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () => disabledHookNativeApi.Dispatch('B', 'b') ? 1 : 0));
         cases.Add(Measure(
             "typing_hook_literal",
             iterations: 100_000,
@@ -352,7 +364,7 @@ internal static class Program
             return NoopDisposable.Instance;
         }
 
-        public IDisposable InstallPointerReset(Action callback) =>
+        public IPointerResetLease InstallPointerReset(Action callback) =>
             NoopDisposable.Instance;
 
         public VietnameseTypingContext GetTypingContext() => new(
@@ -373,9 +385,13 @@ internal static class Program
                 new Rune(character))) ?? false;
     }
 
-    private sealed class NoopDisposable : IDisposable
+    private sealed class NoopDisposable : IPointerResetLease
     {
         public static NoopDisposable Instance { get; } = new();
+
+        public void SetActive(bool active)
+        {
+        }
 
         public void Dispose()
         {

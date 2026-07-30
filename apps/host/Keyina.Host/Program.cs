@@ -38,7 +38,9 @@ internal static class Program
         double AverageCpuPercent,
         bool TypingHookRunning,
         long ProcessedPhysicalEventCount,
-        bool MeasurementContaminatedByInput);
+        bool MeasurementContaminatedByInput,
+        long PrivateMemoryBudgetBytes,
+        bool BudgetPass);
 
     [STAThread]
     public static int Main(string[] args)
@@ -90,6 +92,13 @@ internal static class Program
                     CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
+            var threadCountDelta = snapshot.ThreadCount - baselineThreadCount;
+            var contaminatedByInput = hook.ProcessedPhysicalEventCount != 0;
+            var budgetPass = ResidentInputResourceBudget.IsSatisfied(
+                snapshot.PrivateMemoryBytes,
+                threadCountDelta,
+                hook.IsRunning,
+                contaminatedByInput);
             var result = new ResidentInputResourceSnapshot(
                 startupTimer.Elapsed.TotalMilliseconds,
                 snapshot.DurationMilliseconds,
@@ -99,7 +108,7 @@ internal static class Program
                 snapshot.PrivateMemoryBytes - baselinePrivateMemory,
                 snapshot.ManagedHeapBytes,
                 snapshot.ThreadCount,
-                snapshot.ThreadCount - baselineThreadCount,
+                threadCountDelta,
                 snapshot.HandleCount,
                 snapshot.HandleCount - baselineHandleCount,
                 snapshot.ProcessorCount,
@@ -107,9 +116,11 @@ internal static class Program
                 snapshot.AverageCpuPercent,
                 hook.IsRunning,
                 hook.ProcessedPhysicalEventCount,
-                hook.ProcessedPhysicalEventCount != 0);
+                contaminatedByInput,
+                ResidentInputResourceBudget.MaximumPrivateMemoryBytes,
+                budgetPass);
             Console.WriteLine(JsonSerializer.Serialize(result, ResourceJsonOptions));
-            return 0;
+            return budgetPass ? 0 : 1;
         }
 
         if (args.Contains("--hotkey-self-test", StringComparer.Ordinal))

@@ -8,9 +8,9 @@ This report records the local evidence for the first Keyina extreme-optimization
 - zero-allocation managed hot paths after warm-up;
 - reusable native engine composition buffers;
 - a dedicated keyboard-hook message thread independent from the UI thread;
-- asynchronous Raw Input pointer observation with buffered packet draining;
-- thread QoS separation for latency-sensitive keyboard and background pointer work;
-- resident startup, CPU, RAM, thread, and handle measurement;
+- Raw Input click/wheel observation on the same message loop, registered only while a composition exists;
+- no low-level mouse hook and no pointer-observer thread;
+- resident startup, CPU, RAM, thread, and handle measurement with a strict 10 MiB private-memory gate;
 - allocation-aware native benchmarks and regression budgets;
 - correctness, integration, Debug, and Release verification.
 
@@ -50,8 +50,9 @@ Final values below are the median p99 from three Release runs:
 | Native bridge literal key | 300 ns | 0 B |
 | Native bridge Telex transform | 600 ns | 0 B |
 | Injection event preparation | 100 ns | 0 B |
-| Full hook literal path | 400 ns | 0 B |
-| Full hook transformed path | 800 ns | 0 B |
+| Disabled hook fast path | 100 ns | 0 B |
+| Full hook literal path | 500 ns | 0 B |
+| Full hook transformed path | 1.0 µs | 0 B |
 
 The foreground-context case calls the real Win32 focus and password-style probe rather than a fake. The deterministic injection benchmark measures event construction and dispatch to a fake sender. Real `SendInput` duration depends on Windows and the target application and is measured by the opt-in runtime Diagnostics profiler instead.
 
@@ -59,21 +60,25 @@ The foreground-context case calls the real Win32 focus and password-style probe 
 
 The keyboard hook runs on a dedicated background thread with its own message loop, a bounded 256 KiB stack, explicit startup/shutdown handshakes, and fail-open exception handling. Modifier chords and push-to-talk release detection subscribe to that same resident hook instead of installing a second `WH_KEYBOARD_LL` hook. Observer failures are isolated from Vietnamese composition. A regression test blocks the owner UI thread for 300 ms and verifies that the hook still processes input independently.
 
-Pointer clicks and wheel input are observed asynchronously through a message-only Raw Input window on a separate thread with a bounded 128 KiB stack. Ordinary pointer movement does not reset the Vietnamese engine. The observer reads the current packet and drains queued packets with `GetRawInputBuffer`, coalescing a burst into one atomic reset request. Native-width alignment and packet-boundary checks prevent pointer truncation or overflow on x64.
+Pointer clicks and wheel input are observed through a message-only Raw Input window owned by the existing keyboard-hook message thread. Keyina does not install `WH_MOUSE_LL`, does not create a second pointer thread, and never injects mouse input. Raw mouse registration is disabled when there is no active composition and is enabled asynchronously after the first composition character, so ordinary FPS mouse movement at high polling rates does not deliver resident packets to Keyina. Click or wheel packets disarm observation before requesting one atomic engine reset. Buffered packet draining, native-width alignment, and packet-boundary checks remain in place for burst safety on x64.
 
-The keyboard thread opts out of execution-speed throttling as a latency-sensitive path. The background pointer observer requests EcoQoS. Both requests are best effort: an unsupported OS or policy does not prevent input startup.
+The disabled typing path returns before foreground probing or engine work. Keyina-injected keyboard events return before physical-hotkey observers. Pressed and suppressed keys use inline 256-bit state instead of two managed arrays, modifier state is recomputed only when a modifier changes, and the foreground PID is cached per active HWND while password style is still refreshed on every secure-input snapshot.
 
-The resident resource self-test initializes the real native engine, keyboard hook, Raw Input observer, and thread QoS before measuring. Median values from three uncontaminated Release runs were:
+The keyboard thread opts out of execution-speed throttling as a latency-sensitive path. Raw Input registration changes are posted to the message loop rather than performed inside the global-hook callback.
 
-| Metric | Median |
+The resident resource self-test initializes the real native engine and shared keyboard/Raw Input backend before measuring. A repository-owned gate fails when total private memory exceeds 10 MiB, more than one resident input thread is added, the hook is not running, or real input contaminates the measurement. Three uncontaminated Release runs produced:
+
+| Metric | Range |
 |---|---:|
-| Hook backend startup | 14.99 ms |
-| Idle CPU over 5 seconds | 0 ms measured CPU / 0.000% |
-| Working-set increase | 1,691,648 B |
-| Private-memory increase | 876,544 B |
-| Resident thread increase | 2 |
-| Handle increase | 11 |
+| Hook backend startup | 10.4–10.7 ms |
+| Idle CPU over 5 seconds | 0–0.0195% |
+| Total working set | 26.906–27.035 MiB |
+| Total private memory | 8.383–8.523 MiB |
+| Private-memory increase | about 116–120 KiB |
+| Resident thread increase | 1 |
+| Handle increase | 6 |
 | Physical keyboard events during measurement | 0 |
+| 10 MiB private-memory budget | pass in 3/3 runs |
 
 The Windows process CPU counter has finite resolution, so `0 ms` means no measurable CPU time in the median five-second window rather than mathematically zero execution.
 
@@ -120,13 +125,14 @@ A universal single-pass technical-token classifier was also benchmarked and reje
 Fresh gates after the changes:
 
 - Release solution build: 0 warnings, 0 errors.
-- Host tests, including real desktop hook integration and shared modifier observation: 193/193 passed.
+- Host tests, including real desktop hook integration, shared modifier observation, pointer lifetime, injected-event isolation, disabled fast path, and resource-budget checks: 200/200 passed.
 - Dedicated-hook regression: input remains responsive while the owner UI thread is blocked.
 - Secure-input regression: password state is refreshed even when the focused HWND does not change.
 - Partial-startup regression: a pointer-observer startup failure releases the already-installed keyboard hook.
-- Resident resource self-test: three uncontaminated runs completed; median idle CPU time was not measurable.
-- Native Release tests: 4/4 passed.
-- Native Debug tests: 4/4 passed after rebuilding the final hook, buffer, and Context Guard changes.
+- Pointer regression: pointer reset never calls the keyboard injector and cannot synthesize a click.
+- Resident resource self-test: three uncontaminated runs passed the 10 MiB private-memory and one-thread gate.
+- Native Release tests: 100% passed.
+- Native Debug tests: 100% passed after rebuilding the final hook, buffer, and Context Guard changes.
 - Native endurance: 1,000,000 deterministic mixed events preserve edit, visible-text, rollback, and token-size invariants in both Debug and Release.
 - Managed Release benchmark: every latency and allocation budget passed in all three runs.
 - Native Release benchmark: every allocation budget passed.

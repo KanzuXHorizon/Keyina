@@ -8,6 +8,10 @@ public static class WindowsTypingContextProbe
     private const nint EditStylePassword = 0x20;
     private static readonly uint GuiThreadInfoSize =
         checked((uint)Marshal.SizeOf<GuiThreadInfo>());
+    [ThreadStatic]
+    private static nint cachedActiveWindow;
+    [ThreadStatic]
+    private static int cachedProcessId;
 
     public static VietnameseTypingContext Capture()
     {
@@ -20,8 +24,8 @@ public static class WindowsTypingContextProbe
         var activeWindow = info.ActiveWindow != 0
             ? info.ActiveWindow
             : info.FocusWindow;
-        var threadId = GetWindowThreadProcessId(activeWindow, out var processId);
-        if (threadId == 0)
+        var processId = ResolveProcessId(activeWindow);
+        if (processId == 0)
         {
             return new VietnameseTypingContext(
                 0,
@@ -33,9 +37,30 @@ public static class WindowsTypingContextProbe
         var style = GetWindowLongPtrW(info.FocusWindow, GlobalWindowStyle);
         var styleReadFailed = style == 0 && Marshal.GetLastPInvokeError() != 0;
         return new VietnameseTypingContext(
-            checked((int)processId),
+            processId,
             info.FocusWindow,
             styleReadFailed || (style & EditStylePassword) != 0);
+    }
+
+    private static int ResolveProcessId(nint activeWindow)
+    {
+        if (activeWindow == cachedActiveWindow && cachedProcessId != 0)
+        {
+            return cachedProcessId;
+        }
+
+        var threadId = GetWindowThreadProcessId(activeWindow, out var processId);
+        if (threadId == 0)
+        {
+            cachedActiveWindow = 0;
+            cachedProcessId = 0;
+            return 0;
+        }
+
+        var resolved = checked((int)processId);
+        cachedActiveWindow = activeWindow;
+        cachedProcessId = resolved;
+        return resolved;
     }
 
     [StructLayout(LayoutKind.Sequential)]

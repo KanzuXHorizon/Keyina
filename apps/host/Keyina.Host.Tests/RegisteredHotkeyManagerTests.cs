@@ -472,7 +472,7 @@ internal static class RegisteredHotkeyManagerTests
             return new ActionDisposable(() => Callback = null);
         }
 
-        public IDisposable InstallPointerReset(Action pointerResetCallback) =>
+        public IPointerResetLease InstallPointerReset(Action pointerResetCallback) =>
             new ActionDisposable(static () => { });
 
         public VietnameseTypingContext GetTypingContext() =>
@@ -491,9 +491,13 @@ internal static class RegisteredHotkeyManagerTests
         }
     }
 
-    private sealed class ActionDisposable(Action action) : IDisposable
+    private sealed class ActionDisposable(Action action) : IPointerResetLease
     {
         private Action? action = action;
+
+        public void SetActive(bool active)
+        {
+        }
 
         public void Dispose() => Interlocked.Exchange(ref action, null)?.Invoke();
     }
