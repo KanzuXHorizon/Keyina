@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Keyina.Host.Core.Feedback;
@@ -12,6 +13,9 @@ namespace Keyina.Host.UI;
 
 public sealed class SettingsForm : Form
 {
+    private const string DeepLAuthenticationHelpUrl =
+        "https://developers.deepl.com/docs/getting-started/auth";
+
     private static readonly Dictionary<string, (string Title, string Subtitle)> SectionCopy =
         new(StringComparer.Ordinal)
         {
@@ -77,7 +81,7 @@ public sealed class SettingsForm : Form
         Text = "Keyina";
         AccessibleName = "Cài đặt Keyina";
         AccessibleDescription =
-            "Cài đặt bộ gõ tiếng Việt, nhập bằng giọng nói, phím tắt, gõ tắt và chẩn đoán.";
+            "Cài đặt bộ gõ tiếng Việt, nhập bằng giọng nói, dịch nhanh, phím tắt, gõ tắt và chẩn đoán.";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(900, 620);
@@ -151,6 +155,9 @@ public sealed class SettingsForm : Form
             "Dán khóa DeepL API Free",
             "Khóa API DeepL");
         deepLApiKey.UseSystemPasswordChar = true;
+        deepLApiKey.MaxLength = 256;
+        deepLApiKey.AccessibleDescription =
+            "Khóa được che khi nhập và chỉ lưu trong Windows Credential Manager.";
         saveDeepLKey = CreateButton(
             "saveDeepLKey",
             "Lưu khóa",
@@ -335,6 +342,17 @@ public sealed class SettingsForm : Form
         removeSpeechKey.Click += (_, _) => actions.DeleteSpeechApiKey();
         deepLApiKey.TextChanged += (_, _) => saveDeepLKey.Enabled =
             !string.IsNullOrWhiteSpace(deepLApiKey.Text);
+        deepLApiKey.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.KeyCode != Keys.Enter || !saveDeepLKey.Enabled)
+            {
+                return;
+            }
+
+            SaveDeepLCredential();
+            eventArgs.SuppressKeyPress = true;
+            eventArgs.Handled = true;
+        };
         saveDeepLKey.Click += (_, _) => SaveDeepLCredential();
         removeDeepLKey.Click += (_, _) => actions.DeleteDeepLApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
@@ -415,16 +433,20 @@ public sealed class SettingsForm : Form
                 snapshot.TranslationCredentialConfigured ? FluentTone.Success : FluentTone.Warning);
             SetBadge(
                 translationHotkeyStatus,
-                !snapshot.TranslationEnabled
-                    ? "Chưa bật"
-                    : snapshot.TranslationHotkeyRegistered
-                        ? "Đã đăng ký"
-                        : "Đang xung đột",
-                !snapshot.TranslationEnabled
-                    ? FluentTone.Neutral
-                    : snapshot.TranslationHotkeyRegistered
-                        ? FluentTone.Success
-                        : FluentTone.Warning);
+                !snapshot.TranslationCredentialConfigured
+                    ? "Cần khóa API"
+                    : !snapshot.TranslationEnabled
+                        ? "Chưa bật"
+                        : snapshot.TranslationHotkeyRegistered
+                            ? "Đã đăng ký"
+                            : "Đang xung đột",
+                !snapshot.TranslationCredentialConfigured
+                    ? FluentTone.Warning
+                    : !snapshot.TranslationEnabled
+                        ? FluentTone.Neutral
+                        : snapshot.TranslationHotkeyRegistered
+                            ? FluentTone.Success
+                            : FluentTone.Warning);
             SetBadge(
                 ipcStatus,
                 LocalizeRuntimeStatus(snapshot.IpcStatus),
@@ -443,6 +465,9 @@ public sealed class SettingsForm : Form
                 : $"{snapshot.CustomSnippetCount} gõ tắt tùy chỉnh";
             removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
             removeDeepLKey.Enabled = snapshot.TranslationCredentialConfigured;
+            saveDeepLKey.Text = snapshot.TranslationCredentialConfigured
+                ? "Cập nhật khóa"
+                : "Lưu khóa";
             setupTsfButton.Text = snapshot.Readiness switch
             {
                 KeyinaReadiness.Ready => "Mở kiểm tra gõ",
@@ -1043,7 +1068,7 @@ public sealed class SettingsForm : Form
 
         var credentialHint = CreateLabel(
             "translationCredentialHint",
-            "Miễn phí tối đa 500.000 ký tự mỗi tháng; khóa chỉ lưu trong Windows Credential Manager.",
+            "Khóa API Free thường kết thúc bằng :fx. Keyina tự chọn endpoint phù hợp và chỉ lưu khóa trong Windows Credential Manager.",
             LabelRole.Secondary);
         credentialHint.Dock = DockStyle.Fill;
         credentialLayout.Controls.Add(credentialHint, 0, 1);
@@ -1075,9 +1100,18 @@ public sealed class SettingsForm : Form
             Padding = new Padding(0, 4, 0, 4),
         };
         saveDeepLKey.Margin = new Padding(0, 0, 8, 0);
-        removeDeepLKey.Margin = Padding.Empty;
+        removeDeepLKey.Margin = new Padding(0, 0, 8, 0);
+        var openDeepLApiHelp = CreateButton(
+            "openDeepLApiHelp",
+            "Cách lấy khóa",
+            FluentButtonKind.Subtle,
+            128);
+        openDeepLApiHelp.AccessibleDescription =
+            "Mở tài liệu chính thức của DeepL về cách tìm khóa API.";
+        openDeepLApiHelp.Click += (_, _) => OpenDeepLAuthenticationHelp();
         actionsPanel.Controls.Add(saveDeepLKey);
         actionsPanel.Controls.Add(removeDeepLKey);
+        actionsPanel.Controls.Add(openDeepLApiHelp);
         credentialLayout.Controls.Add(actionsPanel, 0, 3);
         credentialLayout.SetColumnSpan(actionsPanel, 3);
 
@@ -2183,13 +2217,32 @@ public sealed class SettingsForm : Form
 
     private void SaveDeepLCredential()
     {
-        var secret = deepLApiKey.Text;
-        if (string.IsNullOrWhiteSpace(secret))
+        var secret = deepLApiKey.Text.Trim();
+        if (secret.Length == 0)
         {
             return;
         }
         actions.SaveDeepLApiKey(secret);
         deepLApiKey.Clear();
+    }
+
+    private void OpenDeepLAuthenticationHelp()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = DeepLAuthenticationHelpUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception)
+        {
+            SetBadge(
+                translationCredentialStatus,
+                "Không mở được trợ giúp",
+                FluentTone.Error);
+        }
     }
 
     private void CopyDiagnostics()

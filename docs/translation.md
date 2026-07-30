@@ -17,11 +17,12 @@ Translation is disabled by default. Keyina does not ship a shared provider key; 
 
 1. Create a DeepL API Free account and obtain an authentication key.
 2. Open **Cài đặt Keyina → Dịch nhanh**.
-3. Paste the key into **Khóa DeepL API Free** and select **Lưu khóa**.
-4. Choose the target language.
-5. Enable **Bật dịch nhanh văn bản đang chọn**.
+3. Use **Cách lấy khóa** to open DeepL's official authentication guide when needed.
+4. Paste the key into **Khóa DeepL API Free** and select **Lưu khóa**. Leading and trailing whitespace from clipboard paste is removed before storage.
+5. Choose the target language.
+6. Enable **Bật dịch nhanh văn bản đang chọn**.
 
-The key is stored under `Keyina/DeepL/ApiKey` in Windows Credential Manager. It is never written to `settings.json`.
+The key is masked while entered and stored under `Keyina/DeepL/ApiKey` in Windows Credential Manager. It is never written to `settings.json`. Removing the key also disables translation and releases its optional shortcut.
 
 ## Use
 
@@ -37,7 +38,7 @@ Keyina refuses to insert the result if either the foreground window or the focus
 
 Translation progress uses Keyina's existing no-focus feedback system. Windowed applications receive a compact overlay and sound according to the selected feedback mode; fullscreen-like applications suppress the overlay automatically and use audio only. Feedback contains only status and target-language names, never selected or translated content.
 
-The translation shortcut is registered only while translation is enabled, so an unused feature does not reserve `Ctrl + Alt + T`. If another application already owns that chord, Keyina keeps the Vietnamese input hook and its other shortcuts running, shows the conflict in settings, and leaves translation available from the tray menu.
+The translation shortcut is registered only while translation is enabled and a DeepL credential exists, so an incomplete or unused feature does not reserve `Ctrl + Alt + T`. The tray translation command also remains disabled until both requirements are met. If another application already owns that chord, Keyina keeps the Vietnamese input hook and its other shortcuts running, shows the conflict in settings, and leaves translation available from the tray menu.
 
 ## Safety limits
 

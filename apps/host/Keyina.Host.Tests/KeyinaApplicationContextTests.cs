@@ -201,6 +201,85 @@ internal static class KeyinaApplicationContextTests
         }
     }
 
+    [KeyinaTest("translation tray command stays unavailable until a DeepL credential exists")]
+    private static void TranslationTrayRequiresCredential()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { TranslationEnabled = true },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault(null),
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        var menuItemField = typeof(KeyinaApplicationContext).GetField(
+            "translateSelectionMenuItem",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Translation tray item field was not found.");
+        var menuItem = (ToolStripMenuItem?)menuItemField.GetValue(context)
+            ?? throw new InvalidOperationException("Translation tray item was not created.");
+
+        AssertEx.False(menuItem.Enabled,
+            "Translation tray command should not run without a configured credential.");
+        AssertEx.Equal("Cần khóa DeepL", menuItem.ShortcutKeyDisplayString);
+        AssertEx.True(context.CurrentSettingsSnapshot.TranslationEnabled,
+            "The user's translation preference should remain visible while setup is incomplete.");
+        AssertEx.False(context.CurrentSettingsSnapshot.TranslationCredentialConfigured,
+            "Missing credentials were incorrectly reported as configured.");
+    }
+
+    [KeyinaTest("removing the DeepL credential disables translation and persists the safe state")]
+    private static void RemovingTranslationCredentialDisablesFeature()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { TranslationEnabled = true },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var credentialVault = new FakeCredentialVault("test-key:fx");
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            credentialVault,
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        context.OpenSettings();
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        var form = (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Settings form was not created.");
+        var remove = (Button)form.Controls.Find("removeDeepLKey", true).Single();
+
+        InvokeClick(remove);
+
+        AssertEx.Equal(null, credentialVault.Read(CredentialTargets.DeepLApiKey));
+        AssertEx.False(context.CurrentSettingsSnapshot.TranslationEnabled,
+            "Translation remained enabled after its credential was removed.");
+        AssertEx.False(context.CurrentSettingsSnapshot.TranslationCredentialConfigured,
+            "Removed credential remained visible as configured.");
+        AssertEx.True(
+            SpinWait.SpinUntil(
+                () => TranslationSettingSaveCompleted(configurationPath, expectedEnabled: false),
+                TimeSpan.FromSeconds(2)),
+            "Disabled translation state was not persisted after credential removal.");
+        context.CloseSettings();
+    }
+
     [KeyinaTest("resident context translates the selected text with configured DeepL credentials")]
     private static void TranslationCommandUsesConfiguredProvider()
     {
@@ -262,6 +341,30 @@ internal static class KeyinaApplicationContextTests
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Button click handler could not be invoked.");
         _ = onClick.Invoke(button, [EventArgs.Empty]);
+    }
+
+    private static bool TranslationSettingSaveCompleted(string path, bool expectedEnabled)
+    {
+        if (!File.Exists(path) || File.Exists(path + ".tmp"))
+        {
+            return false;
+        }
+
+        try
+        {
+            var persisted = new AtomicConfigurationStore(path)
+                .LoadAsync(CancellationToken.None)
+                .GetAwaiter().GetResult();
+            return persisted.TranslationEnabled == expectedEnabled;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool ConfigurationSaveCompleted(
@@ -332,15 +435,20 @@ internal static class KeyinaApplicationContextTests
         public void Play(FeedbackSoundCue cue) => Cues.Add(cue);
     }
 
-    private sealed class FakeCredentialVault(string? secret) : ICredentialVault
+    private sealed class FakeCredentialVault(string? initialSecret) : ICredentialVault
     {
-        public void Write(string target, string value)
-        {
-        }
+        private string? secret = initialSecret;
+
+        public void Write(string target, string value) => secret = value;
 
         public string? Read(string target) => secret;
 
-        public bool Delete(string target) => true;
+        public bool Delete(string target)
+        {
+            var existed = secret is not null;
+            secret = null;
+            return existed;
+        }
     }
 
     private sealed class FakeTranslationProvider : ITranslationProvider

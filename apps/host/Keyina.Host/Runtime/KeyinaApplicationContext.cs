@@ -416,6 +416,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 {
                     hotkeyManager.Register(CreateRequiredRegisteredBindings());
                     translationHotkeyReady = configuration.TranslationEnabled &&
+                        IsDeepLCredentialConfigured() &&
                         hotkeyManager.TryRegister(
                             CreateTranslationRegisteredBinding(),
                             out _);
@@ -581,9 +582,23 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private void SetTranslationEnabled(bool enabled)
     {
         configuration = configuration with { TranslationEnabled = enabled };
-        UpdateTranslationHotkeyRegistration(enabled);
+        UpdateTranslationHotkeyRegistration(
+            enabled && IsDeepLCredentialConfigured());
         _ = SaveConfigurationSafelyAsync();
         RefreshVisualState();
+    }
+
+    private bool IsDeepLCredentialConfigured()
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(
+                credentialVault.Read(CredentialTargets.DeepLApiKey));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private void UpdateTranslationHotkeyRegistration(bool enabled)
@@ -958,7 +973,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             try
             {
-                credentialVault.Write(CredentialTargets.DeepLApiKey, secret);
+                credentialVault.Write(
+                    CredentialTargets.DeepLApiKey,
+                    secret.Trim());
+                UpdateTranslationHotkeyRegistration(
+                    configuration.TranslationEnabled);
                 RecoverHost();
             }
             catch (Exception)
@@ -972,6 +991,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             try
             {
                 _ = credentialVault.Delete(CredentialTargets.DeepLApiKey);
+                configuration = configuration with { TranslationEnabled = false };
+                UpdateTranslationHotkeyRegistration(enabled: false);
+                _ = SaveConfigurationSafelyAsync();
+                RecoverHost();
             }
             catch (Exception)
             {
@@ -1032,15 +1055,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             credentialConfigured = false;
         }
-        try
-        {
-            translationCredentialConfigured = !string.IsNullOrWhiteSpace(
-                credentialVault.Read(CredentialTargets.DeepLApiKey));
-        }
-        catch (Exception)
-        {
-            translationCredentialConfigured = false;
-        }
+        translationCredentialConfigured = IsDeepLCredentialConfigured();
 
         var ipcConnected = pipeReady && pipeServer?.ActiveTarget is not null;
         var health = new KeyinaHealthSnapshot(
@@ -1148,15 +1163,19 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             ? "Dừng nhập bằng giọng nói"
             : "Bắt đầu nhập bằng giọng nói";
         toggleDictationMenuItem.Enabled = configuration.SpeechEnabled;
-        translateSelectionMenuItem.Enabled = configuration.TranslationEnabled;
+        var translationAvailable = configuration.TranslationEnabled &&
+            settingsSnapshot.TranslationCredentialConfigured;
+        translateSelectionMenuItem.Enabled = translationAvailable;
         translateSelectionMenuItem.Text =
             $"Dịch sang {TranslationLanguageCatalog.GetDisplayName(configuration.TranslationTargetLanguage)}";
         translateSelectionMenuItem.ShortcutKeyDisplayString =
             !configuration.TranslationEnabled
                 ? string.Empty
-                : translationHotkeyReady
-                    ? "Ctrl+Alt+T"
-                    : "Phím tắt xung đột";
+                : !settingsSnapshot.TranslationCredentialConfigured
+                    ? "Cần khóa DeepL"
+                    : translationHotkeyReady
+                        ? "Ctrl+Alt+T"
+                        : "Phím tắt xung đột";
         startupMenuItem.Checked = startupRegistration.IsEnabled;
         if (notifyIcon.Icon is { } trayIcon)
         {

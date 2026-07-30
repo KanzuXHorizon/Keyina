@@ -16,6 +16,9 @@ internal static class SettingsFormTests
 
         AssertEx.Equal("Keyina", form.Text);
         AssertEx.Equal("Cài đặt Keyina", form.AccessibleName);
+        AssertEx.True(
+            form.AccessibleDescription?.Contains("dịch", StringComparison.OrdinalIgnoreCase) == true,
+            "Settings accessibility description did not include translation.");
         AssertEx.Equal(AutoScaleMode.Dpi, form.AutoScaleMode);
         AssertEx.True(form.MinimumSize.Width >= 760, "Settings minimum width is too small.");
         AssertEx.True(form.MinimumSize.Height >= 560, "Settings minimum height is too small.");
@@ -55,6 +58,9 @@ internal static class SettingsFormTests
         var deepLApiKey = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
         AssertEx.True(deepLApiKey.UseSystemPasswordChar, "DeepL API key was not masked.");
         AssertEx.Equal(string.Empty, deepLApiKey.Text);
+        AssertEx.True(deepLApiKey.MaxLength is > 0 and <= 256,
+            "DeepL API key input should have a bounded length.");
+        AssertEx.Equal(1, form.Controls.Find("openDeepLApiHelp", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationToggle", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationTargetLanguage", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationHotkeyStatus", true).Length);
@@ -70,6 +76,9 @@ internal static class SettingsFormTests
 
         var saveButton = (Button)form.Controls.Find("saveSpeechKey", true).Single();
         AssertEx.True(!saveButton.Enabled, "Empty API key should not be saveable.");
+        AssertEx.Equal(
+            "Cập nhật khóa",
+            ((Button)form.Controls.Find("saveDeepLKey", true).Single()).Text);
 
         AssertEx.Equal(0, FindDescendants<DataGridView>(form).Count,
             "Production snippets UI should not expose the legacy DataGridView chrome.");
@@ -77,6 +86,35 @@ internal static class SettingsFormTests
             FindDescendants<CheckBox>(form).All(control =>
                 control.GetType().Name.Contains("FluentToggle", StringComparison.Ordinal)),
             "Settings toggles should use the Fluent owner-drawn control.");
+    }
+
+    [KeyinaTest("translation credential input trims pasted whitespace before secure storage")]
+    private static void TranslationCredentialInputNormalizesPastedSecret()
+    {
+        var savedSecrets = new List<string>();
+        var actions = SettingsActions.NoOp with
+        {
+            SaveDeepLApiKey = savedSecrets.Add,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+        var input = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
+        var save = (Button)form.Controls.Find("saveDeepLKey", true).Single();
+
+        input.Text = "  test-key:fx\r\n";
+        InvokeClick(save);
+
+        AssertEx.Equal(1, savedSecrets.Count);
+        AssertEx.Equal("test-key:fx", savedSecrets[0]);
+        AssertEx.Equal(string.Empty, input.Text);
+        AssertEx.True(!save.Enabled, "Save should disable after the secret is cleared.");
+
+        input.Text = "keyboard-key:fx";
+        var keyEvent = InvokeKeyDown(input, Keys.Enter);
+        AssertEx.Equal(2, savedSecrets.Count);
+        AssertEx.Equal("keyboard-key:fx", savedSecrets[1]);
+        AssertEx.True(keyEvent.Handled, "Enter should be handled by the credential input.");
+        AssertEx.True(keyEvent.SuppressKeyPress,
+            "Enter should not emit a system beep after saving the credential.");
     }
 
     [KeyinaTest("hotkeys settings configure and preview non-intrusive feedback")]
@@ -215,7 +253,7 @@ internal static class SettingsFormTests
             "Chưa cấu hình",
             ((Label)form.Controls.Find("speechCredentialStatus", true).Single()).Text);
         AssertEx.Equal(
-            "Đang xung đột",
+            "Cần khóa API",
             ((Label)form.Controls.Find("translationHotkeyStatus", true).Single()).Text);
     }
 
@@ -278,6 +316,17 @@ internal static class SettingsFormTests
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Button click handler could not be invoked.");
         _ = onClick.Invoke(button, [EventArgs.Empty]);
+    }
+
+    private static KeyEventArgs InvokeKeyDown(Control control, Keys key)
+    {
+        var onKeyDown = control.GetType().GetMethod(
+            "OnKeyDown",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Control key handler could not be invoked.");
+        var eventArgs = new KeyEventArgs(key);
+        _ = onKeyDown.Invoke(control, [eventArgs]);
+        return eventArgs;
     }
 
     private static List<TControl> FindDescendants<TControl>(Control root)
