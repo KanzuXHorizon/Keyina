@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
@@ -26,27 +27,48 @@ public sealed class UnicodeInputInjector : IUnicodeInputInjector
             return;
         }
 
-        var inputs = new List<KeyboardInputEvent>(
-            checked(edit.BackspaceCount * 2 + edit.InsertText.Length * 2));
-        for (var index = 0; index < edit.BackspaceCount; index++)
+        var inputCount = checked(
+            edit.BackspaceCount * 2 + edit.InsertText.Length * 2);
+        if (inputCount == 0)
         {
-            inputs.Add(KeyboardInputEvent.VirtualKeyStroke(0x08, keyUp: false));
-            inputs.Add(KeyboardInputEvent.VirtualKeyStroke(0x08, keyUp: true));
+            return;
         }
-        foreach (var codeUnit in edit.InsertText)
+
+        KeyboardInputEvent[]? rented = null;
+        Span<KeyboardInputEvent> inputs = inputCount <= 64
+            ? stackalloc KeyboardInputEvent[inputCount]
+            : (rented = ArrayPool<KeyboardInputEvent>.Shared.Rent(inputCount));
+        try
         {
-            inputs.Add(KeyboardInputEvent.Unicode(codeUnit, keyUp: false));
-            inputs.Add(KeyboardInputEvent.Unicode(codeUnit, keyUp: true));
+            var writeIndex = 0;
+            for (var index = 0; index < edit.BackspaceCount; index++)
+            {
+                inputs[writeIndex++] =
+                    KeyboardInputEvent.VirtualKeyStroke(0x08, keyUp: false);
+                inputs[writeIndex++] =
+                    KeyboardInputEvent.VirtualKeyStroke(0x08, keyUp: true);
+            }
+            foreach (var codeUnit in edit.InsertText)
+            {
+                inputs[writeIndex++] =
+                    KeyboardInputEvent.Unicode(codeUnit, keyUp: false);
+                inputs[writeIndex++] =
+                    KeyboardInputEvent.Unicode(codeUnit, keyUp: true);
+            }
+            sender.Send(inputs[..writeIndex]);
         }
-        if (inputs.Count != 0)
+        finally
         {
-            sender.Send(inputs);
+            if (rented is not null)
+            {
+                ArrayPool<KeyboardInputEvent>.Shared.Return(rented);
+            }
         }
     }
 
     public interface IInputSender
     {
-        void Send(IReadOnlyList<KeyboardInputEvent> inputs);
+        void Send(ReadOnlySpan<KeyboardInputEvent> inputs);
     }
 
     public readonly record struct KeyboardInputEvent(
@@ -73,38 +95,59 @@ public sealed class UnicodeInputInjector : IUnicodeInputInjector
     {
         private const uint InputKeyboard = 1;
 
-        public void Send(IReadOnlyList<KeyboardInputEvent> inputs)
+        public unsafe void Send(ReadOnlySpan<KeyboardInputEvent> inputs)
         {
-            ArgumentNullException.ThrowIfNull(inputs);
-            var native = new Input[inputs.Count];
-            for (var index = 0; index < inputs.Count; index++)
+            if (inputs.IsEmpty)
             {
-                var item = inputs[index];
-                native[index] = new Input
-                {
-                    Type = InputKeyboard,
-                    Union = new InputUnion
-                    {
-                        Keyboard = new KeybdInput
-                        {
-                            VirtualKey = item.VirtualKey,
-                            ScanCode = item.ScanCode,
-                            Flags = item.Flags,
-                            ExtraInfo = item.ExtraInfo,
-                        },
-                    },
-                };
+                return;
             }
 
-            var sent = SendInput(
-                checked((uint)native.Length),
-                native,
-                Marshal.SizeOf<Input>());
-            if (sent != native.Length)
+            Input[]? rented = null;
+            Span<Input> native = inputs.Length <= 64
+                ? stackalloc Input[inputs.Length]
+                : (rented = ArrayPool<Input>.Shared.Rent(inputs.Length));
+            try
             {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "Windows did not inject the complete Keyina edit.");
+                for (var index = 0; index < inputs.Length; index++)
+                {
+                    var item = inputs[index];
+                    native[index] = new Input
+                    {
+                        Type = InputKeyboard,
+                        Union = new InputUnion
+                        {
+                            Keyboard = new KeybdInput
+                            {
+                                VirtualKey = item.VirtualKey,
+                                ScanCode = item.ScanCode,
+                                Flags = item.Flags,
+                                ExtraInfo = item.ExtraInfo,
+                            },
+                        },
+                    };
+                }
+
+                uint sent;
+                fixed (Input* pointer = native)
+                {
+                    sent = SendInput(
+                        checked((uint)inputs.Length),
+                        pointer,
+                        Marshal.SizeOf<Input>());
+                }
+                if (sent != inputs.Length)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Windows did not inject the complete Keyina edit.");
+                }
+            }
+            finally
+            {
+                if (rented is not null)
+                {
+                    ArrayPool<Input>.Shared.Return(rented);
+                }
             }
         }
 
@@ -133,9 +176,9 @@ public sealed class UnicodeInputInjector : IUnicodeInputInjector
         }
 
         [DllImport("user32.dll", SetLastError = true)]
-        private static extern uint SendInput(
+        private static extern unsafe uint SendInput(
             uint inputCount,
-            [In] Input[] inputs,
+            Input* inputs,
             int inputSize);
     }
 }

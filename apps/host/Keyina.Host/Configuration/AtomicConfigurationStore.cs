@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Keyina.Host.Core.Configuration;
+using Keyina.Host.Core.Feedback;
 
 namespace Keyina.Host.Configuration;
 
@@ -80,6 +81,10 @@ public sealed class AtomicConfigurationStore
                     cancellationToken)
                 .ConfigureAwait(false)
                 ?? throw new ConfigurationException("Configuration JSON was empty.");
+            configuration = configuration with
+            {
+                Feedback = configuration.Feedback ?? FeedbackPreferences.Default,
+            };
             _ = configuration.ValidateAndCreateSnippets();
             return configuration;
         }

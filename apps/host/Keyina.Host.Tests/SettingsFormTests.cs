@@ -1,4 +1,6 @@
+using System.Reflection;
 using Keyina.Host.UI;
+using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Tests;
 
@@ -12,12 +14,16 @@ internal static class SettingsFormTests
             SettingsActions.NoOp);
 
         AssertEx.Equal("Keyina", form.Text);
-        AssertEx.Equal("Keyina settings", form.AccessibleName);
+        AssertEx.Equal("Cài đặt Keyina", form.AccessibleName);
         AssertEx.Equal(AutoScaleMode.Dpi, form.AutoScaleMode);
         AssertEx.True(form.MinimumSize.Width >= 760, "Settings minimum width is too small.");
         AssertEx.True(form.MinimumSize.Height >= 560, "Settings minimum height is too small.");
         AssertEx.True(form.ShowInTaskbar, "Settings window should appear in the taskbar when opened.");
         AssertEx.Equal(FormStartPosition.CenterScreen, form.StartPosition);
+        AssertEx.True(form.UsesBufferedRendering,
+            "Settings shell should use double buffering for smooth Fluent rendering.");
+        AssertEx.Equal(1, form.Controls.Find("settingsShell", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("systemThemeStatus", true).Length);
 
         foreach (var name in new[]
                  {
@@ -51,6 +57,83 @@ internal static class SettingsFormTests
 
         var saveButton = (Button)form.Controls.Find("saveSpeechKey", true).Single();
         AssertEx.True(!saveButton.Enabled, "Empty API key should not be saveable.");
+
+        AssertEx.Equal(0, FindDescendants<DataGridView>(form).Count,
+            "Production snippets UI should not expose the legacy DataGridView chrome.");
+        AssertEx.True(
+            FindDescendants<CheckBox>(form).All(control =>
+                control.GetType().Name.Contains("FluentToggle", StringComparison.Ordinal)),
+            "Settings toggles should use the Fluent owner-drawn control.");
+    }
+
+    [KeyinaTest("typing test reports pass and fail through the runtime action")]
+    private static void TypingTestReportsRuntimeEvidence()
+    {
+        var results = new List<bool>();
+        var actions = SettingsActions.NoOp with
+        {
+            RecordTypingTest = results.Add,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+        var input = (TextBox)form.Controls.Find("typingTestInput", true).Single();
+
+        input.Text = "tiếng Việt";
+        input.Text = "tieengs Vieetj";
+
+        AssertEx.Equal(2, results.Count);
+        AssertEx.True(results[0], "Successful focused typing was not recorded.");
+        AssertEx.False(results[1], "Failed focused typing was not recorded.");
+    }
+
+    [KeyinaTest("diagnostics exposes opt-in per-stage typing latency without content capture")]
+    private static void DiagnosticsExposesTypingLatency()
+    {
+        var enabledValues = new List<bool>();
+        var clearCount = 0;
+        IReadOnlyList<TypingLatencyStageSnapshot> snapshot =
+        [
+            new TypingLatencyStageSnapshot(
+                TypingLatencyStage.EngineProcess,
+                SampleCount: 24,
+                MedianNanoseconds: 220,
+                P95Nanoseconds: 410,
+                P99Nanoseconds: 620,
+                MaximumNanoseconds: 910,
+                MeanNanoseconds: 280.5),
+        ];
+        var actions = SettingsActions.NoOp with
+        {
+            SetTypingLatencyEnabled = enabledValues.Add,
+            GetTypingLatencySnapshot = () => snapshot,
+            ClearTypingLatency = () => clearCount++,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+
+        var diagnostics = (Button)form.Controls.Find("navDiagnostics", true).Single();
+        var toggle = (CheckBox)form.Controls.Find("typingLatencyToggle", true).Single();
+        var refresh = (Button)form.Controls.Find("refreshTypingLatency", true).Single();
+        var clear = (Button)form.Controls.Find("clearTypingLatency", true).Single();
+        var table = (ListView)form.Controls.Find("typingLatencyTable", true).Single();
+        var privacy = (Label)form.Controls.Find("typingLatencyPrivacy", true).Single();
+
+        InvokeClick(diagnostics);
+        toggle.Checked = false;
+        enabledValues.Clear();
+        toggle.Checked = true;
+        InvokeClick(refresh);
+
+        AssertEx.Equal(1, enabledValues.Count);
+        AssertEx.True(enabledValues[0], "Latency profiling toggle did not call the runtime action.");
+        AssertEx.Equal(1, table.Items.Count);
+        AssertEx.Equal("Engine", table.Items[0].Text);
+        AssertEx.True(
+            privacy.Text.Contains("không ghi nội dung", StringComparison.OrdinalIgnoreCase),
+            "Latency privacy copy must explicitly reject content capture.");
+
+        InvokeClick(clear);
+        AssertEx.Equal(1, clearCount);
+        AssertEx.Equal(0, table.Items.Count);
+
     }
 
     [KeyinaTest("settings form applies runtime snapshots without exposing secret text")]
@@ -75,10 +158,132 @@ internal static class SettingsFormTests
             !((CheckBox)form.Controls.Find("startupToggle", true).Single()).Checked,
             "Startup toggle did not update.");
         AssertEx.Equal(
-            "Listening",
+            "Đang nghe",
             ((Label)form.Controls.Find("statusMessage", true).Single()).Text);
         AssertEx.Equal(
-            "Not configured",
+            "Chưa cấu hình",
             ((Label)form.Controls.Find("speechCredentialStatus", true).Single()).Text);
+    }
+
+    [KeyinaTest("settings form uses localized production copy")]
+    private static void ProductionCopyIsVietnameseFirst()
+    {
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample,
+            SettingsActions.NoOp);
+        var visibleText = string.Join(
+            "\n",
+            FindDescendants<Control>(form)
+                .Select(control => control.Text)
+                .Where(text => !string.IsNullOrWhiteSpace(text)));
+
+        foreach (var forbidden in new[]
+                 {
+                     "Optional Vietnamese realtime dictation",
+                     "Speechmatics credential",
+                     "Run offline checks",
+                     "Open config folder",
+                     "Toggle Vietnamese input",
+                     "Registration status",
+                 })
+        {
+            AssertEx.True(!visibleText.Contains(forbidden, StringComparison.Ordinal),
+                $"Mixed-language production copy remained: {forbidden}.");
+        }
+    }
+
+    [KeyinaTest("settings screenshot renderer creates a deterministic review image")]
+    private static void ScreenshotRendererCreatesReviewImage()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"Keyina.Screenshot.Tests.{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings-overview.png");
+        try
+        {
+            SettingsScreenshotRenderer.Render(path, SettingsSnapshot.Sample);
+
+            AssertEx.True(File.Exists(path), "Settings screenshot was not created.");
+            using var image = Image.FromFile(path);
+            AssertEx.Equal(980, image.Width);
+            AssertEx.Equal(690, image.Height);
+            AssertEx.True(new FileInfo(path).Length > 10_000,
+                "Settings screenshot was unexpectedly small or blank.");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void InvokeClick(Button button)
+    {
+        var onClick = button.GetType().GetMethod(
+            "OnClick",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Button click handler could not be invoked.");
+        _ = onClick.Invoke(button, [EventArgs.Empty]);
+    }
+
+    private static List<TControl> FindDescendants<TControl>(Control root)
+        where TControl : Control
+    {
+        var results = new List<TControl>();
+        foreach (Control child in root.Controls)
+        {
+            if (child is TControl typed)
+            {
+                results.Add(typed);
+            }
+            results.AddRange(FindDescendants<TControl>(child));
+        }
+        return results;
+    }
+
+    [KeyinaTest("settings screenshot gallery covers every navigation section")]
+    private static void ScreenshotGalleryCoversEverySection()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"Keyina.Screenshot.Gallery.Tests.{Guid.NewGuid():N}");
+        try
+        {
+            var paths = SettingsScreenshotRenderer.RenderGallery(
+                directory,
+                SettingsSnapshot.Sample);
+
+            var expectedNames = new[]
+            {
+                "overview.png",
+                "typing.png",
+                "speech.png",
+                "hotkeys.png",
+                "snippets.png",
+                "diagnostics.png",
+            };
+            AssertEx.Equal(expectedNames.Length, paths.Count);
+            AssertEx.True(
+                expectedNames.SequenceEqual(
+                    paths.Select(Path.GetFileName),
+                    StringComparer.Ordinal),
+                "Screenshot gallery names or ordering changed.");
+            foreach (var path in paths)
+            {
+                AssertEx.True(File.Exists(path), $"Missing gallery screenshot: {path}.");
+                using var image = Image.FromFile(path);
+                AssertEx.Equal(980, image.Width);
+                AssertEx.Equal(690, image.Height);
+                AssertEx.True(new FileInfo(path).Length > 10_000,
+                    $"Gallery screenshot was unexpectedly small: {path}.");
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 }

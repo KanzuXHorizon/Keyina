@@ -217,7 +217,7 @@ HRESULT RegisterTsf() {
         kTextServiceClsid, kVietnameseLanguage, kVietnameseProfileGuid,
         kDescription, static_cast<ULONG>(std::size(kDescription) - 1),
         module_path.c_str(), static_cast<ULONG>(module_path.size()), 0, nullptr,
-        0, FALSE, 0);
+        0, TRUE, 0);
   }
   profiles->Release();
   if (FAILED(result)) {

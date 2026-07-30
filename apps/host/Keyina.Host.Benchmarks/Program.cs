@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Keyina.Host.Core.Ipc;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Windows.Audio;
+using Keyina.Host.Windows.Typing;
 using Keyina.Speechmatics;
 
 namespace Keyina.Host.Benchmarks;
@@ -35,8 +37,18 @@ internal static class Program
             FocusGeneration: 3,
             Payload: "xin chào");
         var audioSource = CreateAudioSource();
+        using var typingEngine = new NativeEngineClient();
+        var inputSender = new CountingInputSender();
+        var inputInjector = new UnicodeInputInjector(inputSender);
+        var transformEdit = new HookEdit(1, "á", ConsumePhysicalKey: true);
+        var hookNativeApi = new BenchmarkHookNativeApi();
+        using var benchmarkHook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            inputInjector,
+            hookNativeApi);
+        benchmarkHook.Start(enabledInitially: true);
 
-        var cases = new[]
+        var cases = new List<BenchmarkCase>
         {
             Measure(
                 "speech_protocol_parse_final",
@@ -80,6 +92,95 @@ internal static class Program
                 budgetAllocatedBytesPerOperation: 128,
                 operation: () => IpcFrameCodec.Encode(envelope).Length),
         };
+
+        TypingLatencyProfiler.Clear();
+        TypingLatencyProfiler.SetEnabled(false);
+        cases.Add(Measure(
+            "typing_profiler_disabled_start",
+            iterations: 200_000,
+            budgetP99Nanoseconds: 500,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () => checked((int)TypingLatencyProfiler.Start())));
+
+        TypingLatencyProfiler.Clear();
+        TypingLatencyProfiler.SetEnabled(true);
+        cases.Add(Measure(
+            "typing_profiler_enabled_record",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 2_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                var startedAt = TypingLatencyProfiler.Start();
+                TypingLatencyProfiler.Record(
+                    TypingLatencyStage.EngineProcess,
+                    startedAt);
+                return 1;
+            }));
+        TypingLatencyProfiler.SetEnabled(false);
+        TypingLatencyProfiler.Clear();
+
+        cases.Add(Measure(
+            "typing_native_engine_literal",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 20_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                typingEngine.Reset();
+                var edit = typingEngine.Process(
+                    NativeEngineKeyKind.Character,
+                    new Rune('b'));
+                return edit.InsertText.Length + edit.BackspaceCount;
+            }));
+        cases.Add(Measure(
+            "typing_native_engine_transform",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 30_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                typingEngine.Reset();
+                _ = typingEngine.Process(
+                    NativeEngineKeyKind.Character,
+                    new Rune('a'));
+                var edit = typingEngine.Process(
+                    NativeEngineKeyKind.Character,
+                    new Rune('s'));
+                return edit.InsertText.Length + edit.BackspaceCount;
+            }));
+        cases.Add(Measure(
+            "typing_injector_transform_prepare",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 10_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                inputInjector.Apply(transformEdit);
+                return inputSender.LastCount;
+            }));
+        cases.Add(Measure(
+            "typing_hook_literal",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 20_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                benchmarkHook.Reset();
+                return hookNativeApi.Dispatch('B', 'b') ? 1 : 0;
+            }));
+        cases.Add(Measure(
+            "typing_hook_transform",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 30_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                benchmarkHook.Reset();
+                _ = hookNativeApi.Dispatch('A', 'a');
+                var handled = hookNativeApi.Dispatch('S', 's');
+                return inputSender.LastCount + (handled ? 1 : 0);
+            }));
 
         using var process = Process.GetCurrentProcess();
         process.Refresh();
@@ -221,4 +322,52 @@ internal static class Program
         long PrivateMemoryBytes,
         long ManagedHeapBytes,
         int ThreadCount);
+
+    private sealed class CountingInputSender : UnicodeInputInjector.IInputSender
+    {
+        public int LastCount { get; private set; }
+
+        public void Send(
+            ReadOnlySpan<UnicodeInputInjector.KeyboardInputEvent> inputs) =>
+            LastCount = inputs.Length;
+    }
+
+    private sealed class BenchmarkHookNativeApi : IVietnameseKeyboardHookNativeApi
+    {
+        private Func<VietnameseKeyboardEvent, bool>? callback;
+
+        public IDisposable Install(Func<VietnameseKeyboardEvent, bool> value)
+        {
+            callback = value;
+            return NoopDisposable.Instance;
+        }
+
+        public IDisposable InstallMouseReset(Action callback) =>
+            NoopDisposable.Instance;
+
+        public int GetForegroundProcessId() => 1;
+
+        public bool ShouldBypassTyping() => false;
+
+        public bool Dispatch(char virtualKey, char character) =>
+            callback?.Invoke(new VietnameseKeyboardEvent(
+                virtualKey,
+                IsKeyDown: true,
+                IsInjected: false,
+                ExtraInfo: 0,
+                Shift: false,
+                Control: false,
+                Alt: false,
+                Windows: false,
+                new Rune(character))) ?? false;
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public static NoopDisposable Instance { get; } = new();
+
+        public void Dispose()
+        {
+        }
+    }
 }

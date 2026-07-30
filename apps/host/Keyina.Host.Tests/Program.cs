@@ -8,7 +8,7 @@ internal static class Program
     private sealed record TestCase(string Name, MethodInfo Method);
 
     [STAThread]
-    public static int Main()
+    public static int Main(string[] args)
     {
         var tests = Assembly.GetExecutingAssembly()
             .GetTypes()
@@ -24,9 +24,20 @@ internal static class Program
             .OrderBy(test => test.Name, StringComparer.Ordinal)
             .ToArray();
 
+        if (args.Length > 0)
+        {
+            tests = tests
+                .Where(test => args.Any(filter =>
+                    test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+        }
+
         var failures = 0;
         foreach (var test in tests)
         {
+            Console.WriteLine($"[RUN] {test.Name}");
+            Console.Out.Flush();
+            var previousSynchronizationContext = SynchronizationContext.Current;
             try
             {
                 ValidateSignature(test.Method);
@@ -42,6 +53,11 @@ internal static class Program
             {
                 failures++;
                 Console.Error.WriteLine($"[FAIL] {test.Name}: {exception}");
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    previousSynchronizationContext);
             }
         }
 

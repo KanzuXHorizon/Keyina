@@ -2,7 +2,10 @@ using System.Text.Json;
 using Keyina.Host.Core;
 using Keyina.Host.Diagnostics;
 using Keyina.Host.Hotkeys;
+using Keyina.Host.Runtime;
 using Keyina.Host.Speech;
+using Keyina.Host.UI;
+using Keyina.Host.UI.Fluent;
 
 namespace Keyina.Host;
 
@@ -16,6 +19,7 @@ internal static class Program
     private const int AlreadyRunningExitCode = 17;
     private const string HostMutexName = "Local\\Keyina.Host";
 
+    [STAThread]
     public static int Main(string[] args)
     {
         if (args.Contains("--self-test", StringComparer.Ordinal))
@@ -51,6 +55,30 @@ internal static class Program
             return result.Success ? 0 : 1;
         }
 
+        FluentTheme.InitializeApplicationColorMode();
+
+        var galleryIndex = Array.FindIndex(
+            args,
+            argument => string.Equals(argument, "--render-settings-gallery", StringComparison.Ordinal));
+        if (galleryIndex >= 0)
+        {
+            if (galleryIndex + 1 >= args.Length)
+            {
+                Console.Error.WriteLine("--render-settings-gallery requires an output directory.");
+                return 2;
+            }
+            ApplicationConfiguration.Initialize();
+            var outputDirectory = Path.GetFullPath(args[galleryIndex + 1]);
+            var paths = SettingsScreenshotRenderer.RenderGallery(
+                outputDirectory,
+                SettingsSnapshot.Sample);
+            foreach (var path in paths)
+            {
+                Console.WriteLine(path);
+            }
+            return 0;
+        }
+
         if (!SingleInstanceGuard.TryAcquire(HostMutexName, out var guard))
         {
             return AlreadyRunningExitCode;
@@ -58,6 +86,11 @@ internal static class Program
 
         using (guard)
         {
+            ApplicationConfiguration.Initialize();
+            using var context = new KeyinaApplicationContext(
+                KeyinaRuntimeOptions.CreateProduction(
+                    showSettingsOnStart: args.Contains("--show-settings", StringComparer.Ordinal)));
+            Application.Run(context);
             return 0;
         }
     }

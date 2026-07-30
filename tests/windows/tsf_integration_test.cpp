@@ -489,6 +489,21 @@ int wmain(int argc, wchar_t** argv) {
       break;
     }
 
+    const std::wstring before_selection{store->Text()};
+    store->SelectForTest(0, static_cast<LONG>(store->Text().size()));
+    BOOL selection_test_eaten = FALSE;
+    BOOL selection_eaten = TRUE;
+    result = key_sink->OnTestKeyDown(context, 'T', 0, &selection_test_eaten);
+    if (FAILED(result) || !selection_test_eaten ||
+        FAILED(key_sink->OnKeyDown(context, 'T', 0, &selection_eaten)) ||
+        selection_eaten || store->Text() != before_selection) {
+      Fail(L"typing over a non-empty selection did not fail open safely");
+      break;
+    }
+    store->SelectForTest(
+        static_cast<LONG>(store->Text().size()),
+        static_cast<LONG>(store->Text().size()));
+
     ULONGLONG focus_generation = 0;
     result = test_control->GetFocusGeneration(&focus_generation);
     if (FAILED(result) || focus_generation == 0) {

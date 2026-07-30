@@ -1,176 +1,219 @@
-using System.ComponentModel;
-using System.Drawing.Drawing2D;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using Keyina.Host.UI.Fluent;
+using Keyina.Host.Windows.Typing;
+using Microsoft.Win32;
+
+#pragma warning disable CA1725
 
 namespace Keyina.Host.UI;
 
 public sealed class SettingsForm : Form
 {
-    private static readonly Color WindowBackground = Color.FromArgb(14, 18, 28);
-    private static readonly Color SidebarBackground = Color.FromArgb(19, 24, 36);
-    private static readonly Color CardBackground = Color.FromArgb(27, 33, 48);
-    private static readonly Color CardBorder = Color.FromArgb(50, 59, 78);
-    private static readonly Color PrimaryText = Color.FromArgb(241, 245, 249);
-    private static readonly Color SecondaryText = Color.FromArgb(157, 169, 190);
-    private static readonly Color Accent = Color.FromArgb(100, 116, 255);
-    private static readonly Color AccentHover = Color.FromArgb(116, 132, 255);
-    private static readonly Color Positive = Color.FromArgb(52, 211, 153);
-    private static readonly Color Warning = Color.FromArgb(251, 191, 36);
+    private static readonly Dictionary<string, (string Title, string Subtitle)> SectionCopy =
+        new(StringComparer.Ordinal)
+        {
+            ["overview"] = ("Tổng quan", "Trạng thái bộ gõ và các hành động cần thiết."),
+            ["typing"] = ("Bộ gõ", "Thiết lập cách Keyina xử lý tiếng Việt trong Windows."),
+            ["speech"] = ("Nhập bằng giọng nói", "Đọc tiếng Việt vào ứng dụng đang được chọn."),
+            ["hotkeys"] = ("Phím tắt", "Các thao tác nhanh hoạt động trên toàn hệ thống."),
+            ["snippets"] = ("Gõ tắt", "Mở rộng cụm từ và lệnh cục bộ, có kiểm soát."),
+            ["diagnostics"] = ("Chẩn đoán", "Kiểm tra trạng thái mà không thu thập nội dung đã nhập."),
+        };
 
     private readonly SettingsActions actions;
     private readonly Dictionary<string, Panel> pages = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Button> navigationButtons = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, FluentNavigationButton> navigationButtons = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly TableLayoutPanel shell;
+    private readonly Panel sidebar;
+    private readonly Panel contentPanel;
     private readonly Panel pageHost;
     private readonly Label sectionTitle;
-    private readonly CheckBox vietnameseToggle;
-    private readonly CheckBox speechToggle;
-    private readonly CheckBox startupToggle;
-    private readonly Label statusMessage;
-    private readonly Label inputStatus;
-    private readonly Label speechStatus;
-    private readonly Label speechCredentialStatus;
-    private readonly Label ipcStatus;
-    private readonly Label hotkeyStatus;
+    private readonly Label sectionSubtitle;
+    private readonly Label systemThemeStatus;
+    private readonly FluentStatusBadge statusMessage;
+    private readonly FluentStatusBadge inputStatus;
+    private readonly FluentStatusBadge speechStatus;
+    private readonly FluentStatusBadge speechCredentialStatus;
+    private readonly FluentStatusBadge ipcStatus;
+    private readonly FluentStatusBadge hotkeyStatus;
     private readonly Label snippetCount;
+    private readonly FluentToggle vietnameseToggle;
+    private readonly FluentToggle speechToggle;
+    private readonly FluentToggle startupToggle;
+    private readonly FluentToggle typingLatencyToggle;
+    private readonly ListView typingLatencyTable;
     private readonly TextBox speechApiKey;
-    private readonly Button saveSpeechKey;
-    private readonly Button removeSpeechKey;
+    private readonly FluentButton saveSpeechKey;
+    private readonly FluentButton removeSpeechKey;
     private readonly Label diagnosticsResult;
-    private readonly CancellationTokenSource lifetime = new();
+    private readonly FluentButton setupTsfButton;
+    private readonly FlowLayoutPanel snippetsList;
+    private readonly TextBox snippetsSearch;
+    private FluentThemePalette palette = FluentTheme.Current;
+    private SettingsSnapshot currentSnapshot;
     private bool applyingSnapshot;
+    private bool resourcesReleased;
 
     public SettingsForm(SettingsSnapshot snapshot, SettingsActions actions)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         this.actions = actions ?? throw new ArgumentNullException(nameof(actions));
+        currentSnapshot = snapshot;
 
         Text = "Keyina";
-        AccessibleName = "Keyina settings";
-        AccessibleDescription = "Settings for Vietnamese typing, dictation, hotkeys, snippets, and diagnostics.";
+        AccessibleName = "Cài đặt Keyina";
+        AccessibleDescription =
+            "Cài đặt bộ gõ tiếng Việt, nhập bằng giọng nói, phím tắt, gõ tắt và chẩn đoán.";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 560);
-        Size = new Size(980, 690);
-        BackColor = WindowBackground;
-        ForeColor = PrimaryText;
-        Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+        MinimumSize = new Size(900, 620);
+        Size = new Size(1100, 760);
+        Font = new Font("Segoe UI Variable Text", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
         ShowInTaskbar = true;
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
         MinimizeBox = true;
         KeyPreview = true;
         DoubleBuffered = true;
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
-        var root = new TableLayoutPanel
+        statusMessage = CreateBadge("statusMessage", 142);
+        inputStatus = CreateBadge("inputStatus", 104);
+        speechStatus = CreateBadge("speechStatus", 104);
+        speechCredentialStatus = CreateBadge("speechCredentialStatus", 118);
+        ipcStatus = CreateBadge("ipcStatus", 150);
+        hotkeyStatus = CreateBadge("hotkeyStatus", 120);
+        snippetCount = CreateLabel("snippetCount", string.Empty, LabelRole.Secondary);
+
+        vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
+        speechToggle = CreateToggle("speechToggle", "Bật nhập bằng giọng nói");
+        startupToggle = CreateToggle("startupToggle", "Khởi động Keyina cùng Windows");
+        typingLatencyToggle = CreateToggle(
+            "typingLatencyToggle",
+            "Đo độ trễ từng công đoạn");
+        typingLatencyTable = CreateTypingLatencyTable();
+
+        speechApiKey = CreateTextBox(
+            "speechApiKey",
+            "Dán khóa API Speechmatics",
+            "Khóa API Speechmatics");
+        speechApiKey.UseSystemPasswordChar = true;
+        saveSpeechKey = CreateButton(
+            "saveSpeechKey",
+            "Lưu khóa",
+            FluentButtonKind.Primary,
+            112);
+        saveSpeechKey.Enabled = false;
+        removeSpeechKey = CreateButton(
+            "removeSpeechKey",
+            "Xóa khóa",
+            FluentButtonKind.Secondary,
+            108);
+
+        diagnosticsResult = CreateLabel(
+            "diagnosticsResult",
+            "Chưa chạy kiểm tra. Keyina chỉ đọc trạng thái hệ thống cục bộ.",
+            LabelRole.Secondary);
+        diagnosticsResult.AutoEllipsis = true;
+
+        setupTsfButton = CreateButton(
+            "setupTsf",
+            "Mở kiểm tra gõ",
+            FluentButtonKind.Primary,
+            168);
+        snippetsList = CreateVerticalStack("snippetsList");
+        snippetsList.AutoScroll = false;
+        snippetsList.Dock = DockStyle.Fill;
+        snippetsSearch = CreateTextBox(
+            "snippetsSearch",
+            "Tìm theo từ kích hoạt hoặc nội dung",
+            "Tìm gõ tắt");
+
+        shell = new TableLayoutPanel
         {
+            Name = "settingsShell",
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
-            BackColor = WindowBackground,
-            Padding = Padding.Empty,
             Margin = Padding.Empty,
+            Padding = Padding.Empty,
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220F));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        Controls.Add(root);
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 228F));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        Controls.Add(shell);
 
-        var sidebar = CreateSidebar();
-        root.Controls.Add(sidebar, 0, 0);
+        sidebar = CreateSidebar();
+        shell.Controls.Add(sidebar, 0, 0);
 
-        var content = new Panel
+        contentPanel = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = WindowBackground,
-            Padding = new Padding(34, 26, 34, 30),
+            Padding = new Padding(30, 22, 30, 26),
         };
-        root.Controls.Add(content, 1, 0);
+        shell.Controls.Add(contentPanel, 1, 0);
 
-        sectionTitle = new Label
+        var contentLayout = new TableLayoutPanel
         {
-            AutoSize = true,
-            Text = "Overview",
-            Font = new Font(Font.FontFamily, 21F, FontStyle.Bold),
-            ForeColor = PrimaryText,
-            Location = new Point(0, 0),
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
         };
-        content.Controls.Add(sectionTitle);
+        contentLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76F));
+        contentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        contentPanel.Controls.Add(contentLayout);
 
-        var subtitle = new Label
+        var header = new TableLayoutPanel
         {
-            AutoSize = true,
-            Text = "Fast, private Vietnamese input for every Windows app.",
-            Font = new Font(Font.FontFamily, 9.5F),
-            ForeColor = SecondaryText,
-            Location = new Point(2, 43),
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
         };
-        content.Controls.Add(subtitle);
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+        contentLayout.Controls.Add(header, 0, 0);
+
+        sectionTitle = CreateLabel("sectionTitle", "Tổng quan", LabelRole.Title);
+        sectionTitle.Dock = DockStyle.Fill;
+        sectionTitle.TextAlign = ContentAlignment.MiddleLeft;
+        header.Controls.Add(sectionTitle, 0, 0);
+
+        sectionSubtitle = CreateLabel(
+            "sectionSubtitle",
+            SectionCopy["overview"].Subtitle,
+            LabelRole.Secondary);
+        sectionSubtitle.Dock = DockStyle.Fill;
+        sectionSubtitle.TextAlign = ContentAlignment.TopLeft;
+        header.Controls.Add(sectionSubtitle, 0, 1);
+
+        systemThemeStatus = CreateLabel(
+            "systemThemeStatus",
+            FluentTheme.SystemThemeDescription,
+            LabelRole.Tertiary);
+        systemThemeStatus.AutoSize = true;
+        systemThemeStatus.TextAlign = ContentAlignment.MiddleRight;
+        systemThemeStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        systemThemeStatus.Margin = new Padding(12, 8, 0, 0);
+        systemThemeStatus.AccessibleName = "Giao diện hiện tại";
+        header.SetRowSpan(systemThemeStatus, 2);
+        header.Controls.Add(systemThemeStatus, 1, 0);
 
         pageHost = new Panel
         {
-            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
-            Location = new Point(0, 78),
-            Size = new Size(content.ClientSize.Width, content.ClientSize.Height - 78),
-            BackColor = WindowBackground,
+            Name = "pageHost",
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
         };
-        content.Controls.Add(pageHost);
-        content.Resize += (_, _) =>
-        {
-            pageHost.Size = new Size(content.ClientSize.Width, Math.Max(0, content.ClientSize.Height - 78));
-        };
-
-        statusMessage = CreateValueLabel("statusMessage");
-        inputStatus = CreateValueLabel("inputStatus");
-        speechStatus = CreateValueLabel("speechStatus");
-        speechCredentialStatus = CreateValueLabel("speechCredentialStatus");
-        ipcStatus = CreateValueLabel("ipcStatus");
-        hotkeyStatus = CreateValueLabel("hotkeyStatus");
-        snippetCount = CreateValueLabel("snippetCount");
-
-        vietnameseToggle = CreateToggle("vietnameseToggle", "Vietnamese input", "Ctrl + Shift");
-        speechToggle = CreateToggle("speechToggle", "Speech-to-text", "Ctrl + Alt + V");
-        startupToggle = CreateToggle("startupToggle", "Start with Windows", "Current user only");
-
-        speechApiKey = new TextBox
-        {
-            Name = "speechApiKey",
-            Dock = DockStyle.Top,
-            Height = 36,
-            UseSystemPasswordChar = true,
-            BorderStyle = BorderStyle.FixedSingle,
-            BackColor = Color.FromArgb(17, 22, 34),
-            ForeColor = PrimaryText,
-            AccessibleName = "Speechmatics API key",
-            PlaceholderText = "Paste a Speechmatics API key",
-            Margin = new Padding(0, 8, 0, 8),
-        };
-        saveSpeechKey = CreatePrimaryButton("saveSpeechKey", "Save key");
-        saveSpeechKey.Enabled = false;
-        speechApiKey.TextChanged += (_, _) => saveSpeechKey.Enabled =
-            !string.IsNullOrWhiteSpace(speechApiKey.Text);
-        saveSpeechKey.Click += (_, _) =>
-        {
-            var secret = speechApiKey.Text;
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                return;
-            }
-
-            actions.SaveSpeechApiKey(secret);
-            speechApiKey.Clear();
-        };
-
-        removeSpeechKey = CreateSecondaryButton("removeSpeechKey", "Remove key");
-        removeSpeechKey.Click += (_, _) => actions.DeleteSpeechApiKey();
-
-        diagnosticsResult = new Label
-        {
-            Name = "diagnosticsResult",
-            AutoSize = false,
-            Dock = DockStyle.Top,
-            Height = 70,
-            Text = "Run offline checks to verify hotkeys, IPC, configuration, and resource usage.",
-            ForeColor = SecondaryText,
-            Padding = new Padding(0, 8, 0, 0),
-        };
+        contentLayout.Controls.Add(pageHost, 0, 1);
 
         pages.Add("overview", CreateOverviewPage());
         pages.Add("typing", CreateTypingPage());
@@ -204,46 +247,115 @@ public sealed class SettingsForm : Form
                 actions.SetStartupEnabled(startupToggle.Checked);
             }
         };
+        typingLatencyToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetTypingLatencyEnabled(typingLatencyToggle.Checked);
+            }
+        };
+        speechApiKey.TextChanged += (_, _) => saveSpeechKey.Enabled =
+            !string.IsNullOrWhiteSpace(speechApiKey.Text);
+        saveSpeechKey.Click += (_, _) => SaveSpeechCredential();
+        removeSpeechKey.Click += (_, _) => actions.DeleteSpeechApiKey();
+        snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
+        setupTsfButton.Click += SetupTsfButtonClick;
+
+        SystemEvents.UserPreferenceChanged += SystemEventsUserPreferenceChanged;
+        Resize += (_, _) => UpdateResponsiveShell();
 
         ApplySnapshot(snapshot);
-        ShowSection("overview", "Overview");
+        ApplySystemTheme();
+        ShowSection("overview");
     }
+
+    public bool UsesBufferedRendering => DoubleBuffered;
 
     public void ApplySnapshot(SettingsSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        currentSnapshot = snapshot;
         applyingSnapshot = true;
         try
         {
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
             speechToggle.Checked = snapshot.SpeechEnabled;
             startupToggle.Checked = snapshot.StartupEnabled;
-            statusMessage.Text = snapshot.StatusMessage;
-            statusMessage.ForeColor = snapshot.Listening ? Warning : Positive;
-            inputStatus.Text = snapshot.VietnameseEnabled ? "Enabled" : "Disabled";
-            inputStatus.ForeColor = snapshot.VietnameseEnabled ? Positive : SecondaryText;
-            speechStatus.Text = snapshot.Listening
-                ? "Listening"
-                : snapshot.SpeechEnabled
-                    ? "Ready"
-                    : "Disabled";
-            speechStatus.ForeColor = snapshot.Listening
-                ? Warning
-                : snapshot.SpeechEnabled
-                    ? Positive
-                    : SecondaryText;
-            speechCredentialStatus.Text = snapshot.SpeechCredentialConfigured
-                ? "Configured"
-                : "Not configured";
-            speechCredentialStatus.ForeColor = snapshot.SpeechCredentialConfigured
-                ? Positive
-                : Warning;
-            removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
-            ipcStatus.Text = snapshot.IpcStatus;
-            hotkeyStatus.Text = snapshot.HotkeyStatus;
+            typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
+
+            var readinessText = snapshot.Listening
+                ? "Đang nghe"
+                : snapshot.Readiness switch
+                {
+                    KeyinaReadiness.Ready => "Sẵn sàng",
+                    KeyinaReadiness.NeedsSetup => "Cần thiết lập",
+                    KeyinaReadiness.NeedsAttention => "Cần xử lý",
+                    KeyinaReadiness.Unavailable => "Không khả dụng",
+                    _ => "Đang kiểm tra",
+                };
+            SetBadge(
+                statusMessage,
+                readinessText,
+                snapshot.Listening
+                    ? FluentTone.Warning
+                    : snapshot.Readiness switch
+                    {
+                        KeyinaReadiness.Ready => FluentTone.Success,
+                        KeyinaReadiness.NeedsSetup => FluentTone.Warning,
+                        KeyinaReadiness.NeedsAttention => FluentTone.Warning,
+                        KeyinaReadiness.Unavailable => FluentTone.Error,
+                        _ => FluentTone.Neutral,
+                    });
+
+            SetBadge(
+                inputStatus,
+                !snapshot.TsfRegistered
+                    ? "Chưa kết nối"
+                    : snapshot.VietnameseEnabled ? "Đang bật" : "Đang tắt",
+                !snapshot.TsfRegistered
+                    ? FluentTone.Warning
+                    : snapshot.VietnameseEnabled ? FluentTone.Success : FluentTone.Neutral);
+            SetBadge(
+                speechStatus,
+                snapshot.Listening
+                    ? "Đang nghe"
+                    : snapshot.SpeechEnabled ? "Sẵn sàng" : "Đang tắt",
+                snapshot.Listening
+                    ? FluentTone.Warning
+                    : snapshot.SpeechEnabled ? FluentTone.Success : FluentTone.Neutral);
+            SetBadge(
+                speechCredentialStatus,
+                snapshot.SpeechCredentialConfigured ? "Đã cấu hình" : "Chưa cấu hình",
+                snapshot.SpeechCredentialConfigured ? FluentTone.Success : FluentTone.Warning);
+            SetBadge(
+                ipcStatus,
+                LocalizeRuntimeStatus(snapshot.IpcStatus),
+                snapshot.IpcStatus.Contains("connected", StringComparison.OrdinalIgnoreCase)
+                    ? FluentTone.Success
+                    : FluentTone.Warning);
+            SetBadge(
+                hotkeyStatus,
+                LocalizeRuntimeStatus(snapshot.HotkeyStatus),
+                snapshot.HotkeyStatus.Contains("registered", StringComparison.OrdinalIgnoreCase)
+                    ? FluentTone.Success
+                    : FluentTone.Warning);
+
             snippetCount.Text = snapshot.CustomSnippetCount == 1
-                ? "1 custom snippet"
-                : $"{snapshot.CustomSnippetCount} custom snippets";
+                ? "1 gõ tắt tùy chỉnh"
+                : $"{snapshot.CustomSnippetCount} gõ tắt tùy chỉnh";
+            removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
+            setupTsfButton.Text = snapshot.Readiness switch
+            {
+                KeyinaReadiness.Ready => "Mở kiểm tra gõ",
+                KeyinaReadiness.NeedsSetup => "Thiết lập bộ gõ",
+                KeyinaReadiness.NeedsAttention => "Sửa kết nối",
+                KeyinaReadiness.Unavailable => "Mở chẩn đoán",
+                _ => "Kiểm tra lại",
+            };
+            setupTsfButton.Kind = snapshot.Readiness == KeyinaReadiness.Unavailable
+                ? FluentButtonKind.Secondary
+                : FluentButtonKind.Primary;
+            setupTsfButton.Invalidate();
         }
         finally
         {
@@ -251,629 +363,1674 @@ public sealed class SettingsForm : Form
         }
     }
 
-    protected override void OnFormClosed(FormClosedEventArgs e)
+    protected override void OnHandleCreated(EventArgs eventArgs)
     {
-        lifetime.Cancel();
-        lifetime.Dispose();
-        base.OnFormClosed(e);
+        base.OnHandleCreated(eventArgs);
+        FluentWindow.Apply(this, palette);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !resourcesReleased)
+        {
+            resourcesReleased = true;
+            SystemEvents.UserPreferenceChanged -= SystemEventsUserPreferenceChanged;
+            lifetime.Cancel();
+            lifetime.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     private Panel CreateSidebar()
     {
-        var sidebar = new Panel
+        var panel = new Panel
+        {
+            Name = "sidebar",
+            Dock = DockStyle.Fill,
+            Padding = new Padding(14, 18, 14, 14),
+        };
+
+        var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            BackColor = SidebarBackground,
-            Padding = new Padding(18, 24, 18, 18),
+            ColumnCount = 1,
+            RowCount = 4,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        panel.Controls.Add(layout);
+
+        var brand = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = Padding.Empty,
+        };
+        brand.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52F));
+        brand.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        brand.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        brand.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+        layout.Controls.Add(brand, 0, 0);
 
         var mark = new Label
         {
-            AutoSize = false,
+            Name = "brandMark",
+            Dock = DockStyle.Fill,
             Text = "K",
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(Font.FontFamily, 18F, FontStyle.Bold),
+            Font = new Font("Segoe UI Variable Display", 18F, FontStyle.Bold),
             ForeColor = Color.White,
-            BackColor = Accent,
-            Location = new Point(18, 22),
-            Size = new Size(44, 44),
-            AccessibleName = "Keyina logo",
+            Margin = new Padding(0, 0, 10, 10),
+            AccessibleName = "Biểu tượng Keyina",
         };
-        sidebar.Controls.Add(mark);
+        mark.Paint += BrandMarkPaint;
+        brand.SetRowSpan(mark, 2);
+        brand.Controls.Add(mark, 0, 0);
 
-        var product = new Label
-        {
-            AutoSize = true,
-            Text = "Keyina",
-            Font = new Font(Font.FontFamily, 16F, FontStyle.Bold),
-            ForeColor = PrimaryText,
-            Location = new Point(72, 23),
-        };
-        sidebar.Controls.Add(product);
+        var product = CreateLabel("productName", "Keyina", LabelRole.Heading);
+        product.Dock = DockStyle.Fill;
+        product.TextAlign = ContentAlignment.BottomLeft;
+        brand.Controls.Add(product, 1, 0);
 
-        var productSubtitle = new Label
-        {
-            AutoSize = true,
-            Text = "Vietnamese input",
-            Font = new Font(Font.FontFamily, 8.5F),
-            ForeColor = SecondaryText,
-            Location = new Point(74, 49),
-        };
-        sidebar.Controls.Add(productSubtitle);
+        var productSubtitle = CreateLabel(
+            "productSubtitle",
+            "Bộ gõ tiếng Việt",
+            LabelRole.Tertiary);
+        productSubtitle.Dock = DockStyle.Fill;
+        productSubtitle.TextAlign = ContentAlignment.TopLeft;
+        brand.Controls.Add(productSubtitle, 1, 1);
 
         var navigation = new FlowLayoutPanel
         {
+            Name = "navigation",
+            Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
-            AutoSize = false,
-            Location = new Point(12, 98),
-            Size = new Size(196, 360),
-            BackColor = Color.Transparent,
+            AutoScroll = false,
+            Margin = new Padding(0, 4, 0, 0),
+            Padding = new Padding(0, 8, 0, 0),
         };
-        sidebar.Controls.Add(navigation);
+        layout.Controls.Add(navigation, 0, 1);
 
-        AddNavigation(navigation, "navOverview", "Overview", "overview");
-        AddNavigation(navigation, "navTyping", "Typing", "typing");
-        AddNavigation(navigation, "navSpeech", "Speech-to-text", "speech");
-        AddNavigation(navigation, "navHotkeys", "Hotkeys", "hotkeys");
-        AddNavigation(navigation, "navSnippets", "Snippets", "snippets");
-        AddNavigation(navigation, "navDiagnostics", "Diagnostics", "diagnostics");
-
-        var privacy = new Label
+        AddNavigation(navigation, "navOverview", "Tổng quan", "\uE80F", "overview");
+        AddNavigation(navigation, "navTyping", "Bộ gõ", "\uE765", "typing");
+        AddNavigation(navigation, "navSpeech", "Nhập bằng giọng nói", "\uE720", "speech");
+        AddNavigation(navigation, "navHotkeys", "Phím tắt", "\uE92E", "hotkeys");
+        AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
+        AddNavigation(navigation, "navDiagnostics", "Chẩn đoán", "\uE9D9", "diagnostics");
+        navigation.SizeChanged += (_, _) =>
         {
-            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
-            AutoSize = false,
-            Text = "LOCAL-FIRST\r\nTyping never calls the network.",
-            Font = new Font(Font.FontFamily, 8F, FontStyle.Bold),
-            ForeColor = SecondaryText,
-            Location = new Point(20, 500),
-            Size = new Size(178, 54),
+            foreach (Control child in navigation.Controls)
+            {
+                child.Width = Math.Max(120, navigation.ClientSize.Width - 2);
+            }
         };
-        sidebar.Controls.Add(privacy);
-        sidebar.Resize += (_, _) => privacy.Top = Math.Max(470, sidebar.ClientSize.Height - 76);
 
-        return sidebar;
+        var privacy = new TableLayoutPanel
+        {
+            Name = "privacySummary",
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = new Padding(4, 0, 4, 0),
+            Padding = new Padding(8, 4, 8, 4),
+        };
+        privacy.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26F));
+        privacy.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        privacy.RowStyles.Add(new RowStyle(SizeType.Absolute, 21F));
+        privacy.RowStyles.Add(new RowStyle(SizeType.Absolute, 21F));
+        layout.Controls.Add(privacy, 0, 2);
+
+        var shield = CreateIconLabel("privacyIcon", "\uEA18", 14F);
+        shield.Dock = DockStyle.Fill;
+        privacy.SetRowSpan(shield, 2);
+        privacy.Controls.Add(shield, 0, 0);
+        var localFirst = CreateLabel("localFirst", "Cục bộ trước", LabelRole.Caption);
+        localFirst.Dock = DockStyle.Fill;
+        privacy.Controls.Add(localFirst, 1, 0);
+        var localDetail = CreateLabel(
+            "localDetail",
+            "Gõ văn bản không dùng mạng",
+            LabelRole.Tertiary);
+        localDetail.Dock = DockStyle.Fill;
+        privacy.Controls.Add(localDetail, 1, 1);
+
+        var version = CreateLabel(
+            "versionLabel",
+            $"Phiên bản {currentSnapshot.Version}",
+            LabelRole.Tertiary);
+        version.Dock = DockStyle.Fill;
+        version.TextAlign = ContentAlignment.MiddleLeft;
+        version.Padding = new Padding(8, 0, 0, 0);
+        layout.Controls.Add(version, 0, 3);
+
+        return panel;
     }
 
     private void AddNavigation(
         FlowLayoutPanel navigation,
         string name,
         string text,
+        string glyph,
         string pageKey)
     {
-        var button = new Button
+        var button = new FluentNavigationButton
         {
             Name = name,
             Text = text,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Width = 190,
-            Height = 44,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.Transparent,
-            ForeColor = SecondaryText,
-            Cursor = Cursors.Hand,
-            Margin = new Padding(0, 0, 0, 5),
-            Padding = new Padding(14, 0, 0, 0),
-            TabStop = true,
+            Glyph = glyph,
+            Font = new Font(Font.FontFamily, 9.5F, FontStyle.Regular),
+            Width = 196,
             AccessibleName = text,
+            AccessibleDescription = $"Mở trang {text}",
         };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(34, 41, 59);
-        button.Click += (_, _) => ShowSection(pageKey, text);
+        button.Click += (_, _) => ShowSection(pageKey);
         navigation.Controls.Add(button);
         navigationButtons.Add(pageKey, button);
     }
 
-    private void ShowSection(string pageKey, string title)
+    private void ShowSection(string pageKey)
     {
-        foreach (var (key, page) in pages)
+        if (!pages.TryGetValue(pageKey, out var selectedPage) ||
+            !SectionCopy.TryGetValue(pageKey, out var copy))
         {
-            page.Visible = string.Equals(key, pageKey, StringComparison.Ordinal);
+            throw new ArgumentOutOfRangeException(nameof(pageKey));
         }
+
+        foreach (var page in pages.Values)
+        {
+            page.Visible = ReferenceEquals(page, selectedPage);
+        }
+        selectedPage.BringToFront();
+
         foreach (var (key, button) in navigationButtons)
         {
-            var selected = string.Equals(key, pageKey, StringComparison.Ordinal);
-            button.BackColor = selected ? Color.FromArgb(46, 54, 78) : Color.Transparent;
-            button.ForeColor = selected ? Color.White : SecondaryText;
-            button.Font = new Font(
-                button.Font,
-                selected ? FontStyle.Bold : FontStyle.Regular);
+            button.Selected = string.Equals(key, pageKey, StringComparison.Ordinal);
         }
-        sectionTitle.Text = title;
+
+        sectionTitle.Text = copy.Title;
+        sectionSubtitle.Text = copy.Subtitle;
+        selectedPage.SelectNextControl(
+            selectedPage,
+            forward: true,
+            tabStopOnly: true,
+            nested: true,
+            wrap: false);
     }
 
     private Panel CreateOverviewPage()
     {
-        var page = CreatePage();
-        var grid = new TableLayoutPanel
+        var page = CreatePage("overviewPage");
+        var stack = CreateVerticalStack("overviewStack");
+        page.Controls.Add(stack);
+
+        var readiness = CreateCard("readinessCard", 150);
+        var readinessLayout = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
-            AutoSize = true,
+            Dock = DockStyle.Fill,
             ColumnCount = 3,
-            RowCount = 2,
-            BackColor = Color.Transparent,
+            RowCount = 3,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
         };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34F));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 146F));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 160F));
-        page.Controls.Add(grid);
+        readinessLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        readinessLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        readinessLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        readinessLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+        readinessLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+        readinessLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        readiness.Controls.Add(readinessLayout);
 
-        grid.Controls.Add(CreateStatusCard(
-            "Input",
-            inputStatus,
-            "Native TSF composition",
-            "Ctrl + Shift"), 0, 0);
-        grid.Controls.Add(CreateStatusCard(
-            "Dictation",
-            speechStatus,
-            "Speechmatics · Vietnamese",
-            "Ctrl + Alt + Space"), 1, 0);
-        grid.Controls.Add(CreateStatusCard(
-            "System",
-            statusMessage,
-            "Private resident host",
-            "Low-latency"), 2, 0);
+        var readinessTitle = CreateLabel(
+            "readinessTitle",
+            "Trạng thái hệ thống",
+            LabelRole.Heading);
+        readinessTitle.Dock = DockStyle.Fill;
+        readinessLayout.Controls.Add(readinessTitle, 0, 0);
+        readinessLayout.SetColumnSpan(readinessTitle, 3);
 
-        var privacyCard = CreateCard();
-        privacyCard.Margin = new Padding(6, 12, 6, 0);
-        grid.SetColumnSpan(privacyCard, 2);
-        grid.Controls.Add(privacyCard, 0, 1);
-        privacyCard.Controls.Add(CreateCardTitle("Private by design", 18, 18));
-        privacyCard.Controls.Add(new Label
+        statusMessage.Anchor = AnchorStyles.Left;
+        readinessLayout.Controls.Add(statusMessage, 0, 1);
+        setupTsfButton.Anchor = AnchorStyles.Right;
+        setupTsfButton.Margin = new Padding(12, 2, 0, 2);
+        readinessLayout.Controls.Add(setupTsfButton, 2, 1);
+
+        var readinessDetail = CreateLabel(
+            "readinessDetail",
+            "Keyina chỉ báo sẵn sàng khi host, bộ gõ, phím tắt và đường nhập đang hoạt động đúng.",
+            LabelRole.Secondary);
+        readinessDetail.Dock = DockStyle.Fill;
+        readinessDetail.Padding = new Padding(0, 4, 0, 0);
+        readinessLayout.Controls.Add(readinessDetail, 0, 2);
+        readinessLayout.SetColumnSpan(readinessDetail, 3);
+        stack.Controls.Add(readiness);
+
+        var statusGrid = new TableLayoutPanel
         {
-            AutoSize = false,
-            Text = "The native typing path is offline. Speech is optional, credentials stay in Windows Credential Manager, and final text is inserted through the focused TSF context instead of clipboard paste.",
-            ForeColor = SecondaryText,
-            Font = new Font(Font.FontFamily, 9.5F),
-            Location = new Point(20, 52),
-            Size = new Size(480, 68),
-        });
+            Name = "overviewStatusGrid",
+            Height = 248,
+            ColumnCount = 2,
+            RowCount = 2,
+            Margin = new Padding(0, 0, 0, 12),
+            Padding = Padding.Empty,
+        };
+        statusGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        statusGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        statusGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        statusGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        statusGrid.Controls.Add(CreateStatusCard(
+            "overviewTyping",
+            "\uE765",
+            "Bộ gõ",
+            inputStatus,
+            "Telex · phím tắt Ctrl + Shift"), 0, 0);
+        statusGrid.Controls.Add(CreateStatusCard(
+            "overviewSpeech",
+            "\uE720",
+            "Giọng nói",
+            speechStatus,
+            "Speechmatics · tiếng Việt"), 1, 0);
+        statusGrid.Controls.Add(CreateStatusCard(
+            "overviewHotkeys",
+            "\uE92E",
+            "Phím tắt hệ thống",
+            hotkeyStatus,
+            "Hoạt động mà không lấy focus"), 0, 1);
+        statusGrid.Controls.Add(CreateStatusCard(
+            "overviewFocusedApp",
+            "\uE7C5",
+            "Ứng dụng đang nhập",
+            ipcStatus,
+            "Không dùng clipboard để chèn chữ"), 1, 1);
+        stack.Controls.Add(statusGrid);
 
-        var connectionCard = CreateCard();
-        connectionCard.Margin = new Padding(6, 12, 6, 0);
-        grid.Controls.Add(connectionCard, 2, 1);
-        connectionCard.Controls.Add(CreateCardTitle("Focused app", 18, 18));
-        ipcStatus.Location = new Point(20, 57);
-        ipcStatus.Size = new Size(210, 42);
-        connectionCard.Controls.Add(ipcStatus);
+        var privacyCard = CreateCard("privacyCard", 120);
+        var privacyLayout = CreateIconTextLayout(
+            "\uEA18",
+            "Riêng tư ngay từ thiết kế",
+            "Bộ gõ hoạt động ngoại tuyến. Nhập bằng giọng nói là tùy chọn; khóa API chỉ được lưu trong Windows Credential Manager.");
+        privacyCard.Controls.Add(privacyLayout);
+        stack.Controls.Add(privacyCard);
 
         return page;
     }
 
     private Panel CreateTypingPage()
     {
-        var page = CreatePage();
-        var stack = CreateVerticalStack();
+        var page = CreatePage("typingPage");
+        var stack = CreateVerticalStack("typingStack");
         page.Controls.Add(stack);
-        stack.Controls.Add(CreateSectionDescription(
-            "Familiar controls, native TSF edits, and Context Guard for code, URLs, commands, paths, and English-heavy tokens."));
-        stack.Controls.Add(CreateToggleCard(
-            vietnameseToggle,
-            "Enable or disable Vietnamese input without changing Windows focus."));
-        stack.Controls.Add(CreateToggleCard(
-            startupToggle,
-            "Launch the lightweight host when this Windows user signs in."));
-        stack.Controls.Add(CreateInformationCard(
-            "Compatibility strategy",
-            "Keyina uses Text Services Framework compositions and validates suffix ownership before replacing text. Unsupported or secure fields fail open to literal input."));
+
+        stack.Controls.Add(CreateSettingRow(
+            "typingEnabledRow",
+            "\uE765",
+            "Bộ gõ tiếng Việt",
+            "Bật hoặc tắt mà không làm mất focus của ứng dụng hiện tại.",
+            "Ctrl + Shift",
+            vietnameseToggle));
+        stack.Controls.Add(CreateSettingRow(
+            "startupRow",
+            "\uE7E8",
+            "Khởi động cùng Windows",
+            "Chạy host nhẹ cho tài khoản Windows hiện tại.",
+            "Người dùng hiện tại",
+            startupToggle));
+
+        var testCard = CreateCard("typingTestCard", 248);
+        var testLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 5,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        testLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+        testLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        testLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
+        testLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        testLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        testCard.Controls.Add(testLayout);
+
+        var testTitle = CreateLabel("typingTestTitle", "Thử gõ thật", LabelRole.Heading);
+        testTitle.Dock = DockStyle.Fill;
+        testLayout.Controls.Add(testTitle, 0, 0);
+        var testPrompt = CreateLabel(
+            "typingTestPrompt",
+            "Nhấp vào ô và gõ:  tieengs Vieetj   →   tiếng Việt",
+            LabelRole.Secondary);
+        testPrompt.Dock = DockStyle.Fill;
+        testPrompt.TextAlign = ContentAlignment.MiddleLeft;
+        testLayout.Controls.Add(testPrompt, 0, 1);
+
+        var typingTest = CreateTextBox(
+            "typingTestInput",
+            "Gõ câu Telex ở đây",
+            "Ô kiểm tra gõ tiếng Việt");
+        typingTest.Font = new Font(Font.FontFamily, 13F, FontStyle.Regular);
+        typingTest.Margin = new Padding(0, 2, 0, 4);
+        typingTest.Dock = DockStyle.Fill;
+        testLayout.Controls.Add(CreateInputFrame(typingTest), 0, 2);
+
+        var typingResult = CreateLabel(
+            "typingTestResult",
+            "Chưa kiểm tra",
+            LabelRole.Caption);
+        typingResult.Dock = DockStyle.Fill;
+        typingResult.TextAlign = ContentAlignment.MiddleLeft;
+        testLayout.Controls.Add(typingResult, 0, 3);
+
+        var testNote = CreateLabel(
+            "typingTestNote",
+            "Bài kiểm tra dùng chính ô đang focus; không gọi engine trực tiếp để giả lập kết quả.",
+            LabelRole.Tertiary);
+        testNote.Dock = DockStyle.Fill;
+        testNote.TextAlign = ContentAlignment.TopLeft;
+        testLayout.Controls.Add(testNote, 0, 4);
+
+        typingTest.TextChanged += (_, _) =>
+        {
+            var normalized = typingTest.Text.Trim();
+            var passed = normalized.Contains("tiếng Việt", StringComparison.OrdinalIgnoreCase);
+            actions.RecordTypingTest(passed);
+            if (passed)
+            {
+                typingResult.Text = "Đạt — tiếng Việt đã đi qua đường nhập đang focus.";
+                typingResult.ForeColor = palette.Success;
+            }
+            else if (normalized.Length == 0)
+            {
+                typingResult.Text = "Chưa kiểm tra";
+                typingResult.ForeColor = palette.TextSecondary;
+            }
+            else
+            {
+                typingResult.Text = "Chưa đạt — kiểm tra bộ gõ đang bật rồi thử lại.";
+                typingResult.ForeColor = palette.Warning;
+            }
+        };
+        stack.Controls.Add(testCard);
+
+        var guardCard = CreateCard("contextGuardCard", 126);
+        guardCard.Controls.Add(CreateIconTextLayout(
+            "\uE72E",
+            "Context Guard",
+            "Keyina ưu tiên nhập nguyên văn trong code, URL, email, lệnh, đường dẫn, identifier và trường nhập bảo mật."));
+        stack.Controls.Add(guardCard);
         return page;
     }
 
     private Panel CreateSpeechPage()
     {
-        var page = CreatePage();
-        var stack = CreateVerticalStack();
+        var page = CreatePage("speechPage");
+        var stack = CreateVerticalStack("speechStack");
         page.Controls.Add(stack);
-        stack.Controls.Add(CreateSectionDescription(
-            "Optional Vietnamese realtime dictation. Partials stay in the overlay; only stable final segments are inserted into the focused app."));
-        stack.Controls.Add(CreateToggleCard(
-            speechToggle,
-            "Speech failures never disable or delay ordinary Vietnamese typing."));
 
-        var credentialCard = CreateCard();
-        credentialCard.Height = 222;
-        credentialCard.Padding = new Padding(20);
-        credentialCard.Controls.Add(CreateCardTitle("Speechmatics credential", 20, 18));
-        speechCredentialStatus.Location = new Point(20, 52);
-        speechCredentialStatus.Size = new Size(240, 28);
-        credentialCard.Controls.Add(speechCredentialStatus);
-        speechApiKey.Location = new Point(20, 88);
-        speechApiKey.Width = 520;
-        credentialCard.Controls.Add(speechApiKey);
-        saveSpeechKey.Location = new Point(20, 140);
-        removeSpeechKey.Location = new Point(132, 140);
-        credentialCard.Controls.Add(saveSpeechKey);
-        credentialCard.Controls.Add(removeSpeechKey);
-        credentialCard.Controls.Add(new Label
+        stack.Controls.Add(CreateSettingRow(
+            "speechEnabledRow",
+            "\uE720",
+            "Nhập bằng giọng nói",
+            "Chỉ chèn đoạn đã ổn định vào ứng dụng đang focus; lỗi giọng nói không ảnh hưởng bộ gõ.",
+            "Ctrl + Alt + V",
+            speechToggle));
+
+        var credentialCard = CreateCard("speechCredentialCard", 238);
+        var credentialLayout = new TableLayoutPanel
         {
-            AutoSize = true,
-            Text = "Stored only in Windows Credential Manager. Never written to settings.json.",
-            ForeColor = SecondaryText,
-            Location = new Point(20, 188),
-        });
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 5,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        credentialCard.Controls.Add(credentialLayout);
+
+        var credentialTitle = CreateLabel(
+            "speechCredentialTitle",
+            "Khóa dịch vụ Speechmatics",
+            LabelRole.Heading);
+        credentialTitle.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(credentialTitle, 0, 0);
+        credentialLayout.SetColumnSpan(credentialTitle, 2);
+        speechCredentialStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        credentialLayout.Controls.Add(speechCredentialStatus, 2, 0);
+
+        var credentialHint = CreateLabel(
+            "speechCredentialHint",
+            "Khóa được mã hóa bởi Windows Credential Manager, không ghi vào settings.json.",
+            LabelRole.Secondary);
+        credentialHint.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(credentialHint, 0, 1);
+        credentialLayout.SetColumnSpan(credentialHint, 3);
+
+        var reveal = CreateButton(
+            "toggleSpeechKeyVisibility",
+            "Hiện",
+            FluentButtonKind.Subtle,
+            72);
+        reveal.AccessibleName = "Hiện hoặc ẩn khóa API";
+        reveal.Click += (_, _) =>
+        {
+            speechApiKey.UseSystemPasswordChar = !speechApiKey.UseSystemPasswordChar;
+            reveal.Text = speechApiKey.UseSystemPasswordChar ? "Hiện" : "Ẩn";
+        };
+        var credentialInput = CreateInputFrame(speechApiKey, reveal);
+        credentialInput.Dock = DockStyle.Fill;
+        credentialInput.Margin = new Padding(0, 4, 0, 4);
+        credentialLayout.Controls.Add(credentialInput, 0, 2);
+        credentialLayout.SetColumnSpan(credentialInput, 3);
+
+        var actionsPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 4, 0, 4),
+        };
+        saveSpeechKey.Margin = new Padding(0, 0, 8, 0);
+        removeSpeechKey.Margin = Padding.Empty;
+        actionsPanel.Controls.Add(saveSpeechKey);
+        actionsPanel.Controls.Add(removeSpeechKey);
+        credentialLayout.Controls.Add(actionsPanel, 0, 3);
+        credentialLayout.SetColumnSpan(actionsPanel, 3);
+
+        var credentialPrivacy = CreateLabel(
+            "speechPrivacy",
+            "Âm thanh chỉ được gửi khi bạn chủ động bắt đầu phiên đọc. Gõ tiếng Việt thông thường vẫn ngoại tuyến.",
+            LabelRole.Tertiary);
+        credentialPrivacy.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(credentialPrivacy, 0, 4);
+        credentialLayout.SetColumnSpan(credentialPrivacy, 3);
         stack.Controls.Add(credentialCard);
+
+        var providerCard = CreateCard("speechProviderCard", 118);
+        providerCard.Controls.Add(CreateIconTextLayout(
+            "\uE8D4",
+            "Cấu hình hiện tại",
+            "Tiếng Việt · đoạn tạm chỉ hiển thị trên lớp phủ · Escape để hủy phiên."));
+        stack.Controls.Add(providerCard);
         return page;
     }
 
     private Panel CreateHotkeysPage()
     {
-        var page = CreatePage();
-        var stack = CreateVerticalStack();
+        var page = CreatePage("hotkeysPage");
+        var stack = CreateVerticalStack("hotkeysStack");
         page.Controls.Add(stack);
-        stack.Controls.Add(CreateSectionDescription(
-            "Defaults follow familiar UniKey/EVKey muscle memory and avoid stealing focus."));
-        stack.Controls.Add(CreateShortcutCard("Ctrl + Shift", "Toggle Vietnamese input"));
-        stack.Controls.Add(CreateShortcutCard("Ctrl + Alt + Space", "Hold to dictate"));
-        stack.Controls.Add(CreateShortcutCard("Ctrl + Alt + V", "Toggle dictation session"));
-        stack.Controls.Add(CreateShortcutCard("Escape", "Cancel dictation"));
-        var statusCard = CreateInformationCard("Registration status", string.Empty);
-        hotkeyStatus.Location = new Point(20, 53);
-        hotkeyStatus.Size = new Size(500, 30);
-        statusCard.Controls.Add(hotkeyStatus);
-        stack.Controls.Add(statusCard);
+
+        stack.Controls.Add(CreateShortcutRow(
+            "hotkeyVietnamese",
+            "\uE765",
+            "Ctrl + Shift",
+            "Bật hoặc tắt bộ gõ tiếng Việt"));
+        stack.Controls.Add(CreateShortcutRow(
+            "hotkeyPushToTalk",
+            "\uE720",
+            "Ctrl + Alt + Space",
+            "Giữ để đọc bằng giọng nói"));
+        stack.Controls.Add(CreateShortcutRow(
+            "hotkeyToggleDictation",
+            "\uE8D4",
+            "Ctrl + Alt + V",
+            "Bắt đầu hoặc dừng phiên đọc"));
+        stack.Controls.Add(CreateShortcutRow(
+            "hotkeyCancel",
+            "\uE711",
+            "Escape",
+            "Hủy phiên đọc hiện tại"));
+
+        var registration = CreateCard("hotkeyRegistrationCard", 112);
+        var registrationLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+        };
+        registrationLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        registrationLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        registrationLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        registrationLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        registration.Controls.Add(registrationLayout);
+        var registrationTitle = CreateLabel(
+            "hotkeyRegistrationTitle",
+            "Trạng thái đăng ký",
+            LabelRole.Heading);
+        registrationTitle.Dock = DockStyle.Fill;
+        registrationLayout.Controls.Add(registrationTitle, 0, 0);
+        hotkeyStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        registrationLayout.Controls.Add(hotkeyStatus, 1, 0);
+        var registrationText = CreateLabel(
+            "hotkeyRegistrationText",
+            "Các phím tắt được đăng ký toàn hệ thống và không chiếm focus của ứng dụng đang dùng.",
+            LabelRole.Secondary);
+        registrationText.Dock = DockStyle.Fill;
+        registrationLayout.Controls.Add(registrationText, 0, 1);
+        registrationLayout.SetColumnSpan(registrationText, 2);
+        stack.Controls.Add(registration);
         return page;
     }
 
     private Panel CreateSnippetsPage()
     {
-        var page = CreatePage();
-        var stack = CreateVerticalStack();
+        var page = CreatePage("snippetsPage");
+        var stack = CreateVerticalStack("snippetsStack");
         page.Controls.Add(stack);
-        stack.Controls.Add(CreateSectionDescription(
-            "Fast local expansions with explicit delimiters, application scopes, Unicode validation, and secure-field bypass."));
 
-        var card = CreateCard();
-        card.Height = 308;
-        card.Padding = new Padding(18);
-        card.Controls.Add(CreateCardTitle("Snippet library", 18, 16));
-        snippetCount.Location = new Point(18, 48);
-        snippetCount.Size = new Size(300, 26);
-        card.Controls.Add(snippetCount);
-
-        var table = new DataGridView
+        var library = CreateCard("snippetsLibraryCard", 420);
+        var libraryLayout = new TableLayoutPanel
         {
-            Name = "snippetTable",
-            Location = new Point(18, 82),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
-            Size = new Size(660, 200),
-            ReadOnly = true,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            AllowUserToResizeRows = false,
-            RowHeadersVisible = false,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
-            BackgroundColor = Color.FromArgb(18, 23, 35),
-            BorderStyle = BorderStyle.None,
-            GridColor = CardBorder,
-            ForeColor = PrimaryText,
-            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(35, 42, 58),
-                ForeColor = PrimaryText,
-                SelectionBackColor = Color.FromArgb(35, 42, 58),
-                Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
-            },
-            DefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(22, 27, 40),
-                ForeColor = PrimaryText,
-                SelectionBackColor = Color.FromArgb(52, 61, 91),
-                SelectionForeColor = Color.White,
-            },
-            EnableHeadersVisualStyles = false,
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 4,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
         };
-        table.Columns.Add("trigger", "Trigger");
-        table.Columns.Add("action", "Expansion / command");
-        table.Rows.Add(";kvi", "Toggle Vietnamese");
-        table.Rows.Add(";kvoice", "Toggle dictation");
-        table.Rows.Add(";kdate", "Current date");
-        table.Rows.Add(";ktime", "Current time");
-        card.Controls.Add(table);
-        stack.Controls.Add(card);
+        libraryLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        libraryLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        libraryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        libraryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+        libraryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        libraryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        library.Controls.Add(libraryLayout);
+
+        var libraryTitle = CreateLabel("snippetsTitle", "Thư viện gõ tắt", LabelRole.Heading);
+        libraryTitle.Dock = DockStyle.Fill;
+        libraryLayout.Controls.Add(libraryTitle, 0, 0);
+        snippetCount.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        snippetCount.TextAlign = ContentAlignment.MiddleRight;
+        libraryLayout.Controls.Add(snippetCount, 1, 0);
+
+        var searchFrame = CreateInputFrame(snippetsSearch);
+        searchFrame.Dock = DockStyle.Fill;
+        searchFrame.Margin = new Padding(0, 4, 0, 4);
+        libraryLayout.Controls.Add(searchFrame, 0, 1);
+        libraryLayout.SetColumnSpan(searchFrame, 2);
+
+        AddSnippetRows();
+        libraryLayout.Controls.Add(snippetsList, 0, 2);
+        libraryLayout.SetColumnSpan(snippetsList, 2);
+
+        var snippetFooter = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+        };
+        snippetFooter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        snippetFooter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var snippetNote = CreateLabel(
+            "snippetPrivacyNote",
+            "Tự động bỏ qua trường bảo mật và kiểm tra Unicode trước khi mở rộng.",
+            LabelRole.Tertiary);
+        snippetNote.Dock = DockStyle.Fill;
+        snippetNote.TextAlign = ContentAlignment.MiddleLeft;
+        snippetFooter.Controls.Add(snippetNote, 0, 0);
+        var openConfig = CreateButton(
+            "openSnippetConfig",
+            "Mở thư mục cấu hình",
+            FluentButtonKind.Secondary,
+            168);
+        openConfig.Click += (_, _) => actions.OpenConfigurationFolder();
+        snippetFooter.Controls.Add(openConfig, 1, 0);
+        libraryLayout.Controls.Add(snippetFooter, 0, 3);
+        libraryLayout.SetColumnSpan(snippetFooter, 2);
+
+        stack.Controls.Add(library);
         return page;
     }
 
     private Panel CreateDiagnosticsPage()
     {
-        var page = CreatePage();
-        var stack = CreateVerticalStack();
+        var page = CreatePage("diagnosticsPage");
+        var stack = CreateVerticalStack("diagnosticsStack");
         page.Controls.Add(stack);
-        stack.Controls.Add(CreateSectionDescription(
-            "Offline checks never collect transcript text, audio, snippets, clipboard content, or raw keystrokes."));
 
-        var card = CreateCard();
-        card.Height = 208;
-        card.Padding = new Padding(20);
-        card.Controls.Add(CreateCardTitle("System health", 20, 18));
-        diagnosticsResult.Location = new Point(20, 50);
-        diagnosticsResult.Width = 620;
-        card.Controls.Add(diagnosticsResult);
-
-        var run = CreatePrimaryButton("runDiagnostics", "Run offline checks");
-        run.Location = new Point(20, 132);
-        run.Width = 154;
-        run.Click += async (_, _) =>
+        var checks = CreateCard("diagnosticChecksCard", 250);
+        var checksLayout = new TableLayoutPanel
         {
-            run.Enabled = false;
-            diagnosticsResult.Text = "Running checks…";
-            try
-            {
-                diagnosticsResult.Text = await actions.RunDiagnostics(lifetime.Token);
-            }
-            catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
-            {
-            }
-            catch (Exception exception)
-            {
-                diagnosticsResult.Text = $"Diagnostics failed: {exception.GetType().Name}";
-            }
-            finally
-            {
-                if (!IsDisposed)
-                {
-                    run.Enabled = true;
-                }
-            }
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 5,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
         };
-        card.Controls.Add(run);
+        checksLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        checksLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        checksLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        checksLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        checksLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        checks.Controls.Add(checksLayout);
+        var checksTitle = CreateLabel("diagnosticsTitle", "Kiểm tra cục bộ", LabelRole.Heading);
+        checksTitle.Dock = DockStyle.Fill;
+        checksLayout.Controls.Add(checksTitle, 0, 0);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE7BA", "Host nền", hotkeyStatus), 0, 1);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE765", "Bộ gõ và đường nhập", inputStatus), 0, 2);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE8C8", "Kết nối ứng dụng", ipcStatus), 0, 3);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE720", "Dịch vụ giọng nói", speechStatus), 0, 4);
+        stack.Controls.Add(checks);
 
-        var folder = CreateSecondaryButton("openConfigFolder", "Open config folder");
-        folder.Location = new Point(186, 132);
-        folder.Width = 154;
+        var resultCard = CreateCard("diagnosticsResultCard", 188);
+        var resultLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        resultLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        resultLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        resultLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        resultCard.Controls.Add(resultLayout);
+        var resultTitle = CreateLabel("diagnosticsResultTitle", "Kết quả gần nhất", LabelRole.Heading);
+        resultTitle.Dock = DockStyle.Fill;
+        resultLayout.Controls.Add(resultTitle, 0, 0);
+        diagnosticsResult.Dock = DockStyle.Fill;
+        diagnosticsResult.Padding = new Padding(0, 4, 0, 4);
+        resultLayout.Controls.Add(diagnosticsResult, 0, 1);
+
+        var actionBar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 5, 0, 0),
+        };
+        var run = CreateButton(
+            "runDiagnostics",
+            "Chạy kiểm tra",
+            FluentButtonKind.Primary,
+            132);
+        var folder = CreateButton(
+            "openConfigFolder",
+            "Mở thư mục cấu hình",
+            FluentButtonKind.Secondary,
+            168);
+        var copy = CreateButton(
+            "copyDiagnostics",
+            "Sao chép báo cáo",
+            FluentButtonKind.Secondary,
+            150);
+        run.Margin = new Padding(0, 0, 8, 0);
+        folder.Margin = new Padding(0, 0, 8, 0);
+        copy.Margin = Padding.Empty;
+        run.Click += async (_, _) => await RunDiagnosticsAsync(run).ConfigureAwait(true);
         folder.Click += (_, _) => actions.OpenConfigurationFolder();
-        card.Controls.Add(folder);
-        stack.Controls.Add(card);
+        copy.Click += (_, _) => CopyDiagnostics();
+        actionBar.Controls.Add(run);
+        actionBar.Controls.Add(folder);
+        actionBar.Controls.Add(copy);
+        resultLayout.Controls.Add(actionBar, 0, 2);
+        stack.Controls.Add(resultCard);
+
+        var latencyCard = CreateCard("typingLatencyCard", 352);
+        var latencyLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 4,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        latencyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        latencyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        latencyLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        latencyLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        latencyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        latencyLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        latencyCard.Controls.Add(latencyLayout);
+
+        var latencyTitle = CreateLabel(
+            "typingLatencyTitle",
+            "Độ trễ đường gõ",
+            LabelRole.Heading);
+        latencyTitle.Dock = DockStyle.Fill;
+        latencyTitle.TextAlign = ContentAlignment.MiddleLeft;
+        latencyLayout.Controls.Add(latencyTitle, 0, 0);
+        typingLatencyToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        typingLatencyToggle.Margin = new Padding(8, 4, 0, 0);
+        latencyLayout.Controls.Add(typingLatencyToggle, 1, 0);
+
+        var latencyPrivacy = CreateLabel(
+            "typingLatencyPrivacy",
+            "Chỉ đo thời gian từng công đoạn; không ghi nội dung đã gõ, phím thô hoặc clipboard.",
+            LabelRole.Secondary);
+        latencyPrivacy.Dock = DockStyle.Fill;
+        latencyPrivacy.TextAlign = ContentAlignment.MiddleLeft;
+        latencyPrivacy.AccessibleDescription =
+            "Bộ đo cục bộ chỉ lưu thống kê thời gian và không lưu nội dung người dùng.";
+        latencyLayout.Controls.Add(latencyPrivacy, 0, 1);
+        latencyLayout.SetColumnSpan(latencyPrivacy, 2);
+
+        latencyLayout.Controls.Add(typingLatencyTable, 0, 2);
+        latencyLayout.SetColumnSpan(typingLatencyTable, 2);
+
+        var latencyActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 5, 0, 0),
+        };
+        var refreshLatency = CreateButton(
+            "refreshTypingLatency",
+            "Làm mới số đo",
+            FluentButtonKind.Primary,
+            142);
+        var clearLatency = CreateButton(
+            "clearTypingLatency",
+            "Xóa số đo",
+            FluentButtonKind.Secondary,
+            120);
+        refreshLatency.Margin = new Padding(0, 0, 8, 0);
+        clearLatency.Margin = Padding.Empty;
+        refreshLatency.Click += (_, _) => RefreshTypingLatency();
+        clearLatency.Click += (_, _) =>
+        {
+            actions.ClearTypingLatency();
+            typingLatencyTable.Items.Clear();
+        };
+        latencyActions.Controls.Add(refreshLatency);
+        latencyActions.Controls.Add(clearLatency);
+        latencyLayout.Controls.Add(latencyActions, 0, 3);
+        latencyLayout.SetColumnSpan(latencyActions, 2);
+        stack.Controls.Add(latencyCard);
+
+        var privacy = CreateCard("diagnosticsPrivacyCard", 116);
+        privacy.Controls.Add(CreateIconTextLayout(
+            "\uEA18",
+            "Không thu thập nội dung",
+            "Kiểm tra không đọc transcript, âm thanh, clipboard, nội dung gõ tắt hoặc phím thô."));
+        stack.Controls.Add(privacy);
         return page;
     }
 
-    private static Panel CreatePage() => new()
+    private ListView CreateTypingLatencyTable()
     {
-        Dock = DockStyle.Fill,
-        BackColor = WindowBackground,
-        Visible = false,
-        AutoScroll = true,
-        Padding = new Padding(0, 0, 8, 8),
-    };
-
-    private static FlowLayoutPanel CreateVerticalStack() => new()
-    {
-        Dock = DockStyle.Top,
-        AutoSize = true,
-        FlowDirection = FlowDirection.TopDown,
-        WrapContents = false,
-        BackColor = Color.Transparent,
-        Padding = new Padding(0),
-    };
-
-    private Label CreateSectionDescription(string text) => new()
-    {
-        AutoSize = false,
-        Width = 690,
-        Height = 58,
-        Text = text,
-        ForeColor = SecondaryText,
-        Font = new Font(Font.FontFamily, 10F),
-        Margin = new Padding(4, 0, 4, 14),
-    };
-
-    private static RoundedPanel CreateToggleCard(CheckBox toggle, string description)
-    {
-        var card = CreateCard();
-        card.Height = 104;
-        card.Margin = new Padding(4, 0, 4, 12);
-        toggle.Location = new Point(20, 18);
-        toggle.Width = 620;
-        card.Controls.Add(toggle);
-        card.Controls.Add(new Label
+        var table = new ListView
         {
-            AutoSize = false,
-            Text = description,
-            ForeColor = SecondaryText,
-            Location = new Point(46, 53),
-            Size = new Size(600, 36),
-        });
-        return card;
-    }
-
-    private RoundedPanel CreateStatusCard(
-        string title,
-        Label value,
-        string detail,
-        string footer)
-    {
-        var card = CreateCard();
-        card.Margin = new Padding(6);
-        card.Controls.Add(CreateCardTitle(title, 18, 16));
-        value.Location = new Point(18, 53);
-        value.Size = new Size(200, 28);
-        card.Controls.Add(value);
-        card.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = detail,
-            ForeColor = SecondaryText,
-            Location = new Point(18, 86),
-        });
-        card.Controls.Add(new Label
-        {
-            AutoSize = true,
-            Text = footer,
-            ForeColor = Color.FromArgb(126, 139, 166),
-            Font = new Font(Font.FontFamily, 8F, FontStyle.Bold),
-            Location = new Point(18, 112),
-        });
-        return card;
-    }
-
-    private RoundedPanel CreateShortcutCard(string chord, string description)
-    {
-        var card = CreateCard();
-        card.Height = 72;
-        card.Margin = new Padding(4, 0, 4, 10);
-        var chordLabel = new Label
-        {
-            AutoSize = false,
-            Text = chord,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
-            ForeColor = Color.White,
-            BackColor = Color.FromArgb(48, 57, 82),
-            Location = new Point(18, 17),
-            Size = new Size(160, 38),
+            Name = "typingLatencyTable",
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = false,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            MultiSelect = false,
+            HideSelection = false,
+            BorderStyle = BorderStyle.None,
+            OwnerDraw = true,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 4, 0, 4),
+            AccessibleName = "Bảng độ trễ đường gõ",
+            AccessibleDescription =
+                "Thống kê thời gian theo công đoạn, không chứa nội dung đã gõ.",
         };
-        card.Controls.Add(chordLabel);
-        card.Controls.Add(new Label
+        table.Columns.Add("Công đoạn", 154, HorizontalAlignment.Left);
+        table.Columns.Add("Mẫu", 72, HorizontalAlignment.Right);
+        table.Columns.Add("P50", 88, HorizontalAlignment.Right);
+        table.Columns.Add("P95", 88, HorizontalAlignment.Right);
+        table.Columns.Add("P99", 88, HorizontalAlignment.Right);
+        table.Columns.Add("Tối đa", 96, HorizontalAlignment.Right);
+        table.Columns.Add("Trung bình", 96, HorizontalAlignment.Right);
+        table.DrawColumnHeader += (_, eventArgs) =>
         {
-            AutoSize = true,
-            Text = description,
-            ForeColor = PrimaryText,
-            Location = new Point(198, 27),
-        });
-        return card;
-    }
-
-    private RoundedPanel CreateInformationCard(string title, string description)
-    {
-        var card = CreateCard();
-        card.Height = 112;
-        card.Margin = new Padding(4, 0, 4, 12);
-        card.Controls.Add(CreateCardTitle(title, 20, 16));
-        if (!string.IsNullOrEmpty(description))
-        {
-            card.Controls.Add(new Label
+            if (eventArgs.Header is not { } header)
             {
-                AutoSize = false,
-                Text = description,
-                ForeColor = SecondaryText,
-                Location = new Point(20, 49),
-                Size = new Size(620, 50),
-            });
+                return;
+            }
+            using var background = new SolidBrush(palette.SurfaceSecondary);
+            using var separator = new Pen(palette.Border);
+            eventArgs.Graphics.FillRectangle(background, eventArgs.Bounds);
+            eventArgs.Graphics.DrawLine(
+                separator,
+                eventArgs.Bounds.Left,
+                eventArgs.Bounds.Bottom - 1,
+                eventArgs.Bounds.Right,
+                eventArgs.Bounds.Bottom - 1);
+            var alignment = header.TextAlign == HorizontalAlignment.Right
+                ? TextFormatFlags.Right
+                : TextFormatFlags.Left;
+            using var headerFont = new Font(Font.FontFamily, 8.75F, FontStyle.Bold);
+            TextRenderer.DrawText(
+                eventArgs.Graphics,
+                header.Text,
+                headerFont,
+                Rectangle.Inflate(eventArgs.Bounds, -10, 0),
+                palette.TextSecondary,
+                alignment |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
+        };
+        table.DrawItem += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is not { } item)
+            {
+                return;
+            }
+            var backgroundColor = item.Selected
+                ? palette.SurfacePressed
+                : eventArgs.ItemIndex % 2 == 0
+                    ? palette.Surface
+                    : palette.SurfaceSecondary;
+            using var background = new SolidBrush(backgroundColor);
+            eventArgs.Graphics.FillRectangle(background, eventArgs.Bounds);
+        };
+        table.DrawSubItem += (_, eventArgs) =>
+        {
+            if (eventArgs.Item is not { } item || eventArgs.SubItem is not { } subItem)
+            {
+                return;
+            }
+            var backgroundColor = item.Selected
+                ? palette.SurfacePressed
+                : eventArgs.ItemIndex % 2 == 0
+                    ? palette.Surface
+                    : palette.SurfaceSecondary;
+            using var background = new SolidBrush(backgroundColor);
+            using var separator = new Pen(palette.Border);
+            eventArgs.Graphics.FillRectangle(background, eventArgs.Bounds);
+            eventArgs.Graphics.DrawLine(
+                separator,
+                eventArgs.Bounds.Left,
+                eventArgs.Bounds.Bottom - 1,
+                eventArgs.Bounds.Right,
+                eventArgs.Bounds.Bottom - 1);
+            var alignment = eventArgs.Header?.TextAlign == HorizontalAlignment.Right
+                ? TextFormatFlags.Right
+                : TextFormatFlags.Left;
+            var font = eventArgs.ColumnIndex == 0
+                ? new Font(Font.FontFamily, 9F, FontStyle.Bold)
+                : new Font(Font.FontFamily, 9F, FontStyle.Regular);
+            using (font)
+            {
+                TextRenderer.DrawText(
+                    eventArgs.Graphics,
+                    subItem.Text,
+                    font,
+                    Rectangle.Inflate(eventArgs.Bounds, -10, 0),
+                    item.Selected ? palette.TextPrimary :
+                        eventArgs.ColumnIndex == 0 ? palette.TextPrimary : palette.TextSecondary,
+                    alignment |
+                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.NoPrefix);
+            }
+        };
+        table.Resize += (_, _) => ResizeTypingLatencyColumns(table);
+        return table;
+    }
+
+    private void RefreshTypingLatency()
+    {
+        var snapshots = actions.GetTypingLatencySnapshot();
+        typingLatencyTable.BeginUpdate();
+        try
+        {
+            typingLatencyTable.Items.Clear();
+            foreach (var snapshot in snapshots)
+            {
+                var item = new ListViewItem(GetTypingLatencyStageLabel(snapshot.Stage))
+                {
+                    Tag = snapshot,
+                };
+                item.SubItems.Add(snapshot.SampleCount.ToString("N0", CultureInfo.CurrentCulture));
+                item.SubItems.Add(FormatLatency(snapshot.MedianNanoseconds));
+                item.SubItems.Add(FormatLatency(snapshot.P95Nanoseconds));
+                item.SubItems.Add(FormatLatency(snapshot.P99Nanoseconds));
+                item.SubItems.Add(FormatLatency(snapshot.MaximumNanoseconds));
+                item.SubItems.Add(FormatLatency(snapshot.MeanNanoseconds));
+                typingLatencyTable.Items.Add(item);
+            }
         }
+        finally
+        {
+            typingLatencyTable.EndUpdate();
+        }
+    }
+
+    private static string GetTypingLatencyStageLabel(TypingLatencyStage stage) => stage switch
+    {
+        TypingLatencyStage.CallbackTotal => "Toàn bộ callback",
+        TypingLatencyStage.ForegroundContext => "Ngữ cảnh cửa sổ",
+        TypingLatencyStage.SafetyGuard => "Kiểm tra an toàn",
+        TypingLatencyStage.EngineProcess => "Engine",
+        TypingLatencyStage.InputInjection => "Chèn ký tự",
+        _ => stage.ToString(),
+    };
+
+    private static string FormatLatency(double nanoseconds)
+    {
+        if (nanoseconds <= 0)
+        {
+            return "—";
+        }
+        if (nanoseconds < 1_000)
+        {
+            return $"{nanoseconds:N0} ns";
+        }
+        if (nanoseconds < 1_000_000)
+        {
+            return $"{nanoseconds / 1_000D:N2} µs";
+        }
+        return $"{nanoseconds / 1_000_000D:N2} ms";
+    }
+
+    private static void ResizeTypingLatencyColumns(ListView table)
+    {
+        if (table.Columns.Count != 7 || table.ClientSize.Width <= 0)
+        {
+            return;
+        }
+
+        var fixedWidth = 72 + 88 + 88 + 88 + 96 + 96;
+        table.Columns[0].Width = Math.Max(142, table.ClientSize.Width - fixedWidth - 4);
+    }
+
+    private FluentCard CreateStatusCard(
+        string name,
+        string glyph,
+        string title,
+        FluentStatusBadge badge,
+        string detail)
+    {
+        var card = CreateCard(name, 110);
+        card.Margin = new Padding(0, 0, 10, 10);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 2,
+            Padding = new Padding(0),
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        card.Controls.Add(layout);
+        var icon = CreateIconLabel(name + "Icon", glyph, 14F);
+        icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
+        layout.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(name + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(titleLabel, 1, 0);
+        badge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        layout.Controls.Add(badge, 2, 0);
+        var detailLabel = CreateLabel(name + "Detail", detail, LabelRole.Secondary);
+        detailLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(detailLabel, 1, 1);
+        layout.SetColumnSpan(detailLabel, 2);
         return card;
     }
 
-    private static RoundedPanel CreateCard() => new()
+    private FluentCard CreateSettingRow(
+        string name,
+        string glyph,
+        string title,
+        string description,
+        string metadata,
+        FluentToggle toggle)
     {
-        Width = 700,
-        Height = 120,
-        BackColor = CardBackground,
-        BorderColor = CardBorder,
-        CornerRadius = 14,
-        Margin = new Padding(4, 0, 4, 12),
-    };
+        var card = CreateCard(name, 92);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 4,
+            RowCount = 2,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 58F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        card.Controls.Add(layout);
 
-    private Label CreateCardTitle(string text, int x, int y) => new()
+        var icon = CreateIconLabel(name + "Icon", glyph, 14F);
+        icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
+        layout.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(name + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(titleLabel, 1, 0);
+        var metadataLabel = CreateLabel(name + "Metadata", metadata, LabelRole.Caption);
+        metadataLabel.AutoSize = true;
+        metadataLabel.Anchor = AnchorStyles.Right;
+        metadataLabel.Margin = new Padding(12, 0, 12, 0);
+        layout.Controls.Add(metadataLabel, 2, 0);
+        toggle.Anchor = AnchorStyles.Right;
+        toggle.Margin = new Padding(8, 4, 0, 0);
+        layout.SetRowSpan(toggle, 2);
+        layout.Controls.Add(toggle, 3, 0);
+        var descriptionLabel = CreateLabel(name + "Description", description, LabelRole.Secondary);
+        descriptionLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(descriptionLabel, 1, 1);
+        layout.SetColumnSpan(descriptionLabel, 2);
+        return card;
+    }
+
+    private FluentCard CreateShortcutRow(
+        string name,
+        string glyph,
+        string chord,
+        string description)
     {
-        AutoSize = true,
-        Text = text,
-        Font = new Font(Font.FontFamily, 11F, FontStyle.Bold),
-        ForeColor = PrimaryText,
-        Location = new Point(x, y),
-    };
+        var card = CreateCard(name, 74);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        card.Controls.Add(layout);
+        var icon = CreateIconLabel(name + "Icon", glyph, 14F);
+        icon.Dock = DockStyle.Fill;
+        layout.Controls.Add(icon, 0, 0);
+        var keycap = CreateLabel(name + "Keycap", chord, LabelRole.Caption);
+        keycap.Dock = DockStyle.Fill;
+        keycap.TextAlign = ContentAlignment.MiddleCenter;
+        keycap.Margin = new Padding(0, 4, 14, 4);
+        keycap.Paint += KeycapPaint;
+        layout.Controls.Add(keycap, 1, 0);
+        var descriptionLabel = CreateLabel(name + "Description", description, LabelRole.Primary);
+        descriptionLabel.Dock = DockStyle.Fill;
+        descriptionLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(descriptionLabel, 2, 0);
+        return card;
+    }
 
-    private CheckBox CreateToggle(string name, string text, string shortcut) => new()
+    private TableLayoutPanel CreateDiagnosticRow(string glyph, string title, FluentStatusBadge badge)
+    {
+        var row = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var icon = CreateIconLabel(title + "Icon", glyph, 12F);
+        icon.Dock = DockStyle.Fill;
+        row.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(title + "Label", title, LabelRole.Primary);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        row.Controls.Add(titleLabel, 1, 0);
+        badge.Anchor = AnchorStyles.Right;
+        row.Controls.Add(badge, 2, 0);
+        return row;
+    }
+
+    private TableLayoutPanel CreateIconTextLayout(string glyph, string title, string detail)
+    {
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(0),
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 46F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        var icon = CreateIconLabel(title + "Icon", glyph, 15F);
+        icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
+        layout.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(title + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(titleLabel, 1, 0);
+        var detailLabel = CreateLabel(title + "Detail", detail, LabelRole.Secondary);
+        detailLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(detailLabel, 1, 1);
+        return layout;
+    }
+
+    private void AddSnippetRows()
+    {
+        snippetsList.Controls.Clear();
+        foreach (var snippet in SnippetRow.All)
+        {
+            snippetsList.Controls.Add(CreateSnippetRow(snippet));
+        }
+        ResizeStackChildren(snippetsList);
+    }
+
+    private FluentCard CreateSnippetRow(SnippetRow snippet)
+    {
+        var card = CreateCard("snippet_" + snippet.Trigger.TrimStart(';'), 62);
+        card.Tag = snippet;
+        card.Margin = new Padding(0, 0, 0, 6);
+        card.UseSecondarySurface = true;
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        card.Controls.Add(layout);
+        var trigger = CreateLabel(card.Name + "Trigger", snippet.Trigger, LabelRole.Caption);
+        trigger.Dock = DockStyle.Fill;
+        trigger.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(trigger, 0, 0);
+        var expansion = CreateLabel(card.Name + "Expansion", snippet.Expansion, LabelRole.Primary);
+        expansion.Dock = DockStyle.Fill;
+        expansion.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(expansion, 1, 0);
+        var scope = CreateLabel(card.Name + "Scope", snippet.Scope, LabelRole.Tertiary);
+        scope.AutoSize = true;
+        scope.Anchor = AnchorStyles.Right;
+        layout.Controls.Add(scope, 2, 0);
+        return card;
+    }
+
+    private void FilterSnippets(string query)
+    {
+        var normalized = query.Trim();
+        foreach (Control child in snippetsList.Controls)
+        {
+            if (child.Tag is not SnippetRow snippet)
+            {
+                continue;
+            }
+            child.Visible = normalized.Length == 0 ||
+                snippet.Trigger.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
+                snippet.Expansion.Contains(normalized, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static Panel CreatePage(string name) => new()
     {
         Name = name,
-        AutoSize = false,
-        Height = 28,
-        Text = $"{text}     {shortcut}",
-        Font = new Font(Font.FontFamily, 10.5F, FontStyle.Bold),
-        ForeColor = PrimaryText,
-        FlatStyle = FlatStyle.Flat,
-        AccessibleName = text,
+        Dock = DockStyle.Fill,
+        Visible = false,
+        AutoScroll = false,
+        Margin = Padding.Empty,
+        Padding = Padding.Empty,
     };
 
-    private Label CreateValueLabel(string name) => new()
+    private static FlowLayoutPanel CreateVerticalStack(string name)
+    {
+        var stack = new FlowLayoutPanel
+        {
+            Name = name,
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 8, 8, 8),
+        };
+        stack.SizeChanged += (_, _) => ResizeStackChildren(stack);
+        stack.ControlAdded += (_, _) => ResizeStackChildren(stack);
+        return stack;
+    }
+
+    private static void ResizeStackChildren(FlowLayoutPanel stack)
+    {
+        var available = Math.Max(520, stack.ClientSize.Width - stack.Padding.Horizontal - 4);
+        foreach (Control child in stack.Controls)
+        {
+            child.Width = available;
+        }
+    }
+
+    private FluentCard CreateCard(string name, int height) => new()
     {
         Name = name,
-        AutoSize = false,
-        Font = new Font(Font.FontFamily, 11F, FontStyle.Bold),
-        ForeColor = PrimaryText,
-        TextAlign = ContentAlignment.MiddleLeft,
+        Height = height,
+        Palette = palette,
     };
 
-    private Button CreatePrimaryButton(string name, string text)
+    private Label CreateLabel(string name, string text, LabelRole role)
     {
-        var button = new Button
+        var label = new Label
         {
             Name = name,
             Text = text,
             AutoSize = false,
-            Size = new Size(100, 38),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Accent,
-            ForeColor = Color.White,
-            Cursor = Cursors.Hand,
-            Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
+            UseMnemonic = false,
+            Tag = role,
+            Margin = Padding.Empty,
         };
-        button.FlatAppearance.BorderSize = 0;
-        button.FlatAppearance.MouseOverBackColor = AccentHover;
-        return button;
+        label.Font = role switch
+        {
+            LabelRole.Title => new Font("Segoe UI Variable Display", 20F, FontStyle.Bold),
+            LabelRole.Heading => new Font(Font.FontFamily, 10.5F, FontStyle.Bold),
+            LabelRole.Caption => new Font(Font.FontFamily, 9F, FontStyle.Bold),
+            _ => new Font(Font.FontFamily, 9.5F, FontStyle.Regular),
+        };
+        return label;
     }
 
-    private Button CreateSecondaryButton(string name, string text)
+    private static Label CreateIconLabel(string name, string glyph, float size) => new()
     {
-        var button = new Button
+        Name = name,
+        Text = glyph,
+        AutoSize = false,
+        TextAlign = ContentAlignment.MiddleCenter,
+        Font = new Font("Segoe Fluent Icons", size, FontStyle.Regular),
+        Tag = LabelRole.Icon,
+        Margin = Padding.Empty,
+        AccessibleName = string.Empty,
+    };
+
+    private FluentStatusBadge CreateBadge(string name, int width) => new()
+    {
+        Name = name,
+        Width = width,
+        Font = new Font(Font.FontFamily, 8.75F, FontStyle.Bold),
+        Palette = palette,
+        AccessibleRole = AccessibleRole.StaticText,
+    };
+
+    private FluentToggle CreateToggle(string name, string accessibleName) => new()
+    {
+        Name = name,
+        AccessibleName = accessibleName,
+        Palette = palette,
+    };
+
+    private FluentButton CreateButton(
+        string name,
+        string text,
+        FluentButtonKind kind,
+        int width) =>
+        new()
         {
             Name = name,
             Text = text,
-            AutoSize = false,
-            Size = new Size(112, 38),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(37, 44, 62),
-            ForeColor = PrimaryText,
-            Cursor = Cursors.Hand,
+            Kind = kind,
+            Width = width,
             Font = new Font(Font.FontFamily, 9F, FontStyle.Bold),
+            Palette = palette,
+            AccessibleName = text,
         };
-        button.FlatAppearance.BorderColor = CardBorder;
-        button.FlatAppearance.MouseOverBackColor = Color.FromArgb(48, 57, 79);
-        return button;
+
+    private TextBox CreateTextBox(string name, string placeholder, string accessibleName) => new()
+    {
+        Name = name,
+        BorderStyle = BorderStyle.None,
+        PlaceholderText = placeholder,
+        AccessibleName = accessibleName,
+        Font = new Font(Font.FontFamily, 10F, FontStyle.Regular),
+        Margin = Padding.Empty,
+    };
+
+    private Panel CreateInputFrame(TextBox textBox, Control? trailing = null)
+    {
+        var frame = new Panel
+        {
+            Name = textBox.Name + "Frame",
+            Height = 40,
+            Padding = trailing is null
+                ? new Padding(12, 10, 12, 7)
+                : new Padding(12, 8, 4, 4),
+            Margin = Padding.Empty,
+            Tag = "inputFrame",
+        };
+        textBox.Dock = DockStyle.Fill;
+        if (trailing is null)
+        {
+            frame.Controls.Add(textBox);
+        }
+        else
+        {
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            textBox.Margin = new Padding(0, 4, 4, 0);
+            trailing.Height = 30;
+            trailing.Margin = Padding.Empty;
+            layout.Controls.Add(textBox, 0, 0);
+            layout.Controls.Add(trailing, 1, 0);
+            frame.Controls.Add(layout);
+        }
+        frame.Paint += InputFramePaint;
+        return frame;
     }
 
-    private sealed class RoundedPanel : Panel
+    private async void SetupTsfButtonClick(object? sender, EventArgs eventArgs)
     {
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int CornerRadius { get; init; } = 12;
-
-        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public Color BorderColor { get; init; } = CardBorder;
-
-        protected override void OnPaint(PaintEventArgs eventArgs)
+        if (currentSnapshot.Readiness == KeyinaReadiness.Ready)
         {
-            base.OnPaint(eventArgs);
-            eventArgs.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var rectangle = new Rectangle(0, 0, Width - 1, Height - 1);
-            using var path = CreateRoundedRectangle(rectangle, CornerRadius);
-            using var pen = new Pen(BorderColor);
-            eventArgs.Graphics.DrawPath(pen, path);
+            ShowSection("typing");
+            return;
+        }
+        if (currentSnapshot.Readiness == KeyinaReadiness.Unavailable)
+        {
+            ShowSection("diagnostics");
+            return;
         }
 
-        protected override void OnResize(EventArgs eventArgs)
+        setupTsfButton.Enabled = false;
+        setupTsfButton.Text = "Đang thiết lập…";
+        try
         {
-            base.OnResize(eventArgs);
-            using var path = CreateRoundedRectangle(
-                new Rectangle(0, 0, Width, Height),
-                CornerRadius);
-            Region = new Region(path);
-            Invalidate();
+            diagnosticsResult.Text = await actions.SetupTsf(lifetime.Token).ConfigureAwait(true);
+            ShowSection("diagnostics");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (InvalidOperationException exception)
+        {
+            diagnosticsResult.Text = $"Không thể thiết lập: {exception.Message}";
+            ShowSection("diagnostics");
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                setupTsfButton.Enabled = true;
+                ApplySnapshot(currentSnapshot);
+            }
+        }
+    }
+
+    private async Task RunDiagnosticsAsync(FluentButton runButton)
+    {
+        runButton.Enabled = false;
+        diagnosticsResult.Text = "Đang kiểm tra host, bộ gõ, phím tắt và tài nguyên…";
+        diagnosticsResult.ForeColor = palette.TextSecondary;
+        try
+        {
+            diagnosticsResult.Text = await actions.RunDiagnostics(lifetime.Token).ConfigureAwait(true);
+            diagnosticsResult.ForeColor = palette.Success;
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (InvalidOperationException exception)
+        {
+            diagnosticsResult.Text = $"Kiểm tra thất bại: {exception.Message}";
+            diagnosticsResult.ForeColor = palette.Error;
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                runButton.Enabled = true;
+            }
+        }
+    }
+
+    private void SaveSpeechCredential()
+    {
+        var secret = speechApiKey.Text;
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return;
+        }
+        actions.SaveSpeechApiKey(secret);
+        speechApiKey.Clear();
+    }
+
+    private void CopyDiagnostics()
+    {
+        try
+        {
+            Clipboard.SetText(diagnosticsResult.Text);
+            diagnosticsResult.Text = "Đã sao chép báo cáo chẩn đoán.";
+            diagnosticsResult.ForeColor = palette.Success;
+        }
+        catch (ExternalException)
+        {
+            diagnosticsResult.Text = "Clipboard đang bận. Hãy thử sao chép lại.";
+            diagnosticsResult.ForeColor = palette.Warning;
+        }
+    }
+
+    private void UpdateResponsiveShell()
+    {
+        var sidebarWidth = ClientSize.Width < 1020 ? 206F : 228F;
+        shell.ColumnStyles[0].Width = sidebarWidth;
+        contentPanel.Padding = ClientSize.Width < 1020
+            ? new Padding(22, 20, 22, 22)
+            : new Padding(30, 22, 30, 26);
+    }
+
+    private void SystemEventsUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs eventArgs)
+    {
+        if (!IsHandleCreated || IsDisposed)
+        {
+            return;
+        }
+        BeginInvoke(new Action(ApplySystemTheme));
+    }
+
+    private void ApplySystemTheme()
+    {
+        palette = FluentTheme.Current;
+        BackColor = palette.Window;
+        ForeColor = palette.TextPrimary;
+        shell.BackColor = palette.Window;
+        sidebar.BackColor = palette.Sidebar;
+        contentPanel.BackColor = palette.Window;
+        pageHost.BackColor = palette.Window;
+        systemThemeStatus.Text = FluentTheme.SystemThemeDescription;
+
+        ApplyThemeRecursive(this);
+        FluentWindow.Apply(this, palette);
+        Invalidate(true);
+    }
+
+    private void ApplyThemeRecursive(Control root)
+    {
+        switch (root)
+        {
+            case FluentCard card:
+                card.Palette = palette;
+                break;
+            case FluentToggle toggle:
+                toggle.Palette = palette;
+                toggle.BackColor = palette.Surface;
+                break;
+            case FluentNavigationButton navigation:
+                navigation.Palette = palette;
+                navigation.BackColor = palette.Sidebar;
+                break;
+            case FluentButton button:
+                button.Palette = palette;
+                button.BackColor = palette.Surface;
+                break;
+            case FluentStatusBadge badge:
+                badge.Palette = palette;
+                badge.BackColor = palette.Surface;
+                break;
+            case TextBox textBox:
+                textBox.BackColor = palette.SurfaceSecondary;
+                textBox.ForeColor = palette.TextPrimary;
+                break;
+            case ListView listView:
+                listView.BackColor = palette.SurfaceSecondary;
+                listView.ForeColor = palette.TextPrimary;
+                break;
+            case Label label:
+                label.ForeColor = label.Tag switch
+                {
+                    LabelRole.Title or LabelRole.Heading or LabelRole.Primary => palette.TextPrimary,
+                    LabelRole.Tertiary => palette.TextTertiary,
+                    LabelRole.Icon => palette.Accent,
+                    _ => palette.TextSecondary,
+                };
+                break;
+            case Panel panel when string.Equals(panel.Tag as string, "inputFrame", StringComparison.Ordinal):
+                panel.BackColor = palette.SurfaceSecondary;
+                break;
+            case TableLayoutPanel table:
+                table.BackColor = Color.Transparent;
+                break;
+            case FlowLayoutPanel flow:
+                flow.BackColor = Color.Transparent;
+                break;
         }
 
-        private static GraphicsPath CreateRoundedRectangle(
-            Rectangle rectangle,
-            int radius)
+        foreach (Control child in root.Controls)
         {
-            var diameter = Math.Max(2, radius * 2);
-            var path = new GraphicsPath();
-            path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
-            path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
-            path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
-            path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
-            path.CloseFigure();
-            return path;
+            ApplyThemeRecursive(child);
         }
+    }
+
+    private static void SetBadge(FluentStatusBadge badge, string text, FluentTone tone)
+    {
+        badge.Text = text;
+        badge.Tone = tone;
+        badge.AccessibleName = text;
+        badge.Invalidate();
+    }
+
+    private void BrandMarkPaint(object? sender, PaintEventArgs eventArgs)
+    {
+        if (sender is not Label label)
+        {
+            return;
+        }
+        eventArgs.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var bounds = new Rectangle(0, 0, label.Width - 10, label.Height - 10);
+        using var path = FluentDrawing.CreateRoundedRectangle(bounds, 10);
+        using var brush = new SolidBrush(palette.Accent);
+        eventArgs.Graphics.FillPath(brush, path);
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            "K",
+            label.Font,
+            bounds,
+            Color.White,
+            TextFormatFlags.HorizontalCenter |
+            TextFormatFlags.VerticalCenter |
+            TextFormatFlags.NoPadding);
+    }
+
+    private void InputFramePaint(object? sender, PaintEventArgs eventArgs)
+    {
+        if (sender is not Panel panel)
+        {
+            return;
+        }
+        var bounds = new Rectangle(0, 0, panel.Width - 1, panel.Height - 1);
+        using var path = FluentDrawing.CreateRoundedRectangle(bounds, 5);
+        using var pen = new Pen(
+            panel.ContainsFocus ? palette.Focus : palette.BorderStrong,
+            panel.ContainsFocus ? 1.5F : 1F);
+        eventArgs.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        eventArgs.Graphics.DrawPath(pen, path);
+    }
+
+    private void KeycapPaint(object? sender, PaintEventArgs eventArgs)
+    {
+        if (sender is not Label label)
+        {
+            return;
+        }
+        var bounds = new Rectangle(0, 0, label.Width - 1, label.Height - 1);
+        using var path = FluentDrawing.CreateRoundedRectangle(bounds, 5);
+        using var brush = new SolidBrush(palette.SurfaceSecondary);
+        using var pen = new Pen(palette.BorderStrong);
+        eventArgs.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        eventArgs.Graphics.FillPath(brush, path);
+        eventArgs.Graphics.DrawPath(pen, path);
+        TextRenderer.DrawText(
+            eventArgs.Graphics,
+            label.Text,
+            label.Font,
+            bounds,
+            palette.TextPrimary,
+            TextFormatFlags.HorizontalCenter |
+            TextFormatFlags.VerticalCenter |
+            TextFormatFlags.NoPrefix);
+    }
+
+    private static string LocalizeRuntimeStatus(string status)
+    {
+        if (status.Contains("Focused app connected", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Đã kết nối";
+        }
+        if (status.Contains("Registered", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Đã đăng ký";
+        }
+        if (status.Contains("Unavailable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Không khả dụng";
+        }
+        if (status.Contains("Not", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("Missing", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cần xử lý";
+        }
+        return status;
+    }
+
+#pragma warning restore CA1725
+
+    private enum LabelRole
+    {
+        Title,
+        Heading,
+        Primary,
+        Secondary,
+        Tertiary,
+        Caption,
+        Icon,
+    }
+
+    private sealed record SnippetRow(string Trigger, string Expansion, string Scope)
+    {
+        public static IReadOnlyList<SnippetRow> All { get; } =
+        [
+            new(";kvi", "Bật hoặc tắt bộ gõ tiếng Việt", "Lệnh"),
+            new(";kvoice", "Bắt đầu hoặc dừng nhập bằng giọng nói", "Lệnh"),
+            new(";kdate", "Ngày hiện tại", "Biến"),
+            new(";ktime", "Giờ hiện tại", "Biến"),
+        ];
     }
 }

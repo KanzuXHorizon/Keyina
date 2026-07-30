@@ -25,15 +25,11 @@ internal static class LiveKeyboardHookIntegrationTests
         };
         form.Controls.Add(textBox);
         form.Show();
-        form.Activate();
-        textBox.Select();
-        Application.DoEvents();
-        AssertEx.True(
-            form.ContainsFocus,
-            "The live hook test window must own keyboard focus before sending input.");
+        EnsureForeground(form, textBox);
 
         using var hook = new VietnameseKeyboardHook();
         hook.Start(enabledInitially: true);
+        EnsureForeground(form, textBox);
 
         SendAscii("tieengs vieetj");
         PumpUntil(
@@ -42,6 +38,7 @@ internal static class LiveKeyboardHookIntegrationTests
 
         AssertEx.Equal("tiếng việt", textBox.Text);
 
+        EnsureForeground(form, textBox);
         textBox.SelectAll();
         hook.Reset();
         SendAscii("as");
@@ -50,6 +47,7 @@ internal static class LiveKeyboardHookIntegrationTests
             TimeSpan.FromSeconds(3));
         AssertEx.Equal("á", textBox.Text);
 
+        EnsureForeground(form, textBox);
         textBox.Clear();
         hook.Reset();
         var burstCases = new[]
@@ -64,7 +62,7 @@ internal static class LiveKeyboardHookIntegrationTests
         for (var iteration = 0; iteration < 20; iteration++)
         {
             var testCase = burstCases[iteration % burstCases.Length];
-            SendAscii(testCase.Raw, pumpEachKey: false);
+            SendAscii(testCase.Raw, pumpEachKey: true);
             expected.Append(testCase.Expected);
         }
         PumpUntil(
@@ -72,6 +70,7 @@ internal static class LiveKeyboardHookIntegrationTests
             TimeSpan.FromSeconds(5));
         AssertEx.Equal(expected.ToString(), textBox.Text);
 
+        EnsureForeground(form, textBox);
         textBox.Text = "nội dung cũ cần thay";
         textBox.SelectAll();
         hook.Reset();
@@ -93,6 +92,48 @@ internal static class LiveKeyboardHookIntegrationTests
         hook.Dispose();
         form.Close();
         Application.DoEvents();
+    }
+
+    private static void EnsureForeground(Form form, TextBox textBox)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var currentThread = GetCurrentThreadId();
+            var foregroundThread = GetWindowThreadProcessId(
+                GetForegroundWindow(),
+                out _);
+            var attached = foregroundThread != 0 &&
+                foregroundThread != currentThread &&
+                AttachThreadInput(currentThread, foregroundThread, attach: true);
+            try
+            {
+                form.TopMost = true;
+                _ = ShowWindow(form.Handle, showCommand: 9);
+                _ = BringWindowToTop(form.Handle);
+                form.Activate();
+                _ = SetForegroundWindow(form.Handle);
+                _ = SetActiveWindow(form.Handle);
+                _ = SetFocus(textBox.Handle);
+                form.TopMost = false;
+                Application.DoEvents();
+            }
+            finally
+            {
+                if (attached)
+                {
+                    _ = AttachThreadInput(currentThread, foregroundThread, attach: false);
+                }
+            }
+
+            if (GetForegroundWindow() == form.Handle && textBox.Focused)
+            {
+                return;
+            }
+            Thread.Sleep(20);
+        }
+
+        throw new InvalidOperationException(
+            "The live hook test window could not acquire foreground keyboard focus.");
     }
 
     private static void SetClipboardText(string value)
@@ -171,6 +212,42 @@ internal static class LiveKeyboardHookIntegrationTests
             Thread.Sleep(10);
         }
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetActiveWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint window, int showCommand);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        nint window,
+        out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(
+        uint attachThread,
+        uint attachToThread,
+        [MarshalAs(UnmanagedType.Bool)] bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(

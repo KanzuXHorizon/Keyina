@@ -242,22 +242,28 @@ public sealed class VietnameseKeyboardHook : IDisposable
             {
                 try
                 {
-                    TypingTraceBuffer.Record(
-                        "transform",
-                        keyIndex,
-                        currentProcessId,
-                        keyboardEvent.Shift,
-                        detail: $"backspaces={edit.BackspaceCount};insertUnits={edit.InsertText.Length}");
+                    if (TypingTraceBuffer.IsEnabled)
+                    {
+                        TypingTraceBuffer.Record(
+                            "transform",
+                            keyIndex,
+                            currentProcessId,
+                            keyboardEvent.Shift,
+                            detail: $"backspaces={edit.BackspaceCount};insertUnits={edit.InsertText.Length}");
+                    }
                     injector.Apply(edit);
                 }
                 catch (Exception exception) when (
                     exception is Win32Exception or InvalidOperationException)
                 {
-                    TypingTraceBuffer.Record(
-                        "inject-failed",
-                        keyIndex,
-                        currentProcessId,
-                        detail: exception.GetType().Name);
+                    if (TypingTraceBuffer.IsEnabled)
+                    {
+                        TypingTraceBuffer.Record(
+                            "inject-failed",
+                            keyIndex,
+                            currentProcessId,
+                            detail: exception.GetType().Name);
+                    }
                     engine.Reset();
                     return false;
                 }
@@ -291,8 +297,9 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     private static bool IsLiteralPassThrough(HookEdit edit, Rune character) =>
         edit.BackspaceCount == 0 &&
-        character.Value != 0 &&
-        string.Equals(edit.InsertText, character.ToString(), StringComparison.Ordinal);
+        character.Value is > 0 and <= char.MaxValue &&
+        edit.InsertText.Length == 1 &&
+        edit.InsertText[0] == (char)character.Value;
 
     private static bool IsSupportedCharacter(Rune character)
     {

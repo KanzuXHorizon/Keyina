@@ -17,6 +17,7 @@ class TestTextStore final : public ITextStoreACP {
 
   [[nodiscard]] std::wstring_view Text() const noexcept;
   [[nodiscard]] LONG Caret() const noexcept;
+  void SelectForTest(LONG start, LONG end) noexcept;
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID interface_id,
                                            void** object) override;

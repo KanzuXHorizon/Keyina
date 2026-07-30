@@ -692,7 +692,7 @@ HRESULT TextService::RequestRoute(ITfContext* context, KeyRoute route,
       client_id_, session, TF_ES_SYNC | TF_ES_READWRITE, &session_result);
   session->Release();
 
-  if (SUCCEEDED(request_result) && SUCCEEDED(session_result)) {
+  if (SUCCEEDED(request_result) && session_result == S_OK) {
     *applied = true;
     return S_OK;
   }
@@ -824,8 +824,8 @@ HRESULT TextService::ApplyEngineEdit(
   }
 
   HRESULT result = EnsureComposition(context, edit_cookie);
-  if (FAILED(result)) {
-    return result;
+  if (result != S_OK || composition_ == nullptr) {
+    return result == S_OK ? E_UNEXPECTED : result;
   }
 
   ITfRange* range = nullptr;

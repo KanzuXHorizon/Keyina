@@ -9,6 +9,19 @@ public static class TypingTraceBuffer
     private const int Capacity = 512;
     private static readonly TypingTraceEntry?[] Entries = new TypingTraceEntry?[Capacity];
     private static long sequence;
+    private static int enabled;
+
+    public static bool IsEnabled => Volatile.Read(ref enabled) != 0;
+
+    public static void SetEnabled(bool value) =>
+        Volatile.Write(ref enabled, value ? 1 : 0);
+
+    public static void Clear()
+    {
+        SetEnabled(false);
+        Array.Clear(Entries);
+        Volatile.Write(ref sequence, 0);
+    }
 
     public static void Record(
         string action,
@@ -20,13 +33,18 @@ public static class TypingTraceBuffer
         bool windows = false,
         string? detail = null)
     {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
         var next = Interlocked.Increment(ref sequence);
         var entry = new TypingTraceEntry(
             next,
             Stopwatch.GetTimestamp(),
             action,
-            virtualKey,
+            ClassifyVirtualKey(virtualKey),
             processId,
             shift,
             control,
@@ -78,16 +96,26 @@ public static class TypingTraceBuffer
     private static string FormatEntry(TypingTraceEntry entry) => string.Create(
         CultureInfo.InvariantCulture,
         $"seq={entry.Sequence} ticks={entry.TimestampTicks} action={entry.Action} " +
-        $"vk=0x{entry.VirtualKey:X2} pid={entry.ProcessId} " +
+        $"key={entry.KeyClass} pid={entry.ProcessId} " +
         $"mods={(entry.Shift ? 'S' : '-')}{(entry.Control ? 'C' : '-')}{(entry.Alt ? 'A' : '-')}{(entry.Windows ? 'W' : '-')} " +
         $"detail={entry.Detail}");
+
+    private static string ClassifyVirtualKey(int virtualKey) => virtualKey switch
+    {
+        >= 0x41 and <= 0x5A => "letter",
+        >= 0x30 and <= 0x39 => "digit",
+        0x08 => "backspace",
+        0x20 => "space",
+        0x09 or 0x0D or 0x1B => "control",
+        _ => "other",
+    };
 }
 
 public sealed record TypingTraceEntry(
     long Sequence,
     long TimestampTicks,
     string Action,
-    int VirtualKey,
+    string KeyClass,
     int ProcessId,
     bool Shift,
     bool Control,

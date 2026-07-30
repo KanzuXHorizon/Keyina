@@ -12,7 +12,11 @@ function(keyina_configure_target target)
       /EHsc
       /Zc:__cplusplus
       $<$<BOOL:${KEYINA_WARNINGS_AS_ERRORS}>:/WX>
+      $<$<BOOL:${KEYINA_ENABLE_SANITIZERS}>:/fsanitize=address>
     )
+    if(KEYINA_ENABLE_SANITIZERS)
+      target_link_options(${target} PRIVATE /INCREMENTAL:NO)
+    endif()
   else()
     target_compile_options(${target} PRIVATE
       -Wall

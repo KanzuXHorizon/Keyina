@@ -31,6 +31,14 @@ std::wstring_view TestTextStore::Text() const noexcept { return text_; }
 
 LONG TestTextStore::Caret() const noexcept { return selection_.acpEnd; }
 
+void TestTextStore::SelectForTest(LONG start, LONG end) noexcept {
+  selection_.acpStart = start;
+  selection_.acpEnd = end;
+  selection_.style.ase = TS_AE_END;
+  selection_.style.fInterimChar = FALSE;
+  NotifySelectionChange();
+}
+
 HRESULT TestTextStore::QueryInterface(REFIID interface_id, void** object) {
   if (object == nullptr) {
     return E_POINTER;

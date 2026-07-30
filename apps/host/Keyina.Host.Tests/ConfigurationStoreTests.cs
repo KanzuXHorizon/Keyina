@@ -1,6 +1,7 @@
 using System.Text;
 using Keyina.Host.Configuration;
 using Keyina.Host.Core.Configuration;
+using Keyina.Host.Core.Feedback;
 
 namespace Keyina.Host.Tests;
 
@@ -39,6 +40,7 @@ internal static class ConfigurationStoreTests
         AssertEx.Equal(configuration.VietnameseEnabled, loaded.VietnameseEnabled);
         AssertEx.Equal(configuration.SpeechEnabled, loaded.SpeechEnabled);
         AssertEx.Equal(configuration.Theme, loaded.Theme);
+        AssertEx.Equal(configuration.Feedback, loaded.Feedback);
         AssertEx.Equal(configuration.Snippets.Length, loaded.Snippets.Length);
         AssertEx.Equal(configuration.Snippets[0].Trigger, loaded.Snippets[0].Trigger);
         AssertEx.Equal(configuration.Snippets[0].Expansion, loaded.Snippets[0].Expansion);
@@ -80,6 +82,37 @@ internal static class ConfigurationStoreTests
         };
         AssertThrows<ConfigurationException>(() =>
             store.SaveAsync(duplicate, CancellationToken.None).GetAwaiter().GetResult());
+    }
+
+    [KeyinaTest("schema one configuration without feedback uses automatic defaults")]
+    private static void LegacySchemaOneUsesAutomaticFeedback()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        File.WriteAllText(
+            path,
+            "{\"schema_version\":1,\"vietnamese_enabled\":true,\"speech_enabled\":false,\"theme\":\"system\",\"snippets\":[]}");
+
+        var loaded = store.LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(FeedbackPreferences.Default, loaded.Feedback);
+    }
+
+    [KeyinaTest("configuration rejects invalid feedback mode")]
+    private static void InvalidFeedbackModeIsRejected()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        var invalid = KeyinaConfiguration.Default with
+        {
+            Feedback = new FeedbackPreferences((FeedbackMode)999),
+        };
+
+        AssertThrows<ConfigurationException>(() =>
+            store.SaveAsync(invalid, CancellationToken.None).GetAwaiter().GetResult());
     }
 
     [KeyinaTest("configuration store returns defaults when file is missing and ignores orphaned temp files")]

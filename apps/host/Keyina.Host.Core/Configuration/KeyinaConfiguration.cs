@@ -1,3 +1,4 @@
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Snippets;
 
 namespace Keyina.Host.Core.Configuration;
@@ -45,7 +46,8 @@ public sealed record KeyinaConfiguration(
     bool VietnameseEnabled,
     bool SpeechEnabled,
     KeyinaTheme Theme,
-    SnippetConfiguration[] Snippets)
+    SnippetConfiguration[] Snippets,
+    FeedbackPreferences? Feedback = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const int MaximumCustomSnippets = 10_000;
@@ -55,7 +57,8 @@ public sealed record KeyinaConfiguration(
         VietnameseEnabled: true,
         SpeechEnabled: false,
         KeyinaTheme.System,
-        []);
+        [],
+        FeedbackPreferences.Default);
 
     public IReadOnlyList<SnippetDefinition> ValidateAndCreateSnippets()
     {
@@ -67,6 +70,10 @@ public sealed record KeyinaConfiguration(
         if (!Enum.IsDefined(Theme))
         {
             throw new ConfigurationValidationException("Configuration theme is invalid.");
+        }
+        if (Feedback is null || !Enum.IsDefined(Feedback.Mode))
+        {
+            throw new ConfigurationValidationException("Configuration feedback mode is invalid.");
         }
         if (Snippets is null)
         {
