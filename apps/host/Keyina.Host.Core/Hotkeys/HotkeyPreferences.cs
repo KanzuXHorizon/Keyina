@@ -54,6 +54,49 @@ public sealed record HotkeyPreferences(
             HotkeyGestureKind.Press,
             new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape)));
 
+    public HotkeyPreference GetPreference(HotkeyCommand command) => command switch
+    {
+        HotkeyCommand.ToggleVietnamese => ToggleVietnamese,
+        HotkeyCommand.PushToTalkPressed => PushToTalk,
+        HotkeyCommand.ToggleDictation => ToggleDictation,
+        HotkeyCommand.TranslateSelection => TranslateSelection,
+        HotkeyCommand.CancelDictation => CancelActiveCommand,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(command),
+            command,
+            "The command does not expose a configurable shortcut."),
+    };
+
+    public HotkeyPreferences WithChord(
+        HotkeyCommand command,
+        HotkeyChord chord) => command switch
+    {
+        HotkeyCommand.ToggleVietnamese => this with
+        {
+            ToggleVietnamese = ToggleVietnamese with { Chord = chord },
+        },
+        HotkeyCommand.PushToTalkPressed => this with
+        {
+            PushToTalk = PushToTalk with { Chord = chord },
+        },
+        HotkeyCommand.ToggleDictation => this with
+        {
+            ToggleDictation = ToggleDictation with { Chord = chord },
+        },
+        HotkeyCommand.TranslateSelection => this with
+        {
+            TranslateSelection = TranslateSelection with { Chord = chord },
+        },
+        HotkeyCommand.CancelDictation => this with
+        {
+            CancelActiveCommand = CancelActiveCommand with { Chord = chord },
+        },
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(command),
+            command,
+            "The command does not expose a configurable shortcut."),
+    };
+
     public IReadOnlyList<ConfiguredHotkeyBinding> ToBindings() =>
     [
         new(

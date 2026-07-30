@@ -672,7 +672,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 return;
             }
 
-            var candidate = WithHotkeyChord(configuration.Hotkeys, command, chord);
+            var candidate = configuration.Hotkeys.WithChord(command, chord);
             candidate.Validate();
             if (!TryApplyHotkeyPreferences(candidate, command))
             {
@@ -789,37 +789,6 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         hotkeysReady = true;
         return true;
     }
-
-    private static HotkeyPreferences WithHotkeyChord(
-        HotkeyPreferences preferences,
-        HotkeyCommand command,
-        HotkeyChord chord) => command switch
-    {
-        HotkeyCommand.ToggleVietnamese => preferences with
-        {
-            ToggleVietnamese = preferences.ToggleVietnamese with { Chord = chord },
-        },
-        HotkeyCommand.PushToTalkPressed => preferences with
-        {
-            PushToTalk = preferences.PushToTalk with { Chord = chord },
-        },
-        HotkeyCommand.ToggleDictation => preferences with
-        {
-            ToggleDictation = preferences.ToggleDictation with { Chord = chord },
-        },
-        HotkeyCommand.TranslateSelection => preferences with
-        {
-            TranslateSelection = preferences.TranslateSelection with { Chord = chord },
-        },
-        HotkeyCommand.CancelDictation => preferences with
-        {
-            CancelActiveCommand = preferences.CancelActiveCommand with { Chord = chord },
-        },
-        _ => throw new ArgumentOutOfRangeException(
-            nameof(command),
-            command,
-            "The command does not expose a configurable shortcut."),
-    };
 
     private void SetStartupEnabled(bool enabled)
     {

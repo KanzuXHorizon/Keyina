@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Translation;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Typing;
@@ -31,6 +32,7 @@ public sealed class SettingsForm : Form
     private readonly SettingsActions actions;
     private readonly Dictionary<string, Panel> pages = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FluentNavigationButton> navigationButtons = new(StringComparer.Ordinal);
+    private readonly Dictionary<HotkeyCommand, Label> hotkeyKeycaps = [];
     private readonly CancellationTokenSource lifetime = new();
     private readonly TableLayoutPanel shell;
     private readonly Panel sidebar;
@@ -479,6 +481,7 @@ public sealed class SettingsForm : Form
             setupTsfButton.Kind = snapshot.Readiness == KeyinaReadiness.Unavailable
                 ? FluentButtonKind.Secondary
                 : FluentButtonKind.Primary;
+            UpdateHotkeyDisplay(snapshot.Hotkeys);
             setupTsfButton.Invalidate();
         }
         finally
@@ -1170,31 +1173,75 @@ public sealed class SettingsForm : Form
         var stack = CreateVerticalStack("hotkeysStack");
         page.Controls.Add(stack);
 
-        stack.Controls.Add(CreateShortcutRow(
+        stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyVietnamese",
             "\uE765",
-            "Ctrl + Shift",
-            "Bật hoặc tắt bộ gõ tiếng Việt"));
-        stack.Controls.Add(CreateShortcutRow(
+            "Bật hoặc tắt bộ gõ tiếng Việt",
+            "Tổ hợp chỉ gồm phím bổ trợ, không chặn thao tác trong ứng dụng hiện tại.",
+            HotkeyCommand.ToggleVietnamese));
+        stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyPushToTalk",
             "\uE720",
-            "Ctrl + Alt + Space",
-            "Giữ để đọc bằng giọng nói"));
-        stack.Controls.Add(CreateShortcutRow(
+            "Giữ để nhập bằng giọng nói",
+            "Bắt đầu khi nhấn và dừng ngay khi thả phím chính hoặc phím bổ trợ.",
+            HotkeyCommand.PushToTalkPressed));
+        stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyToggleDictation",
             "\uE8D4",
-            "Ctrl + Alt + V",
-            "Bắt đầu hoặc dừng phiên đọc"));
-        stack.Controls.Add(CreateShortcutRow(
+            "Bật hoặc tắt phiên nhập giọng nói",
+            "Nhấn một lần để bắt đầu, nhấn lại để hoàn tất phiên đọc.",
+            HotkeyCommand.ToggleDictation));
+        stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyTranslation",
             "\uE8C1",
-            "Ctrl + Alt + T",
-            "Dịch phần văn bản đang chọn"));
-        stack.Controls.Add(CreateShortcutRow(
+            "Dịch văn bản đang chọn",
+            "Dịch sang ngôn ngữ đã cài đặt và giữ nguyên focus của ứng dụng.",
+            HotkeyCommand.TranslateSelection));
+        stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyCancel",
             "\uE711",
-            "Escape",
-            "Hủy phiên đọc hoặc yêu cầu dịch hiện tại"));
+            "Hủy thao tác đang chạy",
+            "Hủy phiên đọc hoặc yêu cầu dịch hiện tại mà không chèn nội dung dở dang.",
+            HotkeyCommand.CancelDictation));
+
+        var restoreCard = CreateCard("hotkeyRestoreCard", 88);
+        var restoreLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        restoreLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        restoreLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        restoreLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        restoreLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        restoreCard.Controls.Add(restoreLayout);
+        var restoreTitle = CreateLabel(
+            "hotkeyRestoreTitle",
+            "Khôi phục phím tắt mặc định",
+            LabelRole.Heading);
+        restoreTitle.Dock = DockStyle.Fill;
+        restoreLayout.Controls.Add(restoreTitle, 0, 0);
+        var resetAllHotkeys = CreateButton(
+            "resetAllHotkeys",
+            "Khôi phục tất cả",
+            FluentButtonKind.Secondary,
+            144);
+        resetAllHotkeys.AccessibleDescription =
+            "Đưa toàn bộ phím tắt về cấu hình mặc định của Keyina.";
+        resetAllHotkeys.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        resetAllHotkeys.Click += (_, _) => actions.ResetAllHotkeys();
+        restoreLayout.SetRowSpan(resetAllHotkeys, 2);
+        restoreLayout.Controls.Add(resetAllHotkeys, 1, 0);
+        var restoreDescription = CreateLabel(
+            "hotkeyRestoreDescription",
+            "Các thay đổi chỉ được lưu khi Windows đăng ký toàn bộ tổ hợp thành công.",
+            LabelRole.Secondary);
+        restoreDescription.Dock = DockStyle.Fill;
+        restoreLayout.Controls.Add(restoreDescription, 0, 1);
+        stack.Controls.Add(restoreCard);
 
         var feedbackCard = CreateCard("hotkeyFeedbackCard", 184);
         var feedbackLayout = new TableLayoutPanel
@@ -1790,38 +1837,83 @@ public sealed class SettingsForm : Form
         return card;
     }
 
-    private FluentCard CreateShortcutRow(
+    private FluentCard CreateEditableShortcutRow(
         string name,
         string glyph,
-        string chord,
-        string description)
+        string title,
+        string description,
+        HotkeyCommand command)
     {
-        var card = CreateCard(name, 74);
+        var card = CreateCard(name, 92);
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            RowCount = 1,
+            ColumnCount = 5,
+            RowCount = 2,
             Padding = Padding.Empty,
             Margin = Padding.Empty,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 98F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         card.Controls.Add(layout);
+
         var icon = CreateIconLabel(name + "Icon", glyph, 14F);
         icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
         layout.Controls.Add(icon, 0, 0);
-        var keycap = CreateLabel(name + "Keycap", chord, LabelRole.Caption);
+
+        var titleLabel = CreateLabel(name + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(titleLabel, 1, 0);
+
+        var descriptionLabel = CreateLabel(
+            name + "Description",
+            description,
+            LabelRole.Secondary);
+        descriptionLabel.Dock = DockStyle.Fill;
+        descriptionLabel.TextAlign = ContentAlignment.TopLeft;
+        layout.Controls.Add(descriptionLabel, 1, 1);
+
+        var keycap = CreateLabel(
+            name + "Keycap",
+            HotkeyText.Format(currentSnapshot.Hotkeys.GetPreference(command).Chord),
+            LabelRole.Caption);
+        keycap.AccessibleName = $"Phím tắt hiện tại cho {title}";
         keycap.Dock = DockStyle.Fill;
         keycap.TextAlign = ContentAlignment.MiddleCenter;
-        keycap.Margin = new Padding(0, 4, 14, 4);
+        keycap.Margin = new Padding(6, 6, 10, 6);
         keycap.Paint += KeycapPaint;
-        layout.Controls.Add(keycap, 1, 0);
-        var descriptionLabel = CreateLabel(name + "Description", description, LabelRole.Primary);
-        descriptionLabel.Dock = DockStyle.Fill;
-        descriptionLabel.TextAlign = ContentAlignment.MiddleLeft;
-        layout.Controls.Add(descriptionLabel, 2, 0);
+        layout.SetRowSpan(keycap, 2);
+        layout.Controls.Add(keycap, 2, 0);
+        hotkeyKeycaps.Add(command, keycap);
+
+        var changeButton = CreateButton(
+            name + "Change",
+            "Đổi",
+            FluentButtonKind.Primary,
+            76);
+        changeButton.AccessibleName = $"Đổi phím tắt cho {title}";
+        changeButton.Anchor = AnchorStyles.None;
+        changeButton.Click += (_, _) => EditHotkey(command);
+        layout.SetRowSpan(changeButton, 2);
+        layout.Controls.Add(changeButton, 3, 0);
+
+        var resetButton = CreateButton(
+            name + "Reset",
+            "Khôi phục",
+            FluentButtonKind.Subtle,
+            90);
+        resetButton.AccessibleName = $"Khôi phục phím tắt mặc định cho {title}";
+        resetButton.Anchor = AnchorStyles.None;
+        resetButton.Click += (_, _) => actions.ResetHotkey(command);
+        layout.SetRowSpan(resetButton, 2);
+        layout.Controls.Add(resetButton, 4, 0);
         return card;
     }
 
@@ -2201,6 +2293,54 @@ public sealed class SettingsForm : Form
             {
                 runButton.Enabled = true;
             }
+        }
+    }
+
+    private void EditHotkey(HotkeyCommand command)
+    {
+        using var dialog = new HotkeyCaptureDialog(command, currentSnapshot.Hotkeys);
+        if (dialog.ShowDialog(this) == DialogResult.OK &&
+            dialog.CapturedChord is { } chord)
+        {
+            actions.SetHotkey(command, chord);
+        }
+    }
+
+    private void UpdateHotkeyDisplay(HotkeyPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        foreach (var (command, label) in hotkeyKeycaps)
+        {
+            label.Text = HotkeyText.Format(
+                preferences.GetPreference(command).Chord);
+            label.Invalidate();
+        }
+
+        var toggleVietnamese = HotkeyText.Format(
+            preferences.ToggleVietnamese.Chord);
+        var toggleDictation = HotkeyText.Format(
+            preferences.ToggleDictation.Chord);
+        var translation = HotkeyText.Format(
+            preferences.TranslateSelection.Chord);
+        SetNamedLabelText(
+            "overviewTypingDetail",
+            $"Telex · phím tắt {toggleVietnamese}");
+        SetNamedLabelText("typingEnabledRowMetadata", toggleVietnamese);
+        SetNamedLabelText("speechEnabledRowMetadata", toggleDictation);
+        SetNamedLabelText("translationEnabledRowMetadata", translation);
+        SetNamedLabelText(
+            "translationShortcutTitle",
+            $"Phím tắt {translation}");
+    }
+
+    private void SetNamedLabelText(string name, string text)
+    {
+        var label = Controls.Find(name, searchAllChildren: true)
+            .OfType<Label>()
+            .SingleOrDefault();
+        if (label is not null)
+        {
+            label.Text = text;
         }
     }
 

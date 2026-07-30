@@ -1,5 +1,6 @@
 using System.Reflection;
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.UI;
 using Keyina.Host.Windows.Typing;
 
@@ -115,6 +116,61 @@ internal static class SettingsFormTests
         AssertEx.True(keyEvent.Handled, "Enter should be handled by the credential input.");
         AssertEx.True(keyEvent.SuppressKeyPress,
             "Enter should not emit a system beep after saving the credential.");
+    }
+
+    [KeyinaTest("hotkeys settings expose editable rows and restore actions")]
+    private static void HotkeyEditorControlsAreBound()
+    {
+        var resetCommands = new List<HotkeyCommand>();
+        var resetAllCount = 0;
+        var actions = SettingsActions.NoOp with
+        {
+            ResetHotkey = resetCommands.Add,
+            ResetAllHotkeys = () => resetAllCount++,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+
+        foreach (var name in new[]
+                 {
+                     "hotkeyVietnameseChange",
+                     "hotkeyVietnameseReset",
+                     "hotkeyPushToTalkChange",
+                     "hotkeyPushToTalkReset",
+                     "hotkeyToggleDictationChange",
+                     "hotkeyToggleDictationReset",
+                     "hotkeyTranslationChange",
+                     "hotkeyTranslationReset",
+                     "hotkeyCancelChange",
+                     "hotkeyCancelReset",
+                     "resetAllHotkeys",
+                 })
+        {
+            AssertEx.Equal(1, form.Controls.Find(name, true).Length);
+        }
+
+        var custom = HotkeyPreferences.Default with
+        {
+            TranslateSelection = HotkeyPreferences.Default.TranslateSelection with
+            {
+                Chord = new HotkeyChord(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    VirtualKey.K),
+            },
+        };
+        form.ApplySnapshot(SettingsSnapshot.Sample with { Hotkeys = custom });
+        AssertEx.Equal(
+            "Ctrl + Shift + K",
+            ((Label)form.Controls.Find("hotkeyTranslationKeycap", true).Single()).Text);
+        AssertEx.Equal(
+            "Phím tắt Ctrl + Shift + K",
+            ((Label)form.Controls.Find("translationShortcutTitle", true).Single()).Text);
+
+        InvokeClick((Button)form.Controls.Find("hotkeyTranslationReset", true).Single());
+        InvokeClick((Button)form.Controls.Find("resetAllHotkeys", true).Single());
+        AssertEx.True(
+            resetCommands.SequenceEqual([HotkeyCommand.TranslateSelection]),
+            "Per-command restore invoked the wrong action.");
+        AssertEx.Equal(1, resetAllCount);
     }
 
     [KeyinaTest("hotkeys settings configure and preview non-intrusive feedback")]
