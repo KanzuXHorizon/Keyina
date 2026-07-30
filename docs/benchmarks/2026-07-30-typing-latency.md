@@ -64,14 +64,14 @@ Pointer clicks and wheel input are observed through the same message-only window
 
 The keyboard callback performs no file I/O, network I/O, UI work, or process launch. It updates fixed-size state, runs the engine, and posts optional commands to the message loop. Escape and Undo are not captured unless the on-demand command companion is already active, avoiding interference with normal applications and games. The runtime profile is checked once per second on the message loop and atomically reloaded without restarting the hook.
 
-The published-bundle resource gate measures both private working set and private commit, rejects any value over 10 MiB, rejects resident thread growth, and rejects samples contaminated by physical keyboard input. Three uncontaminated Release tray runs produced:
+The published-bundle resource gate measures both private working set and private commit, rejects any value over 10 MiB, and rejects resident thread growth. Physical desktop input is reported as contamination metadata instead of failing the product gate; benchmark summaries use only uncontaminated samples. Three uncontaminated Release tray runs produced:
 
 | Metric | Range | Median |
 |---|---:|---:|
-| Idle CPU over 5 seconds | 0% measured | 0% |
-| Total working set, shared-inclusive | 11.51–12.03 MiB | 12.03 MiB |
-| Private working set | 2.61–2.62 MiB | 2.62 MiB |
-| Private bytes / commit | 2.91–2.92 MiB | 2.91 MiB |
+| Idle CPU over 5 seconds | 0–0.0195% measured | 0% |
+| Total working set, shared-inclusive | 11.19–11.23 MiB | 11.20 MiB |
+| Private working set | 2.51–2.55 MiB | 2.52 MiB |
+| Private bytes / commit | 2.76–2.82 MiB | 2.77 MiB |
 | Resident thread delta | 0 | 0 |
 | Physical keyboard events | 0 | 0 |
 | 10 MiB private-memory gate | pass in 3/3 runs | pass |
@@ -121,7 +121,7 @@ A universal single-pass technical-token classifier was also benchmarked and reje
 Fresh gates after the changes:
 
 - Release solution build: 0 warnings, 0 errors.
-- Host tests, including real desktop hook integration, shared modifier observation, profile publishing, settings/command companions, focus-locked dictation, startup resolution, publish contracts, pointer lifetime, injected-event isolation, disabled fast path, and resource-budget checks: 268/268 passed.
+- Host tests, including real desktop hook integration, shared modifier observation, profile publishing, settings/command companions, focus-locked dictation, startup resolution, release/installer contracts, pointer lifetime, injected-event isolation, disabled fast path, and resource-budget checks: 282/282 passed.
 - Dedicated-hook regression: input remains responsive while the owner UI thread is blocked.
 - Secure-input regression: password state is refreshed even when the focused HWND does not change.
 - Partial-startup regression: a pointer-observer startup failure releases the already-installed keyboard hook.
@@ -137,6 +137,6 @@ Fresh gates after the changes:
 
 ## Local EVKey process comparison
 
-EVKey 64-bit was sampled five times while already running on the same development machine. The five samples were stable at 0.527 MiB private working set, 4.949 MiB private bytes, and 0% measured CPU. Keyina's native tray median was 2.62 MiB private working set and 2.91 MiB private bytes. EVKey therefore had the lower immediately resident private working set in this sample, while Keyina used about 41% less private commit. These metrics measure different memory concepts and do not establish an overall winner.
+EVKey64 was sampled five times while already running on the same development machine. Every sample reported 13.31 MiB total working set, 0.46 MiB private working set, 4.48 MiB private bytes, 0% measured CPU, 4 threads, and 1,002 handles. Keyina's three-run native-tray median was 11.20 MiB total working set, 2.52 MiB private working set, 2.77 MiB private bytes, 0% measured CPU, no thread growth beyond the process baseline, and 164 handles. EVKey therefore had the lower immediately resident private working set in this snapshot; Keyina had roughly 38% lower private commit, lower shared-inclusive working set, and substantially fewer handles. These metrics measure different resource concepts and do not establish an overall winner.
 
 No universal “faster than UniKey” or “faster than EVKey” claim is made from internal microbenchmarks or one process snapshot. A valid product comparison still requires the same keyboard corpus, target applications, startup state, observation method, correctness checks, repeated frame-time measurements, elevated/fullscreen coverage, and long-running stability without capturing user content.
