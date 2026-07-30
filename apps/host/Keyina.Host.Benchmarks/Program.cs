@@ -5,6 +5,7 @@ using System.Text.Json;
 using Keyina.Host.Core.Ipc;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Windows.Audio;
+using Keyina.Host.Windows.Hotkeys;
 using Keyina.Host.Windows.Typing;
 using Keyina.Speechmatics;
 
@@ -38,6 +39,7 @@ internal static class Program
             Payload: "xin chào");
         var audioSource = CreateAudioSource();
         using var typingEngine = new NativeEngineClient();
+        var typingContextProbe = new WindowsTypingContextProbe();
         var inputSender = new CountingInputSender();
         var inputInjector = new UnicodeInputInjector(inputSender);
         var transformEdit = new HookEdit(1, "á", ConsumePhysicalKey: true);
@@ -46,6 +48,9 @@ internal static class Program
             new NativeEngineClient(),
             inputInjector,
             hookNativeApi);
+        using var benchmarkModifierHook = new ModifierKeyboardHook(
+            new SharedTypingKeyboardHookNativeApi(benchmarkHook));
+        benchmarkModifierHook.Start();
         benchmarkHook.Start(enabledInitially: true);
 
         var cases = new List<BenchmarkCase>
@@ -120,6 +125,16 @@ internal static class Program
         TypingLatencyProfiler.SetEnabled(false);
         TypingLatencyProfiler.Clear();
 
+        cases.Add(Measure(
+            "typing_foreground_context_snapshot",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 20_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                var context = typingContextProbe.Capture();
+                return context.ForegroundProcessId ^ context.FocusWindow.GetHashCode();
+            }));
         cases.Add(Measure(
             "typing_native_engine_literal",
             iterations: 100_000,

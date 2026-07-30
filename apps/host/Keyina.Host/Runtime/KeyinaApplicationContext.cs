@@ -421,17 +421,19 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                             out _);
                 });
 
-                modifierHook = new ModifierKeyboardHook();
+                typingHook = new VietnameseKeyboardHook();
+                modifierHook = new ModifierKeyboardHook(
+                    new SharedTypingKeyboardHookNativeApi(typingHook));
                 modifierHook.CommandReceived += (_, command) => PostCommand(command);
                 modifierHook.Start();
-
-                typingHook = new VietnameseKeyboardHook();
                 typingHook.Start(configuration.VietnameseEnabled);
                 typingReady = true;
                 hotkeysReady = true;
             }
             catch (Exception)
             {
+                modifierHook?.Dispose();
+                modifierHook = null;
                 typingHook?.Dispose();
                 typingHook = null;
                 typingReady = false;
@@ -1298,10 +1300,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
         feedbackCoordinator?.Dispose();
         feedbackCoordinator = null;
-        typingHook?.Dispose();
-        typingHook = null;
         modifierHook?.Dispose();
         modifierHook = null;
+        typingHook?.Dispose();
+        typingHook = null;
         if (hotkeyManager is not null && hotkeyWindow is not null)
         {
             try

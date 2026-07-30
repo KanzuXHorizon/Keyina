@@ -35,6 +35,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private readonly IUnicodeInputInjector injector;
     private readonly IVietnameseKeyboardHookNativeApi nativeApi;
     private readonly bool[] suppressedKeys = new bool[256];
+    private Action<VietnameseKeyboardEvent>? physicalEventObserver;
     private IDisposable? installation;
     private IDisposable? pointerInstallation;
     private long processedPhysicalEventCount;
@@ -57,6 +58,22 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     public long ProcessedPhysicalEventCount =>
         Interlocked.Read(ref processedPhysicalEventCount);
+
+    public IDisposable SubscribePhysicalEvents(
+        Action<VietnameseKeyboardEvent> observer)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(observer);
+        if (Interlocked.CompareExchange(
+                ref physicalEventObserver,
+                observer,
+                comparand: null) is not null)
+        {
+            throw new InvalidOperationException(
+                "The resident typing hook already has a physical-event observer.");
+        }
+        return new PhysicalEventSubscription(this, observer);
+    }
 
     public void Start(bool enabledInitially)
     {
@@ -109,6 +126,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             Interlocked.Exchange(ref installation, null),
             ref failures);
         DisposeResource(engine, ref failures);
+        Interlocked.Exchange(ref physicalEventObserver, null);
         Array.Clear(suppressedKeys);
         if (failures is not null)
         {
@@ -120,6 +138,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     private bool ProcessRawEvent(VietnameseKeyboardEvent keyboardEvent)
     {
+        NotifyPhysicalEvent(keyboardEvent);
         if (keyboardEvent.ExtraInfo == UnicodeInputInjector.InjectionMarker)
         {
             return false;
@@ -341,6 +360,30 @@ public sealed class VietnameseKeyboardHook : IDisposable
         }
     }
 
+    private void NotifyPhysicalEvent(VietnameseKeyboardEvent keyboardEvent)
+    {
+        var observer = Volatile.Read(ref physicalEventObserver);
+        if (observer is null)
+        {
+            return;
+        }
+        try
+        {
+            observer(keyboardEvent);
+        }
+        catch (Exception)
+        {
+            // Modifier observation is optional and must never break typing.
+        }
+    }
+
+    private void UnsubscribePhysicalEvents(
+        Action<VietnameseKeyboardEvent> observer) =>
+        _ = Interlocked.CompareExchange(
+            ref physicalEventObserver,
+            null,
+            observer);
+
     private static void DisposeResource(
         IDisposable? resource,
         ref List<Exception>? failures)
@@ -357,6 +400,17 @@ public sealed class VietnameseKeyboardHook : IDisposable
         {
             (failures ??= []).Add(exception);
         }
+    }
+
+    private sealed class PhysicalEventSubscription(
+        VietnameseKeyboardHook owner,
+        Action<VietnameseKeyboardEvent> observer) : IDisposable
+    {
+        private VietnameseKeyboardHook? owner = owner;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref owner, null)?
+                .UnsubscribePhysicalEvents(observer);
     }
 
     private void RequestReset() =>
@@ -400,17 +454,15 @@ public sealed class VietnameseKeyboardHook : IDisposable
         private const int WmKeyUp = 0x0101;
         private const int WmSysKeyDown = 0x0104;
         private const int WmSysKeyUp = 0x0105;
-        private const int GlobalWindowStyle = -16;
-        private const nint EditStylePassword = 0x20;
+        private const int ThreadPowerThrottling = 3;
+        private const uint ThreadPowerThrottlingCurrentVersion = 1;
+        private const uint ThreadPowerThrottlingExecutionSpeed = 0x1;
         private const uint LlkhfLowerIntegrityInjected = 0x00000002;
         private const uint LlkhfInjected = 0x00000010;
-        private static readonly uint GuiThreadInfoSize =
-            checked((uint)Marshal.SizeOf<GuiThreadInfo>());
+        private static readonly uint ThreadPowerThrottlingStateSize =
+            checked((uint)Marshal.SizeOf<ThreadPowerThrottlingState>());
 
-        private nint cachedActiveWindow;
-        private int cachedProcessId;
-        private nint cachedFocusWindow;
-        private bool cachedShouldBypass = true;
+        private readonly WindowsTypingContextProbe contextProbe = new();
 
         public IDisposable Install(Func<VietnameseKeyboardEvent, bool> callback)
         {
@@ -424,36 +476,23 @@ public sealed class VietnameseKeyboardHook : IDisposable
             return new RawMouseResetLease(callback);
         }
 
-        public VietnameseTypingContext GetTypingContext()
+        public VietnameseTypingContext GetTypingContext() => contextProbe.Capture();
+
+        private static void ConfigureThreadPowerQos(bool useEcoQos)
         {
-            var info = new GuiThreadInfo { Size = GuiThreadInfoSize };
-            if (!GetGUIThreadInfo(0, ref info) || info.FocusWindow == 0)
+            var state = new ThreadPowerThrottlingState
             {
-                cachedActiveWindow = 0;
-                cachedProcessId = 0;
-                cachedFocusWindow = 0;
-                cachedShouldBypass = true;
-                return new VietnameseTypingContext(0, 0, ShouldBypassTyping: true);
-            }
-
-            var activeWindow = info.ActiveWindow != 0
-                ? info.ActiveWindow
-                : info.FocusWindow;
-            if (activeWindow != cachedActiveWindow)
-            {
-                _ = GetWindowThreadProcessId(activeWindow, out var processId);
-                cachedActiveWindow = activeWindow;
-                cachedProcessId = checked((int)processId);
-            }
-
-            var style = GetWindowLongPtrW(info.FocusWindow, GlobalWindowStyle);
-            cachedFocusWindow = info.FocusWindow;
-            cachedShouldBypass = (style & EditStylePassword) != 0;
-
-            return new VietnameseTypingContext(
-                cachedProcessId,
-                cachedFocusWindow,
-                cachedShouldBypass);
+                Version = ThreadPowerThrottlingCurrentVersion,
+                ControlMask = ThreadPowerThrottlingExecutionSpeed,
+                StateMask = useEcoQos
+                    ? ThreadPowerThrottlingExecutionSpeed
+                    : 0,
+            };
+            _ = SetThreadInformation(
+                GetCurrentThread(),
+                ThreadPowerThrottling,
+                ref state,
+                ThreadPowerThrottlingStateSize);
         }
 
         private sealed class HookLease : IDisposable
@@ -472,6 +511,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             private Exception? shutdownFailure;
             private uint threadId;
             private nint hookHandle;
+            private bool capsLock;
             private int disposed;
 
             public HookLease(Func<VietnameseKeyboardEvent, bool> callback)
@@ -531,6 +571,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             private void Run()
             {
                 threadId = GetCurrentThreadId();
+                ConfigureThreadPowerQos(useEcoQos: false);
                 try
                 {
                     _ = PeekMessageW(
@@ -539,6 +580,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
                         MinimumMessage: 0,
                         MaximumMessage: 0,
                         PeekMessageNoRemove);
+                    capsLock = (GetKeyState(0x14) & 0x0001) != 0;
                     hookHandle = SetWindowsHookExW(
                         WhKeyboardLowLevel,
                         procedure,
@@ -607,15 +649,21 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 }
             }
 
-            private nint HookCallback(int code, nint message, nint data)
+            private unsafe nint HookCallback(int code, nint message, nint data)
             {
                 try
                 {
                     if (code >= 0 && IsKeyboardMessage(message))
                     {
-                        var nativeEvent = Marshal.PtrToStructure<LowLevelKeyboardInput>(data);
+                        var nativeEvent = *(LowLevelKeyboardInput*)data;
                         var isKeyDown = message == WmKeyDown || message == WmSysKeyDown;
                         var virtualKey = checked((int)nativeEvent.VirtualKey);
+                        var wasPressed = (uint)virtualKey < (uint)pressedKeys.Length &&
+                            pressedKeys[virtualKey];
+                        if (isKeyDown && !wasPressed && virtualKey == 0x14)
+                        {
+                            capsLock = !capsLock;
+                        }
                         if ((uint)virtualKey < (uint)pressedKeys.Length)
                         {
                             pressedKeys[virtualKey] = isKeyDown;
@@ -625,11 +673,9 @@ public sealed class VietnameseKeyboardHook : IDisposable
                         var control = IsPressed(0x11) || IsPressed(0xA2) || IsPressed(0xA3);
                         var alt = IsPressed(0x12) || IsPressed(0xA4) || IsPressed(0xA5);
                         var windows = IsPressed(0x5B) || IsPressed(0x5C);
-                        var capsLock = (GetKeyState(0x14) & 0x0001) != 0;
-                        var character = TranslateCharacter(
-                            nativeEvent.VirtualKey,
-                            shift,
-                            capsLock);
+                        var character = isKeyDown
+                            ? TranslateCharacter(nativeEvent.VirtualKey, shift, capsLock)
+                            : default;
                         var isInjected = (nativeEvent.Flags &
                             (LlkhfInjected | LlkhfLowerIntegrityInjected)) != 0;
                         var handled = callback(new VietnameseKeyboardEvent(
@@ -770,6 +816,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             private void Run()
             {
                 threadId = GetCurrentThreadId();
+                ConfigureThreadPowerQos(useEcoQos: true);
                 var registered = false;
                 try
                 {
@@ -1008,20 +1055,6 @@ public sealed class VietnameseKeyboardHook : IDisposable
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct GuiThreadInfo
-        {
-            public uint Size;
-            public uint Flags;
-            public nint ActiveWindow;
-            public nint FocusWindow;
-            public nint CaptureWindow;
-            public nint MenuOwnerWindow;
-            public nint MoveSizeWindow;
-            public nint CaretWindow;
-            public Rectangle CaretRectangle;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
         private readonly struct LowLevelKeyboardInput
         {
             public readonly uint VirtualKey;
@@ -1079,6 +1112,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
             public uint Time;
             public Point Point;
             public uint Private;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ThreadPowerThrottlingState
+        {
+            public uint Version;
+            public uint ControlMask;
+            public uint StateMask;
         }
 
         private delegate nint LowLevelKeyboardProcedure(int code, nint message, nint data);
@@ -1178,15 +1219,16 @@ public sealed class VietnameseKeyboardHook : IDisposable
         [DllImport("kernel32.dll")]
         private static extern uint GetCurrentThreadId();
 
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+        [DllImport("kernel32.dll")]
+        private static extern nint GetCurrentThread();
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
-
-        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
-        private static extern nint GetWindowLongPtrW(nint window, int index);
+        private static extern bool SetThreadInformation(
+            nint thread,
+            int informationClass,
+            ref ThreadPowerThrottlingState information,
+            uint informationSize);
 
         [DllImport("user32.dll")]
         private static extern short GetKeyState(int virtualKey);

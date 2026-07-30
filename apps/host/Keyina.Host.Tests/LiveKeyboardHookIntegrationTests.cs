@@ -24,27 +24,20 @@ internal static class LiveKeyboardHookIntegrationTests
         form.Show();
         EnsureForeground(form, textBox);
 
-        var nativeType = typeof(VietnameseKeyboardHook).GetNestedType(
-            "WindowsVietnameseKeyboardHookNativeApi",
-            System.Reflection.BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Native typing context provider was not found.");
-        var native = (IVietnameseKeyboardHookNativeApi?)Activator.CreateInstance(
-            nativeType,
-            nonPublic: true)
-            ?? throw new InvalidOperationException("Native typing context provider was not created.");
+        var contextProbe = new WindowsTypingContextProbe();
 
         const int globalWindowStyle = -16;
         const nint editStylePassword = 0x20;
         var focusWindow = textBox.Handle;
         var originalStyle = GetWindowLongPtrW(focusWindow, globalWindowStyle);
-        var ordinary = native.GetTypingContext();
+        var ordinary = contextProbe.Capture();
         try
         {
             _ = SetWindowLongPtrW(
                 focusWindow,
                 globalWindowStyle,
                 originalStyle | editStylePassword);
-            var password = native.GetTypingContext();
+            var password = contextProbe.Capture();
 
             AssertEx.Equal(focusWindow, ordinary.FocusWindow);
             AssertEx.False(ordinary.ShouldBypassTyping, "Ordinary text was classified as secure input.");

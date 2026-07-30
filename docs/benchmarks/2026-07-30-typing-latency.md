@@ -7,6 +7,11 @@ This report records the local evidence for the first Keyina extreme-optimization
 - opt-in latency measurement for each resident typing stage;
 - zero-allocation managed hot paths after warm-up;
 - reusable native engine composition buffers;
+- one shared keyboard-hook callback for Vietnamese typing and modifier hotkeys;
+- a dedicated keyboard-hook message thread independent from the UI thread;
+- asynchronous Raw Input pointer observation with buffered packet draining;
+- thread QoS separation for latency-sensitive keyboard and background pointer work;
+- resident startup, CPU, RAM, thread, and handle measurement;
 - allocation-aware native benchmarks and regression budgets;
 - correctness, integration, Debug, and Release verification.
 
@@ -42,13 +47,36 @@ Final values below are the median p99 from three Release runs:
 |---|---:|---:|
 | Profiler disabled fast path | 100 ns | 0 B |
 | Profiler enabled record | 100 ns | 0 B |
-| Native bridge literal key | 400 ns | 0 B |
-| Native bridge Telex transform | 1.0 µs | 0 B |
+| Real Win32 foreground/focus/password snapshot | 400 ns | 0 B |
+| Native bridge literal key | 300 ns | 0 B |
+| Native bridge Telex transform | 600 ns | 0 B |
 | Injection event preparation | 100 ns | 0 B |
-| Full hook literal path | 500 ns | 0 B |
-| Full hook transformed path | 1.1 µs | 0 B |
+| Shared hook literal path, including modifier state | 500 ns | 0 B |
+| Shared hook transformed path, including modifier state | 900 ns | 0 B |
 
-The deterministic injection benchmark measures event construction and dispatch to a fake sender. Real `SendInput` duration depends on Windows and the target application and is measured by the opt-in runtime Diagnostics profiler instead.
+The foreground-context case calls the real Win32 focus and password-style probe rather than a fake. The deterministic injection benchmark measures event construction and dispatch to a fake sender. Real `SendInput` duration depends on Windows and the target application and is measured by the opt-in runtime Diagnostics profiler instead.
+
+## Resident input runtime
+
+The keyboard hook no longer shares the WinForms UI message loop. It is installed and pumped on a dedicated background thread with a bounded 256 KiB stack, explicit startup/shutdown handshakes, and fail-open exception handling. Modifier-only commands subscribe to the same physical-event stream, so production installs one low-level keyboard hook instead of a second modifier hook. A regression test blocks the owner UI thread for 300 ms and verifies that the hook still processes the test key independently.
+
+The former global low-level mouse hook was removed. Pointer clicks and wheel input are observed asynchronously through a message-only Raw Input window on a separate thread with a bounded 128 KiB stack. Ordinary pointer movement does not reset the Vietnamese engine. The observer reads the current packet and drains additional queued packets with `GetRawInputBuffer`, coalescing a burst into one atomic reset request. The keyboard callback remains the sole owner of the engine and suppression state, so pointer and keyboard threads do not race over mutable composition data.
+
+The keyboard thread opts out of execution-speed throttling as a latency-sensitive path. The background pointer observer requests EcoQoS. Both requests are best effort: an unsupported OS or policy does not prevent input startup.
+
+The resident resource self-test now initializes the real native engine, keyboard hook, Raw Input observer, and thread QoS before measuring. Median values from three uncontaminated Release runs with Vietnamese transformation disabled but the backend fully resident were:
+
+| Metric | Median |
+|---|---:|
+| Shared hook backend startup | 11.47 ms |
+| Idle CPU over 5 seconds | 0 ms measured CPU / 0.000% |
+| Working-set increase | 1,679,360 B |
+| Private-memory increase | 786,432 B |
+| Resident thread increase | 2 |
+| Handle increase | 11 |
+| Physical keyboard events during measurement | 0 |
+
+The Windows process CPU counter has finite resolution, so `0 ms` means no measurable CPU time in that five-second window rather than mathematically zero execution. The self-test reports whether real user input contaminated a run and excludes contaminated samples from the table.
 
 ### Allocation improvements
 
@@ -93,11 +121,16 @@ A universal single-pass technical-token classifier was also benchmarked and reje
 Fresh gates after the changes:
 
 - Release solution build: 0 warnings, 0 errors.
-- Host tests: 157/157 passed.
-- Native Release tests: 4/4 passed.
-- Native Debug tests: 4/4 passed after rebuilding the final buffer and Context Guard changes.
+- Isolated-worktree host tests on the translation-enabled mainline: 190/190 non-live and 2/2 exclusive live-input tests passed (192/192 total).
+- Dedicated-hook regression: input remains responsive while the owner UI thread is blocked.
+- Secure-input regression: password state is refreshed even when the focused HWND does not change.
+- Partial-startup regression: a pointer-observer startup failure releases the already-installed keyboard hook.
+- Shared-hook regression: modifier commands use the resident typing hook and do not install a second native keyboard hook.
+- Resident resource self-test: three uncontaminated runs completed with no measurable idle CPU time.
+- Fresh isolated native Release core lane: 1/1 passed.
+- Fresh isolated native Debug core lane: 1/1 passed after rebuilding the final hook, buffer, and Context Guard changes.
 - Native endurance: 1,000,000 deterministic mixed events preserve edit, visible-text, rollback, and token-size invariants in both Debug and Release.
-- Managed Release benchmark: every latency and allocation budget passed.
+- Managed Release benchmark: every latency and allocation budget passed in all three runs.
 - Native Release benchmark: every allocation budget passed.
 - `git diff --check`: clean at the recorded checkpoint.
 

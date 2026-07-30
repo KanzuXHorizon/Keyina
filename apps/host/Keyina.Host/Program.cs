@@ -6,6 +6,7 @@ using Keyina.Host.Runtime;
 using Keyina.Host.Speech;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Fluent;
+using Keyina.Host.Windows.Hotkeys;
 using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host;
@@ -77,6 +78,9 @@ internal static class Program
 
             var startupTimer = System.Diagnostics.Stopwatch.StartNew();
             using var hook = new VietnameseKeyboardHook();
+            using var modifierHook = new ModifierKeyboardHook(
+                new SharedTypingKeyboardHookNativeApi(hook));
+            modifierHook.Start();
             hook.Start(enabledInitially: false);
             startupTimer.Stop();
 
