@@ -8,6 +8,52 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+
+function Invoke-CheckedCapturedProcess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+        [Parameter()]
+        [string]$Arguments = '',
+        [Parameter()]
+        [string]$WorkingDirectory = $repoRoot
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = $Arguments
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw "Could not start $FilePath."
+    }
+    try {
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if (-not [string]::IsNullOrWhiteSpace($standardOutput)) {
+            Write-Host $standardOutput.TrimEnd()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($standardError)) {
+            Write-Host $standardError.TrimEnd() -ForegroundColor DarkYellow
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "$FilePath failed with exit code $($process.ExitCode)."
+        }
+        return [pscustomobject]@{
+            StandardOutput = $standardOutput
+            StandardError = $standardError
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
     if ([string]::IsNullOrWhiteSpace($Version)) {
         [xml]$props = Get-Content -LiteralPath (Join-Path $repoRoot 'Directory.Build.props') -Raw
@@ -58,15 +104,13 @@ if (-not (Test-Path -LiteralPath $host -PathType Leaf)) {
     throw "Published host not found: $host"
 }
 
-$reportedVersion = (& $host --version | Select-Object -First 1).Trim()
-if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne [string]$manifest.version) {
+$versionResult = Invoke-CheckedCapturedProcess $host '--version' $publishDir
+$reportedVersion = (($versionResult.StandardOutput -split "`r?`n") | Select-Object -First 1).Trim()
+if ($reportedVersion -ne [string]$manifest.version) {
     throw "Published host reports '$reportedVersion'; manifest expects '$($manifest.version)'."
 }
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
-    & $host $selfTest
-    if ($LASTEXITCODE -ne 0) {
-        throw "Published host self-test failed: $selfTest"
-    }
+    $null = Invoke-CheckedCapturedProcess $host $selfTest $publishDir
 }
 
 if ([bool]$manifest.signed) {

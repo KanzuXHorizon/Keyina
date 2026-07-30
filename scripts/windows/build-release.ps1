@@ -42,6 +42,52 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-CheckedCapturedProcess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+        [Parameter()]
+        [string]$Arguments = '',
+        [Parameter()]
+        [string]$WorkingDirectory = $repoRoot
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = $Arguments
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    Write-Host "--> $FilePath $Arguments" -ForegroundColor Cyan
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw "Could not start $FilePath."
+    }
+    try {
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if (-not [string]::IsNullOrWhiteSpace($standardOutput)) {
+            Write-Host $standardOutput.TrimEnd()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($standardError)) {
+            Write-Host $standardError.TrimEnd() -ForegroundColor DarkYellow
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "$FilePath failed with exit code $($process.ExitCode)."
+        }
+        return [pscustomobject]@{
+            StandardOutput = $standardOutput
+            StandardError = $standardError
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 function Get-DefaultVersion {
     [xml]$props = Get-Content -LiteralPath $propsPath -Raw
     $candidate = $props.SelectSingleNode('/Project/PropertyGroup/KeyinaVersion')
@@ -182,12 +228,13 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'SECURITY.md') -Destination $documen
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\translation.md') -Destination $documentationDir
 
 $publishedExe = Join-Path $publishDir 'Keyina.Host.exe'
-$reportedVersion = (& $publishedExe --version | Select-Object -First 1).Trim()
-if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne $Version) {
+$versionResult = Invoke-CheckedCapturedProcess $publishedExe '--version' $publishDir
+$reportedVersion = (($versionResult.StandardOutput -split "`r?`n") | Select-Object -First 1).Trim()
+if ($reportedVersion -ne $Version) {
     throw "Published host reports version '$reportedVersion'; expected '$Version'."
 }
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
-    Invoke-Checked $publishedExe @($selfTest) $publishDir
+    $null = Invoke-CheckedCapturedProcess $publishedExe $selfTest $publishDir
 }
 
 if ($Sign) {
