@@ -31,9 +31,11 @@ KEYINA_TEST(transforms_normal_vietnamese_tokens) {
 }
 
 KEYINA_TEST(protects_technical_tokens_with_stable_reasons) {
-  constexpr std::array<GuardCase, 10> cases = {{
+  constexpr std::array<GuardCase, 12> cases = {{
       {U"https://example.com", false, keyina::GuardReason::Url},
       {U"www.example.com", false, keyina::GuardReason::Url},
+      {U"name@", false, keyina::GuardReason::Email},
+      {U"name@example", false, keyina::GuardReason::Email},
       {U"name@example.com", false, keyina::GuardReason::Email},
       {U"C:\\Temp\\file.txt", false, keyina::GuardReason::FilePath},
       {U"../src/main.cpp", false, keyina::GuardReason::FilePath},

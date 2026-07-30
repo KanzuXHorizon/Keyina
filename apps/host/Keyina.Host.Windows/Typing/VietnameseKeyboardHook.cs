@@ -57,6 +57,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
         Func<int, bool>? shouldBypassApplication = null)
     {
         this.engine = engine ?? new NativeEngineClient();
+        this.engine.Configure(restoreInvalidWord: true);
         this.injector = injector ?? new UnicodeInputInjector();
         this.nativeApi = nativeApi ?? new WindowsVietnameseKeyboardHookNativeApi();
         this.shouldBypassApplication = shouldBypassApplication;
@@ -260,11 +261,9 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 if (keyboardEvent.VirtualKey == 0x08)
                 {
                     TypingTraceBuffer.Record(
-                        "backspace-pass",
+                        "backspace-compose",
                         keyIndex,
                         currentContext.ForegroundProcessId);
-                    ResetEngineState();
-                    return false;
                 }
             }
             finally
@@ -278,7 +277,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
             }
 
             HookEdit edit;
-            if (keyboardEvent.VirtualKey == 0x20 ||
+            if (keyboardEvent.VirtualKey == 0x08)
+            {
+                edit = engine.Process(
+                    NativeEngineKeyKind.Backspace,
+                    default);
+                SetPointerObservation(active: edit.ConsumePhysicalKey);
+            }
+            else if (keyboardEvent.VirtualKey == 0x20 ||
                 IsCommitBoundaryCharacter(keyboardEvent.Character))
             {
                 var engineStartedAt = profiling ? Stopwatch.GetTimestamp() : 0;

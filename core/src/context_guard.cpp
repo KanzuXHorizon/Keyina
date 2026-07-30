@@ -60,15 +60,14 @@ bool IsUrl(std::u32string_view token) noexcept {
 
 bool IsEmail(std::u32string_view token) noexcept {
   const auto at = token.find(U'@');
-  if (at == std::u32string_view::npos || at == 0 || at + 1 >= token.size()) {
+  if (at == std::u32string_view::npos || at == 0) {
     return false;
   }
 
-  bool domain_has_dot = false;
   for (std::size_t index = 0; index < token.size(); ++index) {
     const char32_t value = token[index];
-    if (index > at && value == U'.') {
-      domain_has_dot = true;
+    if (value == U'@' && index != at) {
+      return false;
     }
     const bool allowed = IsAsciiLetter(value) || IsAsciiDigit(value) ||
                          value == U'.' || value == U'_' || value == U'-' ||
@@ -77,7 +76,7 @@ bool IsEmail(std::u32string_view token) noexcept {
       return false;
     }
   }
-  return domain_has_dot;
+  return true;
 }
 
 bool IsFilePath(std::u32string_view token) noexcept {

@@ -43,6 +43,7 @@ bool ApplyShape(VietnameseLetter& letter, VowelShape shape) noexcept {
 }
 
 bool HasVowelAfter(std::u32string_view visible, std::size_t index) noexcept;
+std::optional<Tone> ToneFromKey(char32_t key) noexcept;
 
 bool ReplaceLetter(std::u32string& visible, std::size_t index,
                    VietnameseLetter letter) {
@@ -83,13 +84,20 @@ bool ApplyWModifier(std::u32string& visible) {
     if (left.has_value() && right.has_value() && !consonantal_u &&
         left->base == U'u' && left->shape == VowelShape::Plain &&
         right->shape == VowelShape::Plain &&
-        (right->base == U'o' || right->base == U'a')) {
+        (right->base == U'u' || right->base == U'o' ||
+         right->base == U'a')) {
       const Tone carried_tone =
           right->tone != Tone::None ? right->tone : left->tone;
       left->tone = Tone::None;
       right->tone = Tone::None;
 
-      if (right->base == U'o') {
+      if (right->base == U'u') {
+        if (ApplyShape(*left, VowelShape::Horn)) {
+          left->tone = carried_tone;
+          return ReplaceLetter(visible, *previous_vowel, *left) &&
+                 ReplaceLetter(visible, *last_vowel, *right);
+        }
+      } else if (right->base == U'o') {
         if (ApplyShape(*left, VowelShape::Horn) &&
             ApplyShape(*right, VowelShape::Horn)) {
           right->tone = carried_tone;
@@ -145,8 +153,22 @@ bool ApplyRepeatedVowelModifier(std::u32string& visible,
     if (letter->base != modifier || letter->shape != VowelShape::Plain) {
       continue;
     }
-    return ApplyShape(*letter, VowelShape::Circumflex) &&
-           ReplaceLetter(visible, index, *letter);
+    if (!ApplyShape(*letter, VowelShape::Circumflex)) {
+      return false;
+    }
+    const char32_t original = visible[index];
+    if (!ReplaceLetter(visible, index, *letter)) {
+      return false;
+    }
+    if (index + 1 < visible.size()) {
+      const auto analysis = AnalyzeVietnameseSyllable(visible);
+      if (analysis.status != SyllableStatus::Valid &&
+          analysis.error != SyllableError::InvalidTone) {
+        visible[index] = original;
+        return false;
+      }
+    }
+    return true;
   }
   return false;
 }
@@ -174,18 +196,20 @@ bool ApplyDModifier(std::u32string& visible) {
     return true;
   }
 
-  // Accept delayed Telex order such as "duocd" before later w/j keys.
-  // Require an adjacent vowel cluster so ordinary Latin names such as
-  // "david" remain literal instead of being over-eagerly transformed.
-  if (visible.size() >= 4 && HasAdjacentVowels(visible) &&
-      visible.front() == U'd') {
-    visible.front() = U'đ';
-    return true;
-  }
-  if (visible.size() >= 4 && HasAdjacentVowels(visible) &&
-      visible.front() == U'D') {
-    visible.front() = U'Đ';
-    return true;
+  // Accept delayed Telex order such as "duocd" and "dongd" only when
+  // replacing the initial d produces a structurally plausible Vietnamese
+  // syllable. This keeps ordinary Latin tokens such as "david" literal.
+  if (visible.size() >= 3 &&
+      (visible.front() == U'd' || visible.front() == U'D')) {
+    const char32_t original = visible.front();
+    visible.front() = original == U'd' ? U'đ' : U'Đ';
+    const auto analysis = AnalyzeVietnameseSyllable(visible);
+    if (analysis.status == SyllableStatus::Valid ||
+        analysis.error == SyllableError::InvalidTone ||
+        HasAdjacentVowels(visible)) {
+      return true;
+    }
+    visible.front() = original;
   }
   return false;
 }
@@ -219,6 +243,38 @@ std::optional<Tone> ToneFromKey(char32_t key) noexcept {
     default:
       return std::nullopt;
   }
+}
+
+bool IsAsciiVowel(char32_t value) noexcept {
+  const char32_t lower = ToAsciiLower(value);
+  return lower == U'a' || lower == U'e' || lower == U'i' ||
+         lower == U'o' || lower == U'u' || lower == U'y';
+}
+
+bool HasSuspiciousToneBeforeNewVowel(std::u32string_view raw) noexcept {
+  for (std::size_t tone_index = 0; tone_index < raw.size(); ++tone_index) {
+    if (!ToneFromKey(raw[tone_index]).has_value()) {
+      continue;
+    }
+
+    bool has_vowel_before = false;
+    for (std::size_t index = 0; index < tone_index; ++index) {
+      if (IsAsciiVowel(raw[index])) {
+        has_vowel_before = true;
+        break;
+      }
+    }
+    if (!has_vowel_before) {
+      continue;
+    }
+
+    for (std::size_t index = tone_index + 1; index < raw.size(); ++index) {
+      if (IsAsciiVowel(raw[index])) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 bool HasVowelAfter(std::u32string_view visible, std::size_t index) noexcept {
@@ -278,6 +334,9 @@ std::size_t SelectToneTarget(std::u32string_view visible,
     return indices[0];
   }
   if (count >= 3) {
+    if (HasTrailingConsonant(visible, indices[count - 1])) {
+      return indices[count - 1];
+    }
     return indices[count - 2];
   }
 
@@ -344,8 +403,9 @@ TextEdit Engine::Process(const KeyEvent& event) {
   if (event.kind == KeyKind::CommitBoundary) {
     TextEdit edit;
     if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
-        AnalyzeVietnameseSyllable(visible_text_).status ==
-            SyllableStatus::Impossible) {
+        (AnalyzeVietnameseSyllable(visible_text_).status !=
+             SyllableStatus::Valid ||
+         HasSuspiciousToneBeforeNewVowel(raw_keys_))) {
       composition_buffer_.assign(raw_keys_);
       if (event.character != U'\0') {
         composition_buffer_.push_back(event.character);
@@ -404,6 +464,12 @@ void Engine::BuildVisibleForRaw() {
   const GuardResult guard = ClassifyToken(raw_keys_, context);
   if (guard.transform) {
     ComposeRaw(composition_buffer_);
+    if (config_.restore_invalid_word && composition_buffer_ != raw_keys_ &&
+        HasSuspiciousToneBeforeNewVowel(raw_keys_) &&
+        AnalyzeVietnameseSyllable(composition_buffer_).status !=
+            SyllableStatus::Valid) {
+      composition_buffer_.assign(raw_keys_);
+    }
   } else {
     composition_buffer_.assign(raw_keys_);
   }

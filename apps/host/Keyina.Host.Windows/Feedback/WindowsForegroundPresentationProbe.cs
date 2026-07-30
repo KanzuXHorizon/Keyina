@@ -36,12 +36,16 @@ public sealed class WindowsForegroundPresentationProbe : IForegroundPresentation
             return ForegroundPresentationState.Unknown;
         }
 
-        return Classify(windowRect.ToRectangle(), monitorInfo.Monitor.ToRectangle());
+        return Classify(
+            windowRect.ToRectangle(),
+            monitorInfo.Monitor.ToRectangle(),
+            IsZoomed(window));
     }
 
     public static ForegroundPresentationState Classify(
         Rectangle window,
         Rectangle monitor,
+        bool isMaximized = false,
         double threshold = 0.98)
     {
         if (threshold is <= 0 or > 1)
@@ -52,6 +56,10 @@ public sealed class WindowsForegroundPresentationProbe : IForegroundPresentation
             monitor.Width <= 0 || monitor.Height <= 0)
         {
             return ForegroundPresentationState.Unknown;
+        }
+        if (isMaximized)
+        {
+            return ForegroundPresentationState.Windowed;
         }
 
         var intersection = Rectangle.Intersect(window, monitor);
@@ -69,6 +77,10 @@ public sealed class WindowsForegroundPresentationProbe : IForegroundPresentation
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsZoomed(IntPtr window);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

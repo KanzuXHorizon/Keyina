@@ -30,6 +30,12 @@ void ApplyEdit(std::u32string& external, const keyina::TextEdit& edit) {
 
 }  // namespace
 
+KEYINA_TEST(recognizes_delayed_d_candidate_as_a_valid_syllable) {
+  const auto analysis = keyina::AnalyzeVietnameseSyllable(U"đong");
+  KEYINA_EXPECT_EQ(analysis.status, keyina::SyllableStatus::Valid);
+  KEYINA_EXPECT_EQ(analysis.error, keyina::SyllableError::None);
+}
+
 KEYINA_TEST(validates_representative_vietnamese_syllables) {
   constexpr std::array<std::u32string_view, 28> valid = {
       U"a", U"ai", U"anh", U"bạn", U"chuyện", U"được", U"giếng",
@@ -170,7 +176,7 @@ KEYINA_TEST(classifies_foreign_shaped_tokens_as_ambiguous_without_hiding_garbage
   KEYINA_EXPECT_EQ(repeated.status, keyina::SyllableStatus::Impossible);
 }
 
-KEYINA_TEST(restore_invalid_word_keeps_ambiguous_foreign_shaped_tokens) {
+KEYINA_TEST(restore_invalid_word_restores_ambiguous_foreign_shaped_tokens) {
   keyina::Engine engine({
       .tone_placement = keyina::TonePlacement::Modern,
       .application_bypass = false,
@@ -186,11 +192,12 @@ KEYINA_TEST(restore_invalid_word_keeps_ambiguous_foreign_shaped_tokens) {
         " error=" + std::to_string(static_cast<int>(rendered_analysis.error)));
   }
 
+  auto external = rendered;
   const auto boundary = engine.Process(
       {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
-  KEYINA_EXPECT_TRUE(!boundary.consumed);
-  KEYINA_EXPECT_EQ(boundary.erase_codepoints, std::size_t{0});
-  KEYINA_EXPECT_TRUE(boundary.insert.empty());
+  ApplyEdit(external, boundary);
+  KEYINA_EXPECT_TRUE(boundary.consumed);
+  KEYINA_EXPECT_EQ(external, U"cazees ");
 }
 
 KEYINA_TEST(validates_broad_dictionary_derived_edge_corpus) {

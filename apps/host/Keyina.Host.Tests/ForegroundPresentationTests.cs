@@ -21,11 +21,17 @@ internal static class ForegroundPresentationTests
                 monitor));
     }
 
-    [KeyinaTest("foreground coverage keeps ordinary windows visual")]
-    private static void OrdinaryWindowsRemainWindowed()
+    [KeyinaTest("foreground coverage keeps maximized and ordinary windows visual")]
+    private static void MaximizedAndOrdinaryWindowsRemainWindowed()
     {
         var monitor = new Rectangle(0, 0, 1920, 1080);
 
+        AssertEx.Equal(
+            ForegroundPresentationState.Windowed,
+            WindowsForegroundPresentationProbe.Classify(
+                monitor,
+                monitor,
+                isMaximized: true));
         AssertEx.Equal(
             ForegroundPresentationState.Windowed,
             WindowsForegroundPresentationProbe.Classify(

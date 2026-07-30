@@ -45,6 +45,23 @@ KEYINA_TEST(backspace_rebuilds_the_previous_composition_exactly) {
   KEYINA_EXPECT_EQ(external, std::u32string{U"tiên"});
 }
 
+KEYINA_TEST(backspace_then_retyping_modifier_reuses_the_rebuilt_composition) {
+  keyina::Engine engine;
+  std::u32string external;
+  TypeInto(engine, external, U"nguyenx");
+  KEYINA_EXPECT_EQ(external, std::u32string{U"nguyẽn"});
+
+  const auto remove_tone =
+      engine.Process({keyina::KeyKind::Backspace, U'\0', false, false, false});
+  KEYINA_EXPECT_TRUE(remove_tone.consumed);
+  Apply(external, remove_tone);
+  KEYINA_EXPECT_EQ(external, std::u32string{U"nguyen"});
+
+  TypeInto(engine, external, U"e");
+  KEYINA_EXPECT_EQ(external, std::u32string{U"nguyên"});
+  KEYINA_EXPECT_EQ(engine.RawKeys(), std::u32string_view{U"nguyene"});
+}
+
 KEYINA_TEST(backspace_through_a_modifier_restores_the_literal_letter) {
   keyina::Engine engine;
   std::u32string external;

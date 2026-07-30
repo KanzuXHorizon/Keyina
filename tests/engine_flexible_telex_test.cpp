@@ -30,7 +30,7 @@ struct TelexCase {
 }  // namespace
 
 KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
-  constexpr std::array<TelexCase, 13> cases = {{
+  constexpr std::array<TelexCase, 14> cases = {{
       {U"dduocwj", U"được"},
       {U"dduowcj", U"được"},
       {U"dduwocj", U"được"},
@@ -44,6 +44,7 @@ KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
       {U"vieetj", U"việt"},
       {U"vieejt", U"việt"},
       {U"truocws", U"trước"},
+      {U"uuw", U"ưu"},
   }};
 
   for (const auto& test : cases) {
@@ -56,6 +57,58 @@ KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
         raw.push_back(static_cast<char>(value));
       }
       throw std::runtime_error("failed flexible Telex case: " + raw);
+    }
+  }
+}
+
+KEYINA_TEST(keeps_latin_tokens_literal_while_they_are_still_being_typed) {
+  constexpr std::array<std::u32string_view, 3> cases = {{
+      U"user",
+      U"research",
+      U"tele",
+  }};
+
+  for (const auto raw : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, raw), std::u32string{raw});
+  }
+}
+
+KEYINA_TEST(restores_structurally_impossible_tokens_at_word_boundaries) {
+  constexpr std::array<std::u32string_view, 6> cases = {{
+      U"user",
+      U"evkey",
+      U"flush",
+      U"research",
+      U"tele",
+      U"haahhaahhaahh",
+  }};
+
+  for (const auto raw : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    auto external = TypeSequence(engine, raw);
+    const auto edit = engine.Process(
+        {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
+    KEYINA_EXPECT_TRUE(edit.erase_codepoints <= external.size());
+    external.erase(external.size() - edit.erase_codepoints);
+    external.append(edit.insert);
+    if (!edit.consumed) {
+      external.push_back(U' ');
+    }
+    std::u32string expected{raw};
+    expected.push_back(U' ');
+    if (external != expected) {
+      std::string token;
+      token.reserve(raw.size());
+      for (const char32_t value : raw) {
+        token.push_back(static_cast<char>(value));
+      }
+      throw std::runtime_error(
+          "Structurally impossible token was not restored: " + token);
     }
   }
 }

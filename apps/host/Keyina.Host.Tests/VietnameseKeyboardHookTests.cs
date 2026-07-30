@@ -48,6 +48,23 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("tiếng Việt", injector.Text);
     }
 
+    [KeyinaTest("resident hook restores Latin words without requiring manual engine configuration")]
+    private static void HookRestoresLatinWordsByDefault()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+
+        Type(native, "user research tele ");
+
+        AssertEx.Equal("user research tele ", injector.Text);
+    }
+
     [KeyinaTest("resident hook isolates physical-event observer failures from Vietnamese typing")]
     private static void PhysicalObserverFailuresAreIsolated()
     {
@@ -276,8 +293,8 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("TIẾNG", injector.Text);
     }
 
-    [KeyinaTest("resident hook lets Backspace delete visible text without undoing Telex history")]
-    private static void BackspaceIsOrdinaryDeletion()
+    [KeyinaTest("resident hook reconstructs Telex state after Backspace")]
+    private static void BackspaceReconstructsComposition()
     {
         var native = new FakeHookNativeApi();
         var injector = new TextModelInjector();
@@ -288,12 +305,12 @@ internal static class VietnameseKeyboardHookTests
             native);
         hook.Start(enabledInitially: true);
 
-        Type(native, "as");
-        AssertEx.Equal("á", injector.Text);
-        AssertEx.False(native.SendBackspace(), "Backspace was swallowed by Keyina.");
-        injector.Text = string.Empty;
-        Type(native, "s");
-        AssertEx.Equal("s", injector.Text);
+        Type(native, "nguyenx");
+        AssertEx.Equal("nguyẽn", injector.Text);
+        AssertEx.True(native.SendBackspace(), "Keyina did not own composition Backspace.");
+        AssertEx.Equal("nguyen", injector.Text);
+        Type(native, "e");
+        AssertEx.Equal("nguyên", injector.Text);
     }
 
     [KeyinaTest("resident hook fails open for shortcuts disabled mode and focus changes")]
