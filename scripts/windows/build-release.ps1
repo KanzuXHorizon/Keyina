@@ -44,13 +44,11 @@ function Invoke-Checked {
 
 function Get-DefaultVersion {
     [xml]$props = Get-Content -LiteralPath $propsPath -Raw
-    $candidate = @($props.Project.PropertyGroup.KeyinaVersion) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-        Select-Object -First 1
-    if ($null -eq $candidate) {
+    $candidate = $props.SelectSingleNode('/Project/PropertyGroup/KeyinaVersion')
+    if ($null -eq $candidate -or [string]::IsNullOrWhiteSpace($candidate.InnerText)) {
         throw 'Directory.Build.props does not define KeyinaVersion.'
     }
-    return [string]$candidate
+    return $candidate.InnerText.Trim()
 }
 
 function Get-FileVersion {

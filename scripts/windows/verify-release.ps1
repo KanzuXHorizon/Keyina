@@ -11,9 +11,11 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 if ([string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
     if ([string]::IsNullOrWhiteSpace($Version)) {
         [xml]$props = Get-Content -LiteralPath (Join-Path $repoRoot 'Directory.Build.props') -Raw
-        $Version = [string](@($props.Project.PropertyGroup.KeyinaVersion) |
-            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-            Select-Object -First 1)
+        $versionNode = $props.SelectSingleNode('/Project/PropertyGroup/KeyinaVersion')
+        if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+            throw 'Directory.Build.props does not define KeyinaVersion.'
+        }
+        $Version = $versionNode.InnerText.Trim()
     }
     $ArtifactDirectory = Join-Path $repoRoot "artifacts\release\$Version"
 }
