@@ -73,6 +73,43 @@ internal static class NamedPipeEnvelopeServerTests
             await server.WriteToActiveAsync(stale, CancellationToken.None));
     });
 
+    [KeyinaTest("active target wait survives the reconnect gap caused by a hotkey")]
+    private static void ActiveTargetWaitSurvivesReconnectGap() => Run(async () =>
+    {
+        var pipeName = $"Keyina.Tests.{Guid.NewGuid():N}";
+        await using var server = new NamedPipeEnvelopeServer(pipeName);
+        await server.StartAsync(CancellationToken.None);
+
+        await using (var previous = CreateClient(pipeName))
+        {
+            await previous.ConnectAsync(2_000, CancellationToken.None);
+            await NamedPipeFrameProtocol.WriteAsync(
+                previous,
+                Hello(new IpcSessionId(1, 2), 7),
+                CancellationToken.None);
+            await WaitUntilAsync(() => server.ActiveTarget is not null);
+        }
+        await WaitUntilAsync(() => server.ActiveTarget is null);
+
+        var waitTask = server.WaitForActiveTargetAsync(
+            TimeSpan.FromSeconds(2),
+            CancellationToken.None);
+        await Task.Delay(25);
+
+        await using var client = CreateClient(pipeName);
+        await client.ConnectAsync(2_000, CancellationToken.None);
+        var expected = new IpcSessionId(4, 8);
+        await NamedPipeFrameProtocol.WriteAsync(
+            client,
+            Hello(expected, 12),
+            CancellationToken.None);
+
+        var target = await waitTask;
+        AssertEx.True(target is not null, "Reconnect gap timed out without an active target.");
+        AssertEx.Equal(expected, target!.SessionId);
+        AssertEx.Equal<ulong>(12, target.FocusGeneration);
+    });
+
     [KeyinaTest("newer hello becomes active and disconnected clients are removed")]
     private static void ActiveTargetTracksConnectionLifecycle() => Run(async () =>
     {

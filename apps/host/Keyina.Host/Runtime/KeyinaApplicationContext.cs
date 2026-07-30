@@ -33,6 +33,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private const int CancelDictationHotkeyId = 3;
     private const int TranslateSelectionHotkeyId = 4;
     private const int UndoTranslationHotkeyId = 5;
+    private static readonly TimeSpan ActiveTextTargetReconnectGrace =
+        TimeSpan.FromMilliseconds(750);
 
     private readonly KeyinaRuntimeOptions options;
     private readonly AtomicConfigurationStore configurationStore;
@@ -1085,10 +1087,17 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 return;
             }
             var target = pipeServer?.ActiveTarget;
+            if (target is null && pipeServer is not null)
+            {
+                target = await pipeServer.WaitForActiveTargetAsync(
+                        ActiveTextTargetReconnectGrace,
+                        cancellationToken)
+                    .ConfigureAwait(true);
+            }
             if (target is null)
             {
                 ReportFailure("speech_no_focused_app");
-                PublishFeedback(FeedbackEvents.Error("Chưa có ứng dụng nhận văn bản"));
+                PublishFeedback(FeedbackEvents.Error("Chưa có ô nhập văn bản đang hoạt động"));
                 return;
             }
             var apiKey = credentialVault.Read(CredentialTargets.SpeechmaticsApiKey);

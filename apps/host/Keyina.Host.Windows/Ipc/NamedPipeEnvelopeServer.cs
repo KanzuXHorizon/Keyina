@@ -36,6 +36,8 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
     private readonly CancellationTokenSource shutdown = new();
     private readonly ConcurrentDictionary<long, ClientConnection> connections = new();
     private readonly object targetGate = new();
+    private TaskCompletionSource<ActivePipeTarget> nextTarget =
+        CreateTargetCompletionSource();
     private Task? acceptLoop;
     private ActivePipeTarget? activeTarget;
     private long nextConnectionId;
@@ -66,6 +68,38 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
     }
 
     public int RejectedConnectionCount => Volatile.Read(ref rejectedConnectionCount);
+
+    public async Task<ActivePipeTarget?> WaitForActiveTargetAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (timeout < TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        Task<ActivePipeTarget> waitTask;
+        lock (targetGate)
+        {
+            if (activeTarget is not null || timeout == TimeSpan.Zero)
+            {
+                return activeTarget;
+            }
+            waitTask = nextTarget.Task;
+        }
+
+        try
+        {
+            return await waitTask
+                .WaitAsync(timeout, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            return null;
+        }
+    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -152,10 +186,14 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
         }
 
         connections.Clear();
+        TaskCompletionSource<ActivePipeTarget> pendingTarget;
         lock (targetGate)
         {
             activeTarget = null;
+            pendingTarget = nextTarget;
+            nextTarget = CreateTargetCompletionSource();
         }
+        pendingTarget.TrySetCanceled();
         shutdown.Dispose();
     }
 
@@ -200,13 +238,19 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
         connection.SessionId = hello.SessionId;
         connection.FocusGeneration = hello.FocusGeneration;
         connection.ActivitySequence = Interlocked.Increment(ref activitySequence);
+        TaskCompletionSource<ActivePipeTarget> signal;
+        ActivePipeTarget target;
         lock (targetGate)
         {
-            activeTarget = new ActivePipeTarget(
+            target = new ActivePipeTarget(
                 connection.SessionId,
                 connection.FocusGeneration,
                 connection.ConnectionId);
+            activeTarget = target;
+            signal = nextTarget;
+            nextTarget = CreateTargetCompletionSource();
         }
+        signal.TrySetResult(target);
     }
 
     private void Reject(ClientConnection connection)
@@ -218,6 +262,8 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
     private void Remove(ClientConnection connection)
     {
         connections.TryRemove(connection.ConnectionId, out _);
+        TaskCompletionSource<ActivePipeTarget>? signal = null;
+        ActivePipeTarget? fallbackTarget = null;
         lock (targetGate)
         {
             if (activeTarget?.ConnectionId != connection.ConnectionId)
@@ -229,14 +275,30 @@ public sealed class NamedPipeEnvelopeServer : IAsyncDisposable
                 .Where(candidate => candidate.HasHello)
                 .OrderByDescending(candidate => candidate.ActivitySequence)
                 .FirstOrDefault();
-            activeTarget = fallback is null
-                ? null
-                : new ActivePipeTarget(
+            if (fallback is null)
+            {
+                activeTarget = null;
+            }
+            else
+            {
+                fallbackTarget = new ActivePipeTarget(
                     fallback.SessionId,
                     fallback.FocusGeneration,
                     fallback.ConnectionId);
+                activeTarget = fallbackTarget;
+                signal = nextTarget;
+                nextTarget = CreateTargetCompletionSource();
+            }
+        }
+        if (fallbackTarget is not null)
+        {
+            signal!.TrySetResult(fallbackTarget);
         }
     }
+
+    private static TaskCompletionSource<ActivePipeTarget>
+        CreateTargetCompletionSource() => new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
     private sealed class ClientConnection : IDisposable
     {
