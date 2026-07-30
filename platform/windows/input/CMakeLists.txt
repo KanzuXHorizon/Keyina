@@ -1,4 +1,6 @@
 add_library(keyina_windows_input STATIC
+  input_injection.cpp
+  pointer_input.cpp
   resident_input_controller.cpp
   runtime_profile.cpp
 )
@@ -16,3 +18,56 @@ target_compile_definitions(keyina_windows_input PRIVATE
 )
 target_link_libraries(keyina_windows_input PUBLIC keyina::core)
 keyina_configure_target(keyina_windows_input)
+
+add_executable(KeyinaInput WIN32
+  native_resident.cpp
+  win32_input_runtime.cpp
+)
+target_compile_features(KeyinaInput PRIVATE cxx_std_20)
+target_compile_definitions(KeyinaInput PRIVATE
+  UNICODE
+  _UNICODE
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+)
+target_link_libraries(KeyinaInput PRIVATE
+  keyina::windows_input
+  psapi
+  user32
+)
+set_target_properties(KeyinaInput PROPERTIES
+  OUTPUT_NAME "KeyinaInput"
+)
+keyina_configure_target(KeyinaInput)
+
+add_test(NAME keyina.windows.input_self_test
+  COMMAND KeyinaInput --self-test)
+set_tests_properties(keyina.windows.input_self_test PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "keyina_input_ready"
+  TIMEOUT 10
+)
+
+add_test(NAME keyina.windows.input_resource
+  COMMAND KeyinaInput --resource-self-test)
+set_tests_properties(keyina.windows.input_resource PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "\\\"budget_pass\\\":true"
+  TIMEOUT 15
+)
+
+add_test(NAME keyina.windows.input_typing
+  COMMAND KeyinaInput --typing-self-test)
+set_tests_properties(keyina.windows.input_typing PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "typing_self_test_pass"
+  TIMEOUT 10
+)
+
+add_test(NAME keyina.windows.input_tray_resource
+  COMMAND KeyinaInput --tray-resource-self-test)
+set_tests_properties(keyina.windows.input_tray_resource PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "\\\"tray_enabled\\\":true.*\\\"budget_pass\\\":true"
+  TIMEOUT 15
+)
