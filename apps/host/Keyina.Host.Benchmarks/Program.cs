@@ -121,6 +121,16 @@ internal static class Program
         TypingLatencyProfiler.Clear();
 
         cases.Add(Measure(
+            "typing_foreground_context_snapshot",
+            iterations: 100_000,
+            budgetP99Nanoseconds: 20_000,
+            budgetAllocatedBytesPerOperation: 0,
+            operation: () =>
+            {
+                var context = WindowsTypingContextProbe.Capture();
+                return context.ForegroundProcessId ^ context.FocusWindow.GetHashCode();
+            }));
+        cases.Add(Measure(
             "typing_native_engine_literal",
             iterations: 100_000,
             budgetP99Nanoseconds: 20_000,
