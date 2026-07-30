@@ -22,6 +22,7 @@ if(WIN32)
     windows/input_injection_test.cpp
     windows/pointer_input_test.cpp
     windows/resident_input_controller_test.cpp
+    windows/runtime_hotkeys_test.cpp
     windows/runtime_profile_test.cpp
   )
   target_link_libraries(keyina_tests PRIVATE keyina::windows_input)

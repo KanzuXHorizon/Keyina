@@ -58,29 +58,25 @@ The foreground-context case calls the real Win32 focus and password-style probe 
 
 ## Resident input runtime
 
-The keyboard hook runs on a dedicated background thread with its own message loop, a bounded 256 KiB stack, explicit startup/shutdown handshakes, and fail-open exception handling. Modifier chords and push-to-talk release detection subscribe to that same resident hook instead of installing a second `WH_KEYBOARD_LL` hook. Observer failures are isolated from Vietnamese composition. A regression test blocks the owner UI thread for 300 ms and verifies that the hook still processes input independently.
+`KeyinaInput.exe` is now the default resident process. It owns one native message loop, one `WH_KEYBOARD_LL` hook, the C++ Vietnamese engine, Unicode injection, configurable hotkey routing, and the minimal tray. The .NET/WinForms host starts only for Settings, Speech, Translation, Undo, or fallback diagnostics.
 
-Pointer clicks and wheel input are observed through a message-only Raw Input window owned by the existing keyboard-hook message thread. Keyina does not install `WH_MOUSE_LL`, does not create a second pointer thread, and never injects mouse input. Raw mouse registration is disabled when there is no active composition and is enabled asynchronously after the first composition character, so ordinary FPS mouse movement at high polling rates does not deliver resident packets to Keyina. Click or wheel packets disarm observation before requesting one atomic engine reset. Buffered packet draining, native-width alignment, and packet-boundary checks remain in place for burst safety on x64.
+Pointer clicks and wheel input are observed through the same message-only window. Keyina does not install `WH_MOUSE_LL`, does not create a pointer thread, and never generates `INPUT_MOUSE`. Raw mouse registration is absent when there is no active composition and is posted asynchronously after composition begins. One million synthetic movement packets are classified as non-reset events; only button-down and wheel flags reset composition.
 
-The disabled typing path returns before foreground probing or engine work. Keyina-injected keyboard events return before physical-hotkey observers. Pressed and suppressed keys use inline 256-bit state instead of two managed arrays, modifier state is recomputed only when a modifier changes, and the foreground PID is cached per active HWND while password style is still refreshed on every secure-input snapshot.
+The keyboard callback performs no file I/O, network I/O, UI work, or process launch. It updates fixed-size state, runs the engine, and posts optional commands to the message loop. Escape and Undo are not captured unless the on-demand command companion is already active, avoiding interference with normal applications and games. The runtime profile is checked once per second on the message loop and atomically reloaded without restarting the hook.
 
-The keyboard thread opts out of execution-speed throttling as a latency-sensitive path. Raw Input registration changes are posted to the message loop rather than performed inside the global-hook callback.
+The published-bundle resource gate measures both private working set and private commit, rejects any value over 10 MiB, rejects resident thread growth, and rejects samples contaminated by physical keyboard input. Three uncontaminated Release tray runs produced:
 
-The resident resource self-test initializes the real native engine and shared keyboard/Raw Input backend before measuring. A repository-owned gate fails when total private memory exceeds 10 MiB, more than one resident input thread is added, the hook is not running, or real input contaminates the measurement. Three uncontaminated Release runs produced:
+| Metric | Range | Median |
+|---|---:|---:|
+| Idle CPU over 5 seconds | 0% measured | 0% |
+| Total working set, shared-inclusive | 11.51–12.03 MiB | 12.03 MiB |
+| Private working set | 2.61–2.62 MiB | 2.62 MiB |
+| Private bytes / commit | 2.91–2.92 MiB | 2.91 MiB |
+| Resident thread delta | 0 | 0 |
+| Physical keyboard events | 0 | 0 |
+| 10 MiB private-memory gate | pass in 3/3 runs | pass |
 
-| Metric | Range |
-|---|---:|
-| Hook backend startup | 10.4–10.7 ms |
-| Idle CPU over 5 seconds | 0–0.0195% |
-| Total working set | 26.906–27.035 MiB |
-| Total private memory | 8.383–8.523 MiB |
-| Private-memory increase | about 116–120 KiB |
-| Resident thread increase | 1 |
-| Handle increase | 6 |
-| Physical keyboard events during measurement | 0 |
-| 10 MiB private-memory budget | pass in 3/3 runs |
-
-The Windows process CPU counter has finite resolution, so `0 ms` means no measurable CPU time in the median five-second window rather than mathematically zero execution.
+Total working set includes shared Windows and injected-module pages and is not the amount of private RAM owned by Keyina. The Windows CPU counter also has finite resolution, so `0%` means no measurable CPU time in the five-second sample rather than mathematical zero.
 
 ### Allocation improvements
 
@@ -125,19 +121,22 @@ A universal single-pass technical-token classifier was also benchmarked and reje
 Fresh gates after the changes:
 
 - Release solution build: 0 warnings, 0 errors.
-- Host tests, including real desktop hook integration, shared modifier observation, pointer lifetime, injected-event isolation, disabled fast path, and resource-budget checks: 200/200 passed.
+- Host tests, including real desktop hook integration, shared modifier observation, profile publishing, settings/command companions, focus-locked dictation, startup resolution, publish contracts, pointer lifetime, injected-event isolation, disabled fast path, and resource-budget checks: 268/268 passed.
 - Dedicated-hook regression: input remains responsive while the owner UI thread is blocked.
 - Secure-input regression: password state is refreshed even when the focused HWND does not change.
 - Partial-startup regression: a pointer-observer startup failure releases the already-installed keyboard hook.
 - Pointer regression: pointer reset never calls the keyboard injector and cannot synthesize a click.
-- Resident resource self-test: three uncontaminated runs passed the 10 MiB private-memory and one-thread gate.
-- Native Release tests: 100% passed.
-- Native Debug tests: 100% passed after rebuilding the final hook, buffer, and Context Guard changes.
+- Published native tray resource self-test: three uncontaminated runs passed the 10 MiB private-memory and zero-thread-delta gate.
+- Native Release CTest: 6/6 passed, including live typing, tray resource, profile reload, injection, pointer, hotkey, and unit coverage.
+- Native Debug CTest: 6/6 passed with the same integration lanes.
 - Native endurance: 1,000,000 deterministic mixed events preserve edit, visible-text, rollback, and token-size invariants in both Debug and Release.
-- Managed Release benchmark: every latency and allocation budget passed in all three runs.
+- Managed Release benchmark: every latency and allocation budget passed; disabled hook p99 was 100 ns, literal p99 700 ns, and transformed p99 1.8 µs, all at 0 B/op.
+- Published bundle smoke tests passed for native startup, live typing, resource measurement, profile reload, managed self-test, and isolated companion-state publishing.
 - Native Release benchmark: every allocation budget passed.
 - `git diff --check`: clean at the recorded checkpoint.
 
-## Competitor benchmark policy
+## Local EVKey process comparison
 
-No “faster than UniKey” or “faster than EVKey” claim is made from internal microbenchmarks. A valid comparison needs the same machine, keyboard event corpus, target applications, startup state, observation method, repeated runs, correctness checks, and published raw results. The next comparison harness should cover Notepad, Office, Chromium, Electron, terminal, elevated applications, and long-running stability without capturing user content.
+EVKey 64-bit was sampled five times while already running on the same development machine. The five samples were stable at 0.527 MiB private working set, 4.949 MiB private bytes, and 0% measured CPU. Keyina's native tray median was 2.62 MiB private working set and 2.91 MiB private bytes. EVKey therefore had the lower immediately resident private working set in this sample, while Keyina used about 41% less private commit. These metrics measure different memory concepts and do not establish an overall winner.
+
+No universal “faster than UniKey” or “faster than EVKey” claim is made from internal microbenchmarks or one process snapshot. A valid product comparison still requires the same keyboard corpus, target applications, startup state, observation method, correctness checks, repeated frame-time measurements, elevated/fullscreen coverage, and long-running stability without capturing user content.

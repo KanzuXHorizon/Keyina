@@ -16,6 +16,14 @@ public sealed record KeyinaRuntimeOptions(
     bool ShowSettingsOnStart,
     bool DisplaySettingsWindows)
 {
+    public string? RuntimeInputProfilePath { get; init; }
+
+    public bool ExitWhenLastWindowCloses { get; init; }
+
+    public bool PublishRuntimeProfileOnStartup { get; init; } = true;
+
+    public Func<FocusedUnicodeEnvelopeWriter>? FocusedDictationWriterFactory { get; init; }
+
     public Func<IForegroundPresentationProbe>? ForegroundPresentationProbeFactory { get; init; }
 
     public Func<IFeedbackOverlay>? FeedbackOverlayFactory { get; init; }
@@ -33,6 +41,43 @@ public sealed record KeyinaRuntimeOptions(
             ShowSettingsOnStart: showSettingsOnStart,
             DisplaySettingsWindows: true);
 
+    public static KeyinaRuntimeOptions CreateProductionCommandCompanion() =>
+        new(
+            ConfigurationPaths.GetProductionPath(),
+            StartupRegistrationDefaults.ValueName,
+            EnableNotifyIcon: false,
+            EnableGlobalHotkeys: false,
+            EnablePipe: false,
+            EnableSpeech: true,
+            ShowSettingsOnStart: false,
+            DisplaySettingsWindows: false)
+        {
+            PublishRuntimeProfileOnStartup = false,
+            FocusedDictationWriterFactory = static () =>
+                new FocusedUnicodeEnvelopeWriter(),
+        };
+
+    public static KeyinaRuntimeOptions CreateProductionSettingsCompanion() =>
+        CreateSettingsCompanion(
+            ConfigurationPaths.GetProductionPath(),
+            StartupRegistrationDefaults.ValueName);
+
+    public static KeyinaRuntimeOptions CreateSettingsCompanion(
+        string configurationPath,
+        string startupValueName) =>
+        new(
+            configurationPath,
+            startupValueName,
+            EnableNotifyIcon: false,
+            EnableGlobalHotkeys: false,
+            EnablePipe: false,
+            EnableSpeech: false,
+            ShowSettingsOnStart: true,
+            DisplaySettingsWindows: true)
+        {
+            ExitWhenLastWindowCloses = true,
+        };
+
     public static KeyinaRuntimeOptions CreateSelfTest(
         string configurationPath,
         string startupValueName) =>
@@ -44,7 +89,29 @@ public sealed record KeyinaRuntimeOptions(
             EnablePipe: false,
             EnableSpeech: false,
             ShowSettingsOnStart: false,
-            DisplaySettingsWindows: false);
+            DisplaySettingsWindows: false)
+        {
+            RuntimeInputProfilePath = Path.Combine(
+                Path.GetDirectoryName(configurationPath)
+                    ?? throw new ArgumentException(
+                        "Self-test configuration path has no parent directory.",
+                        nameof(configurationPath)),
+                "runtime-input.bin"),
+        };
+
+    public string ResolveRuntimeInputProfilePath()
+    {
+        if (!string.IsNullOrWhiteSpace(RuntimeInputProfilePath))
+        {
+            return RuntimeInputProfilePath;
+        }
+
+        var directory = Path.GetDirectoryName(ConfigurationPath)
+            ?? throw new ArgumentException(
+                "Runtime configuration path has no parent directory.",
+                nameof(ConfigurationPath));
+        return Path.Combine(directory, "runtime-input.bin");
+    }
 
     public void Validate()
     {
@@ -54,6 +121,13 @@ public sealed record KeyinaRuntimeOptions(
             throw new ArgumentException(
                 "Runtime configuration path must be fully qualified.",
                 nameof(ConfigurationPath));
+        }
+        var runtimeProfilePath = ResolveRuntimeInputProfilePath();
+        if (!Path.IsPathFullyQualified(runtimeProfilePath))
+        {
+            throw new ArgumentException(
+                "Runtime input profile path must be fully qualified.",
+                nameof(RuntimeInputProfilePath));
         }
         ArgumentException.ThrowIfNullOrWhiteSpace(StartupValueName);
         if (StartupValueName.Any(char.IsControl))

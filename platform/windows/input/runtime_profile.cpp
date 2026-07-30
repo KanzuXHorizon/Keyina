@@ -9,9 +9,9 @@ namespace {
 
 constexpr std::array<std::byte, 4> kMagic{
     std::byte{'K'}, std::byte{'I'}, std::byte{'R'}, std::byte{'P'}};
-constexpr std::uint8_t kFormatVersion = 1;
-constexpr std::uint8_t kBindingCount = 5;
-constexpr std::size_t kChecksumOffset = 28;
+constexpr std::uint8_t kFormatVersion = 2;
+constexpr std::uint8_t kBindingCount = 6;
+constexpr std::size_t kChecksumOffset = 32;
 constexpr std::uint8_t kVietnameseEnabledFlag = 1u << 0u;
 constexpr std::uint8_t kSpeechEnabledFlag = 1u << 1u;
 constexpr std::uint8_t kTranslationEnabledFlag = 1u << 2u;
@@ -102,7 +102,7 @@ bool ValidateBinding(
   if (index == 1 && binding.modifiers == 0) {
     return false;
   }
-  if (index != 4 && binding.virtual_key == 0x1B) {
+  if (index != 5 && binding.virtual_key == 0x1B) {
     return false;
   }
   if (binding.modifiers == 0 && RequiresModifier(binding.virtual_key)) {
@@ -155,7 +155,8 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
   const auto flags = ByteAt(bytes, 6);
   if (ByteAt(bytes, 5) != kRuntimeInputProfileSize ||
       ByteAt(bytes, 7) != kBindingCount ||
-      (flags & ~kKnownFlags) != 0 || ByteAt(bytes, 23) != 0) {
+      (flags & ~kKnownFlags) != 0 || ByteAt(bytes, 26) != 0 ||
+      ByteAt(bytes, 27) != 0) {
     result.error = RuntimeInputProfileError::InvalidHeader;
     return result;
   }
@@ -165,7 +166,7 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
     return result;
   }
 
-  result.profile.source_schema_version = ReadInt32LittleEndian(bytes, 24);
+  result.profile.source_schema_version = ReadInt32LittleEndian(bytes, 28);
   if (result.profile.source_schema_version <= 0) {
     result.error = RuntimeInputProfileError::InvalidSchema;
     return result;

@@ -7,7 +7,7 @@ namespace Keyina.Host.Tests;
 internal static class RuntimeInputProfileTests
 {
     private static readonly byte[] DefaultVector = Convert.FromHexString(
-        "4B4952500120010502030001052000055600055400001B00010000008B7B427A");
+        "4B4952500224010602030001052000055600055400055A00001B000001000000A6CE4F2A");
 
     [KeyinaTest("runtime input profile encodes the exact default cross-language vector")]
     private static void DefaultProfileMatchesExactVector()
@@ -38,7 +38,12 @@ internal static class RuntimeInputProfileTests
                     HotkeyCommand.ToggleDictation,
                     new HotkeyChord(
                         HotkeyModifiers.Control | HotkeyModifiers.Shift,
-                        VirtualKey.F9)),
+                        VirtualKey.F9))
+                .WithChord(
+                    HotkeyCommand.UndoTranslation,
+                    new HotkeyChord(
+                        HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                        VirtualKey.F10)),
         };
 
         var decoded = RuntimeInputProfileCodec.Decode(
@@ -59,7 +64,7 @@ internal static class RuntimeInputProfileTests
         AssertInvalid(checksumCorrupt, "checksum corruption");
 
         var unknownVersion = DefaultVector.ToArray();
-        unknownVersion[4] = 2;
+        unknownVersion[4] = 3;
         RewriteChecksum(unknownVersion);
         AssertInvalid(unknownVersion, "unknown version");
 
@@ -85,7 +90,7 @@ internal static class RuntimeInputProfileTests
         AssertInvalid(unknownFlag, "unknown flag");
 
         var reservedByte = DefaultVector.ToArray();
-        reservedByte[23] = 1;
+        reservedByte[26] = 1;
         RewriteChecksum(reservedByte);
         AssertInvalid(reservedByte, "reserved byte");
     }

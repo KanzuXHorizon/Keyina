@@ -18,7 +18,12 @@ namespace {
 constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
 constexpr UINT kPointerRegistrationMessage = WM_APP + 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 2;
+constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
+constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
+constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
 constexpr UINT kTrayIdentifier = 1;
+constexpr wchar_t kCommandCompanionMutexName[] =
+    L"Local\\Keyina.CommandCompanion";
 constexpr UINT kToggleMenuCommand = 1001;
 constexpr UINT kSettingsMenuCommand = 1002;
 constexpr UINT kExitMenuCommand = 1003;
@@ -199,6 +204,72 @@ bool IsFullscreenWindow(HWND window) noexcept {
          window_rect.bottom >= monitor_info.rcMonitor.bottom - tolerance;
 }
 
+bool ResolveRuntimeInputProfilePath(
+    std::array<wchar_t, 32768>& path) noexcept {
+  std::array<wchar_t, 32768> local_app_data{};
+  const DWORD length = GetEnvironmentVariableW(
+      L"LOCALAPPDATA",
+      local_app_data.data(),
+      static_cast<DWORD>(local_app_data.size()));
+  if (length == 0 || length >= local_app_data.size()) {
+    return false;
+  }
+  return swprintf_s(
+             path.data(),
+             path.size(),
+             L"%ls\\Keyina\\runtime-input.bin",
+             local_app_data.data()) > 0;
+}
+
+bool TryReadRuntimeInputProfile(
+    const wchar_t* path,
+    RuntimeInputProfile& profile) noexcept {
+  HANDLE file = CreateFileW(
+      path,
+      GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  std::array<std::byte, kRuntimeInputProfileSize> bytes{};
+  DWORD read = 0;
+  const BOOL success = ReadFile(
+      file,
+      bytes.data(),
+      static_cast<DWORD>(bytes.size()),
+      &read,
+      nullptr);
+  CloseHandle(file);
+  if (!success || read != bytes.size()) {
+    return false;
+  }
+  const auto decoded = DecodeRuntimeInputProfile(bytes);
+  if (!decoded) {
+    return false;
+  }
+  profile = decoded.profile;
+  return true;
+}
+
+bool TryGetRuntimeInputProfileWriteTime(
+    const wchar_t* path,
+    FILETIME& write_time) noexcept {
+  WIN32_FILE_ATTRIBUTE_DATA attributes{};
+  if (!GetFileAttributesExW(
+          path,
+          GetFileExInfoStandard,
+          &attributes)) {
+    return false;
+  }
+  write_time = attributes.ftLastWriteTime;
+  return true;
+}
+
 }  // namespace
 
 Win32InputRuntime* Win32InputRuntime::active_runtime_ = nullptr;
@@ -210,6 +281,11 @@ Win32InputRuntime::Win32InputRuntime(RuntimeInputProfile profile,
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
 bool Win32InputRuntime::Start() noexcept {
+  stopping_ = false;
+  pressed_keys_.Clear();
+  hotkey_router_.Reset();
+  toggle_chord_active_ = false;
+  toggle_chord_contaminated_ = false;
   startup_stage_ = NativeRuntimeStartupStage::None;
   startup_error_ = ERROR_SUCCESS;
   if (hook_ != nullptr || active_runtime_ != nullptr) {
@@ -275,6 +351,12 @@ bool Win32InputRuntime::Start() noexcept {
       UpdateTray();
     }
   }
+  ReloadProfileIfChanged();
+  profile_timer_ = SetTimer(
+      window_,
+      kProfileReloadTimerIdentifier,
+      kProfileReloadIntervalMilliseconds,
+      nullptr);
   return true;
 }
 
@@ -300,6 +382,10 @@ void Win32InputRuntime::Stop() noexcept {
   }
   stopping_ = true;
 
+  if (profile_timer_ != 0 && window_ != nullptr) {
+    KillTimer(window_, profile_timer_);
+    profile_timer_ = 0;
+  }
   pointer_registration_desired_ = false;
   ApplyPointerRegistration();
   if (hook_ != nullptr) {
@@ -332,6 +418,9 @@ void Win32InputRuntime::Stop() noexcept {
     active_runtime_ = nullptr;
   }
   pressed_keys_.Clear();
+  hotkey_router_.Reset();
+  toggle_chord_active_ = false;
+  toggle_chord_contaminated_ = false;
   controller_.Reset();
 }
 
@@ -424,6 +513,16 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
       }
       return result;
     }
+    case WM_TIMER:
+      if (w_param == kProfileReloadTimerIdentifier) {
+        ReloadProfileIfChanged();
+        return 0;
+      }
+      break;
+    case kRuntimeCommandMessage:
+      static_cast<void>(
+          LaunchManagedCommand(static_cast<RuntimeCommand>(w_param)));
+      return 0;
     case kTrayCallbackMessage:
       if (l_param == WM_RBUTTONUP || l_param == WM_CONTEXTMENU) {
         ShowTrayMenu();
@@ -438,6 +537,10 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
           controller_.ApplyProfile(profile_);
           RequestPointerRegistration(false);
           UpdateTray();
+          static_cast<void>(QueueManagedCommand(
+              profile_.vietnamese_enabled
+                  ? RuntimeCommand::SetVietnameseEnabled
+                  : RuntimeCommand::SetVietnameseDisabled));
           return 0;
         case kSettingsMenuCommand:
           OpenManagedSettings();
@@ -498,6 +601,24 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     event.windows = (modifier_state_ & kWindowsModifier) != 0;
 
     ProcessToggleGesture(event);
+    const bool companion_state_required = key_down &&
+        (event.virtual_key == profile_.hotkeys[4].virtual_key ||
+         event.virtual_key == profile_.hotkeys[5].virtual_key);
+    const auto hotkey_decision = hotkey_router_.Process(
+        event,
+        profile_,
+        was_pressed,
+        companion_state_required && IsCommandCompanionActive());
+    if (hotkey_decision.command != RuntimeCommand::None &&
+        !QueueManagedCommand(hotkey_decision.command) &&
+        hotkey_decision.suppress && key_down) {
+      hotkey_router_.CancelSuppression(event.virtual_key);
+      return CallNextHookEx(nullptr, code, message, data);
+    }
+    if (hotkey_decision.suppress) {
+      return 1;
+    }
+
     const TypingContext context = CaptureTypingContext();
     const InputDecision decision = controller_.Process(event, context);
     RequestPointerRegistration(
@@ -635,10 +756,102 @@ void Win32InputRuntime::ProcessToggleGesture(
       controller_.ApplyProfile(profile_);
       RequestPointerRegistration(false);
       UpdateTray();
+      static_cast<void>(QueueManagedCommand(
+          profile_.vietnamese_enabled
+              ? RuntimeCommand::SetVietnameseEnabled
+              : RuntimeCommand::SetVietnameseDisabled));
     }
     toggle_chord_active_ = false;
     toggle_chord_contaminated_ = false;
   }
+}
+
+bool Win32InputRuntime::QueueManagedCommand(
+    RuntimeCommand command) noexcept {
+  return command != RuntimeCommand::None && window_ != nullptr &&
+         PostMessageW(
+             window_,
+             kRuntimeCommandMessage,
+             static_cast<WPARAM>(command),
+             0) != FALSE;
+}
+
+bool Win32InputRuntime::LaunchManagedCommand(
+    RuntimeCommand command) noexcept {
+  const wchar_t* argument = RuntimeCommandArgument(command);
+  if (argument == nullptr || shell_execute_ == nullptr) {
+    return false;
+  }
+
+  std::array<wchar_t, 32768> executable{};
+  const DWORD length = GetModuleFileNameW(
+      nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+  if (length == 0 || length >= executable.size()) {
+    return false;
+  }
+  wchar_t* separator = std::wcsrchr(executable.data(), L'\\');
+  if (separator == nullptr) {
+    return false;
+  }
+  *separator = L'\0';
+
+  std::array<wchar_t, 32768> companion{};
+  if (swprintf_s(
+          companion.data(),
+          companion.size(),
+          L"%ls\\Keyina.Host.exe",
+          executable.data()) <= 0) {
+    return false;
+  }
+
+  const HINSTANCE result = shell_execute_(
+      window_,
+      L"open",
+      companion.data(),
+      argument,
+      executable.data(),
+      SW_SHOWNOACTIVATE);
+  return reinterpret_cast<INT_PTR>(result) > 32;
+}
+
+bool Win32InputRuntime::IsCommandCompanionActive() const noexcept {
+  HANDLE mutex = OpenMutexW(
+      SYNCHRONIZE,
+      FALSE,
+      kCommandCompanionMutexName);
+  if (mutex == nullptr) {
+    return false;
+  }
+  CloseHandle(mutex);
+  return true;
+}
+
+void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
+  std::array<wchar_t, 32768> path{};
+  FILETIME write_time{};
+  if (!ResolveRuntimeInputProfilePath(path) ||
+      !TryGetRuntimeInputProfileWriteTime(path.data(), write_time)) {
+    return;
+  }
+  if (profile_write_time_known_ &&
+      CompareFileTime(&profile_write_time_, &write_time) == 0) {
+    return;
+  }
+
+  RuntimeInputProfile profile{};
+  if (!TryReadRuntimeInputProfile(path.data(), profile)) {
+    return;
+  }
+
+  profile_write_time_ = write_time;
+  profile_write_time_known_ = true;
+  profile_ = profile;
+  controller_.ApplyProfile(profile_);
+  hotkey_router_.Reset();
+  toggle_chord_active_ = false;
+  toggle_chord_contaminated_ = false;
+  RequestPointerRegistration(false);
+  UpdateTray();
 }
 
 void Win32InputRuntime::RefreshModifierState() noexcept {
@@ -756,44 +969,20 @@ RuntimeInputProfile DefaultRuntimeInputProfile() noexcept {
       RuntimeHotkeyBinding{
           RuntimeHotkeyGesture::Press, 0x05, 0x54},
       RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Press, 0x05, 0x5A},
+      RuntimeHotkeyBinding{
           RuntimeHotkeyGesture::Press, 0x00, 0x1B},
   };
   return profile;
 }
 
 RuntimeInputProfile LoadRuntimeInputProfileOrDefault() noexcept {
-  RuntimeInputProfile fallback = DefaultRuntimeInputProfile();
-  std::array<wchar_t, 32768> local_app_data{};
-  const DWORD length = GetEnvironmentVariableW(
-      L"LOCALAPPDATA", local_app_data.data(),
-      static_cast<DWORD>(local_app_data.size()));
-  if (length == 0 || length >= local_app_data.size()) {
-    return fallback;
-  }
-
+  RuntimeInputProfile profile = DefaultRuntimeInputProfile();
   std::array<wchar_t, 32768> path{};
-  if (swprintf_s(path.data(), path.size(), L"%ls\\Keyina\\runtime-input.bin",
-                 local_app_data.data()) <= 0) {
-    return fallback;
+  if (ResolveRuntimeInputProfilePath(path)) {
+    static_cast<void>(TryReadRuntimeInputProfile(path.data(), profile));
   }
-  HANDLE file = CreateFileW(
-      path.data(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE |
-          FILE_SHARE_DELETE,
-      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (file == INVALID_HANDLE_VALUE) {
-    return fallback;
-  }
-
-  std::array<std::byte, kRuntimeInputProfileSize> bytes{};
-  DWORD read = 0;
-  const BOOL success = ReadFile(
-      file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr);
-  CloseHandle(file);
-  if (!success || read != bytes.size()) {
-    return fallback;
-  }
-  const auto decoded = DecodeRuntimeInputProfile(bytes);
-  return decoded ? decoded.profile : fallback;
+  return profile;
 }
 
 NativeResidentResourceSnapshot MeasureNativeResidentResources(

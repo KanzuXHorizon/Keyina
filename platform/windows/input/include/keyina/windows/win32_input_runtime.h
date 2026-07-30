@@ -1,6 +1,7 @@
 #pragma once
 
 #include <keyina/windows/resident_input_controller.h>
+#include <keyina/windows/runtime_hotkeys.h>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -92,6 +93,10 @@ class Win32InputRuntime {
   void RequestPointerRegistration(bool active) noexcept;
   void ApplyPointerRegistration() noexcept;
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
+  [[nodiscard]] bool QueueManagedCommand(RuntimeCommand command) noexcept;
+  [[nodiscard]] bool LaunchManagedCommand(RuntimeCommand command) noexcept;
+  [[nodiscard]] bool IsCommandCompanionActive() const noexcept;
+  void ReloadProfileIfChanged() noexcept;
   void RefreshModifierState() noexcept;
   void UpdateTray() noexcept;
   void ShowTrayMenu() noexcept;
@@ -100,6 +105,7 @@ class Win32InputRuntime {
 
   RuntimeInputProfile profile_{};
   ResidentInputController controller_;
+  RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
   HWND window_{nullptr};
   HHOOK hook_{nullptr};
@@ -121,6 +127,9 @@ class Win32InputRuntime {
   bool toggle_chord_active_{false};
   bool toggle_chord_contaminated_{false};
   bool stopping_{false};
+  FILETIME profile_write_time_{};
+  bool profile_write_time_known_{false};
+  UINT_PTR profile_timer_{};
   NativeRuntimeStartupStage startup_stage_{NativeRuntimeStartupStage::None};
   DWORD startup_error_{};
   std::uint64_t processed_keyboard_events_{};

@@ -2,6 +2,7 @@ add_library(keyina_windows_input STATIC
   input_injection.cpp
   pointer_input.cpp
   resident_input_controller.cpp
+  runtime_hotkeys.cpp
   runtime_profile.cpp
 )
 add_library(keyina::windows_input ALIAS keyina_windows_input)
@@ -70,4 +71,12 @@ set_tests_properties(keyina.windows.input_tray_resource PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "\\\"tray_enabled\\\":true.*\\\"budget_pass\\\":true"
   TIMEOUT 15
+)
+
+add_test(NAME keyina.windows.input_profile_reload
+  COMMAND KeyinaInput --profile-reload-self-test)
+set_tests_properties(keyina.windows.input_profile_reload PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "profile_reload_self_test_pass"
+  TIMEOUT 10
 )

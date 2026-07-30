@@ -50,21 +50,24 @@ Keyina is a clean-room Vietnamese input platform focused on behavior that can be
 
 ```text
 Physical keyboard events
-        ↓ WH_KEYBOARD_LL, strict bypass rules
-Keyina.Host.exe — .NET 10 Windows resident process
-  ├─ input mode and hotkey state
-  ├─ compatibility boundaries and diagnostics
-  ├─ snippets and optional speech
-  └─ minimal Backspace + Unicode SendInput edits
-        ↕ narrow C ABI
-KeyinaEngine.dll — C++20, native, deterministic, offline
-  ├─ Telex composition
-  ├─ tone placement and syllable validation
-  ├─ raw-key rollback
-  └─ Context Guard
+        ↓ one WH_KEYBOARD_LL, strict fail-open rules
+KeyinaInput.exe — C++20 native resident process
+  ├─ Vietnamese engine and Context Guard in-process
+  ├─ hotkeys, Unicode SendInput, minimal native tray
+  ├─ Raw Input mouse registration only during composition
+  └─ atomic runtime-input.bin profile reload
+        ↓ launch/signal only when requested
+Keyina.Host.exe — .NET 10 on-demand companion
+  ├─ Settings and onboarding
+  ├─ optional Speechmatics dictation
+  ├─ optional selection translation and undo
+  └─ diagnostics, import/export, credentials
+
+Optional managed fallback
+Keyina.Host.exe ↔ KeyinaEngine.dll through the narrow C ABI
 ```
 
-The keyboard hook processes only supported plain-text events. Injected events carry a private marker and are never reprocessed. Modifier shortcuts, password fields, elevated targets, navigation or selection-risk boundaries, raw-input software, and unknown failures reset state and pass literal input through.
+The native callback processes only supported plain-text events and never performs file, network, UI, or process-launch work. Commands are posted to the resident message loop, while settings changes are reloaded on a low-frequency timer. Injected events carry a private marker and are never reprocessed. Modifier shortcuts, password fields, elevated targets, fullscreen applications, navigation or selection-risk boundaries, and unknown failures reset state and pass literal input through.
 
 The older Windows Text Services Framework implementation remains optional behind `KEYINA_BUILD_TSF=ON`; it is not required for the default typing flow.
 
@@ -80,17 +83,16 @@ The older Windows Text Services Framework implementation remains optional behind
 - Context transitions that recover literal identifiers, paths, URLs, and mixed-language tokens.
 - Native unit, invariant, integration, golden-vector, and latency tests.
 
-### Windows host
+### Windows runtime and companion
 
-- Resident WinForms host on .NET 10 with a Fluent-inspired light, dark, and high-contrast interface.
-- Familiar, fully configurable global shortcuts with transactional conflict rollback.
-- Native-engine bridge and low-level keyboard hook with injection-loop protection.
-- Deterministic snippets, secure-input bypass, onboarding, and credential-free settings import/export.
-- Per-application exclusions for typing, speech, translation, and visual feedback.
-- Tray lifecycle, startup registration, diagnostics, and self-tests.
-- Optional Speechmatics Vietnamese dictation with Windows Credential Manager storage.
-- Provider-neutral selection translation using DeepL and an optional user-configured LibreTranslate fallback, with preview, one-shot undo, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and separate Credential Manager storage.
-- Deterministic generated icons, lockups, screenshot gallery, portable ZIP, and per-user Windows installer pipeline.
+- Native C++ resident with one keyboard hook, zero-allocation ordinary typing, a minimal tray, and no low-level mouse hook.
+- Familiar, fully configurable global shortcuts with transactional conflict rollback; command work is posted off the hook callback.
+- Settings and onboarding run in an on-demand .NET 10 WinForms companion with Fluent-inspired light, dark, and high-contrast UI.
+- Settings publish a checksummed 36-byte runtime profile atomically; the native resident reloads it without restarting.
+- Deterministic snippets, secure-input bypass, onboarding, credential-free settings import/export, and per-application exclusions for typing, speech, translation, and visual feedback.
+- Optional Speechmatics Vietnamese dictation uses focus-locked direct Unicode delivery and Windows Credential Manager storage.
+- Provider-neutral selection translation uses DeepL with an optional user-configured LibreTranslate fallback, preview, one-shot undo, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and separate Credential Manager storage.
+- Deterministic generated icons, lockups, screenshot gallery, resource gates, live typing self-tests, portable ZIP, and a per-user Windows installer pipeline.
 
 ## Privacy and security model
 
@@ -130,13 +132,14 @@ dotnet build Keyina.slnx -c Debug
 dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
 ```
 
-### Run the development host
+### Publish and run the Windows bundle
 
 ```powershell
-dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --show-settings
+powershell -ExecutionPolicy Bypass -File scripts/windows/publish.ps1
+.\artifacts\publish\win-x64\KeyinaInput.exe
 ```
 
-The development host is unsigned. Windows or security software may warn about locally built keyboard-hook software. Review the source and build it yourself; do not bypass organizational security policy.
+`KeyinaInput.exe`, `Keyina.Host.exe`, `KeyinaEngine.dll`, and the native tray icons are published beside one another. Open Settings from the tray; the managed companion exits after its final window closes. The development binaries are unsigned. Windows or security software may warn about locally built keyboard-hook software. Review the source and build it yourself; do not bypass organizational security policy.
 
 ### Build an installer and portable release
 
@@ -180,6 +183,12 @@ dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-buil
 dotnet build Keyina.slnx -c Release
 dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --resource-self-test
 dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build
+
+.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --self-test
+.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --typing-self-test
+.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --resource-self-test
+.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --tray-resource-self-test
+.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --profile-reload-self-test
 ```
 
 ### Deterministic brand assets

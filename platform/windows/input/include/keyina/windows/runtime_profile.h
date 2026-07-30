@@ -7,8 +7,8 @@
 
 namespace keyina::windows {
 
-inline constexpr std::size_t kRuntimeInputProfileSize = 32;
-inline constexpr std::size_t kRuntimeHotkeyCount = 5;
+inline constexpr std::size_t kRuntimeInputProfileSize = 36;
+inline constexpr std::size_t kRuntimeHotkeyCount = 6;
 
 enum class RuntimeHotkeyGesture : std::uint8_t {
   Press = 0,

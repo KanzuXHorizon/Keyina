@@ -14,11 +14,11 @@ public sealed record RuntimeInputProfileSnapshot(
 
 public static class RuntimeInputProfileCodec
 {
-    public const int EncodedLength = 32;
-    public const int ChecksumOffset = 28;
+    public const int EncodedLength = 36;
+    public const int ChecksumOffset = 32;
 
-    private const byte FormatVersion = 1;
-    private const byte BindingCount = 5;
+    private const byte FormatVersion = 2;
+    private const byte BindingCount = 6;
     private const byte VietnameseEnabledFlag = 1 << 0;
     private const byte SpeechEnabledFlag = 1 << 1;
     private const byte TranslationEnabledFlag = 1 << 2;
@@ -49,10 +49,12 @@ public static class RuntimeInputProfileCodec
         WriteBinding(bytes, 1, configuration.Hotkeys.PushToTalk);
         WriteBinding(bytes, 2, configuration.Hotkeys.ToggleDictation);
         WriteBinding(bytes, 3, configuration.Hotkeys.TranslateSelection);
-        WriteBinding(bytes, 4, configuration.Hotkeys.CancelActiveCommand);
-        bytes[23] = 0;
+        WriteBinding(bytes, 4, configuration.Hotkeys.UndoTranslation);
+        WriteBinding(bytes, 5, configuration.Hotkeys.CancelActiveCommand);
+        bytes[26] = 0;
+        bytes[27] = 0;
         BinaryPrimitives.WriteInt32LittleEndian(
-            bytes.AsSpan(24, sizeof(int)),
+            bytes.AsSpan(28, sizeof(int)),
             configuration.SchemaVersion);
         BinaryPrimitives.WriteUInt32LittleEndian(
             bytes.AsSpan(ChecksumOffset, sizeof(uint)),
@@ -80,7 +82,7 @@ public static class RuntimeInputProfileCodec
         {
             throw new InvalidDataException("Runtime input profile header is inconsistent.");
         }
-        if ((bytes[6] & ~KnownFlags) != 0 || bytes[23] != 0)
+        if ((bytes[6] & ~KnownFlags) != 0 || bytes[26] != 0 || bytes[27] != 0)
         {
             throw new InvalidDataException("Runtime input profile contains unsupported flags.");
         }
@@ -94,7 +96,7 @@ public static class RuntimeInputProfileCodec
         }
 
         var sourceSchemaVersion = BinaryPrimitives.ReadInt32LittleEndian(
-            bytes.Slice(24, sizeof(int)));
+            bytes.Slice(28, sizeof(int)));
         if (sourceSchemaVersion <= 0)
         {
             throw new InvalidDataException("Runtime input profile source schema is invalid.");
@@ -107,7 +109,10 @@ public static class RuntimeInputProfileCodec
                 ReadBinding(bytes, 1),
                 ReadBinding(bytes, 2),
                 ReadBinding(bytes, 3),
-                ReadBinding(bytes, 4));
+                ReadBinding(bytes, 5))
+            {
+                UndoTranslation = ReadBinding(bytes, 4),
+            };
             hotkeys.Validate();
 
             var flags = bytes[6];

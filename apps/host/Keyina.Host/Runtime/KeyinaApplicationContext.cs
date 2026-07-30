@@ -38,6 +38,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
     private readonly KeyinaRuntimeOptions options;
     private readonly AtomicConfigurationStore configurationStore;
+    private readonly RuntimeInputProfileStore runtimeInputProfileStore;
     private readonly WindowsStartupRegistration startupRegistration;
     private readonly ICredentialVault credentialVault;
     private readonly IApplicationExclusionService applicationExclusions;
@@ -49,6 +50,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly ConcurrentQueue<Action> pendingSignals = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim speechCommandGate = new(1, 1);
+    private readonly object configurationSaveSync = new();
+    private Task pendingConfigurationSave = Task.CompletedTask;
     private readonly Control dispatcher = new();
     private readonly ContextMenuStrip trayMenu = new();
     private readonly ToolStripMenuItem statusMenuItem;
@@ -72,6 +75,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private ModifierKeyboardHook? modifierHook;
     private VietnameseKeyboardHook? typingHook;
     private NamedPipeEnvelopeServer? pipeServer;
+    private FocusedUnicodeEnvelopeWriter? focusedDictationWriter;
     private DictationCoordinator? dictationCoordinator;
     private DictationOverlayModel? dictationOverlay;
     private FeedbackCoordinator? feedbackCoordinator;
@@ -88,6 +92,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private string? lastExternalApplicationName;
     private FluentThemeMode? trayThemeMode;
     private DictationStatus? lastFeedbackDictationStatus;
+    private bool runtimeInputProfileReady;
     private bool disposed;
 
     public KeyinaApplicationContext(KeyinaRuntimeOptions options)
@@ -108,6 +113,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         this.applicationExclusions = applicationExclusions ??
             new ApplicationExclusionService();
         configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
+        runtimeInputProfileStore = new RuntimeInputProfileStore(
+            options.ResolveRuntimeInputProfilePath());
         configuration = LoadConfiguration();
         this.applicationExclusions.Update(configuration.Applications);
         if (translationProvider is null)
@@ -132,11 +139,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             VietnameseEnabled = configuration.VietnameseEnabled,
         };
+        if (options.PublishRuntimeProfileOnStartup)
+        {
+            PublishRuntimeInputProfileAtStartup();
+        }
         startupRegistration = new WindowsStartupRegistration(
             options.StartupValueName,
-            static () => Environment.ProcessPath ??
-                throw new InvalidOperationException(
-                    "The current process executable path is unavailable."));
+            NativeResidentPathResolver.ResolveCurrentProcessSibling);
 
         activeIcon = LoadIcon("keyina-tray-active.ico");
         inactiveIcon = LoadIcon("keyina-tray-inactive.ico");
@@ -280,6 +289,16 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
     public bool NotifyIconVisible => notifyIcon.Visible;
 
+    public bool RuntimeInputProfileReady => runtimeInputProfileReady;
+
+    public bool FocusedDictationReady =>
+        focusedDictationWriter is not null && dictationCoordinator is not null;
+
+    public bool CanUndoTranslation => translationCoordinator.CanUndo;
+
+    public bool TranslationPreviewCreated =>
+        translationPreviewForm is not null && !translationPreviewForm.IsDisposed;
+
     public bool TrayUsesCustomRenderer => trayMenu.Renderer is FluentTrayRenderer;
 
     public bool TrayShowsImageMargin => trayMenu.ShowImageMargin;
@@ -359,7 +378,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
 
         settingsForm = new SettingsForm(CreateSettingsSnapshot(), CreateSettingsActions());
-        settingsForm.FormClosed += (_, _) => settingsForm = null;
+        settingsForm.FormClosed += (_, _) =>
+        {
+            settingsForm = null;
+            ScheduleCompanionExitIfIdle();
+        };
         if (!string.IsNullOrWhiteSpace(section))
         {
             settingsForm.OpenSection(section);
@@ -424,6 +447,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 CompleteFirstRun();
             }
             firstRunForm = null;
+            ScheduleCompanionExitIfIdle();
         };
         firstRunForm.Show();
     }
@@ -438,6 +462,25 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         configuration = configuration with { FirstRunCompleted = true };
         _ = SaveConfigurationSafelyAsync();
         RefreshVisualState();
+    }
+
+    private void ScheduleCompanionExitIfIdle()
+    {
+        if (!options.ExitWhenLastWindowCloses || disposed || dispatcher.IsDisposed)
+        {
+            return;
+        }
+
+        dispatcher.BeginInvoke(() =>
+        {
+            if (!disposed &&
+                options.ExitWhenLastWindowCloses &&
+                !SettingsCreated &&
+                !FirstRunCreated)
+            {
+                ExitThread();
+            }
+        });
     }
 
     protected override void ExitThreadCore()
@@ -455,7 +498,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         base.Dispose(disposing);
     }
 
-    private bool IsDictationActive => dictationCoordinator?.State.Status is
+    public bool IsDictationActive => dictationCoordinator?.State.Status is
         DictationStatus.Connecting or
         DictationStatus.Listening or
         DictationStatus.Finalizing;
@@ -597,19 +640,39 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             }
         }
 
-        if (options.EnableSpeech && pipeServer is not null)
+        if (options.EnableSpeech)
         {
-            dictationOverlay = new DictationOverlayModel();
-            dictationOverlay.StateChanged += (_, _) =>
-                PostSignal(HandleDictationStateChanged);
-            dictationCoordinator = new DictationCoordinator(
-                new SpeechmaticsSessionFactory(),
-                new WasapiMicrophoneCapture(),
-                new ActivePipeEnvelopeWriter(pipeServer),
-                dictationOverlay,
-                hostEvent => PostSignal(() => ApplyHostEvent(hostEvent)),
-                () => pipeServer.ActiveTarget?.FocusGeneration ?? 0,
-                TimeSpan.FromSeconds(5));
+            IIpcEnvelopeWriter? envelopeWriter = null;
+            Func<ulong>? focusGenerationProvider = null;
+            if (pipeServer is not null)
+            {
+                envelopeWriter = new ActivePipeEnvelopeWriter(pipeServer);
+                focusGenerationProvider = () =>
+                    pipeServer.ActiveTarget?.FocusGeneration ?? 0;
+            }
+            else if (options.FocusedDictationWriterFactory is not null)
+            {
+                focusedDictationWriter =
+                    options.FocusedDictationWriterFactory.Invoke();
+                envelopeWriter = focusedDictationWriter;
+                focusGenerationProvider = () =>
+                    focusedDictationWriter.FocusGeneration;
+            }
+
+            if (envelopeWriter is not null && focusGenerationProvider is not null)
+            {
+                dictationOverlay = new DictationOverlayModel();
+                dictationOverlay.StateChanged += (_, _) =>
+                    PostSignal(HandleDictationStateChanged);
+                dictationCoordinator = new DictationCoordinator(
+                    new SpeechmaticsSessionFactory(),
+                    new WasapiMicrophoneCapture(),
+                    envelopeWriter,
+                    dictationOverlay,
+                    hostEvent => PostSignal(() => ApplyHostEvent(hostEvent)),
+                    focusGenerationProvider,
+                    TimeSpan.FromSeconds(5));
+            }
         }
     }
 
@@ -700,6 +763,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             dispatcher.BeginInvoke(DrainSignals);
         }
     }
+
+    public Task ApplyNativeVietnameseStateAsync(
+        bool enabled,
+        CancellationToken cancellationToken) =>
+        SetVietnameseEnabledAsync(enabled, cancellationToken);
 
     private async Task SetVietnameseEnabledAsync(
         bool enabled,
@@ -1086,19 +1154,36 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     "Nhập giọng nói đã tắt cho ứng dụng này"));
                 return;
             }
-            var target = pipeServer?.ActiveTarget;
-            if (target is null && pipeServer is not null)
+            IpcSessionId targetSessionId;
+            if (focusedDictationWriter is not null)
             {
-                target = await pipeServer.WaitForActiveTargetAsync(
-                        ActiveTextTargetReconnectGrace,
-                        cancellationToken)
-                    .ConfigureAwait(true);
+                if (!focusedDictationWriter.TryBindToCurrentFocus())
+                {
+                    ReportFailure("speech_no_focused_app");
+                    PublishFeedback(FeedbackEvents.Error(
+                        "Chưa có ô nhập văn bản an toàn"));
+                    return;
+                }
+                targetSessionId = focusedDictationWriter.SessionId;
             }
-            if (target is null)
+            else
             {
-                ReportFailure("speech_no_focused_app");
-                PublishFeedback(FeedbackEvents.Error("Chưa có ô nhập văn bản đang hoạt động"));
-                return;
+                var target = pipeServer?.ActiveTarget;
+                if (target is null && pipeServer is not null)
+                {
+                    target = await pipeServer.WaitForActiveTargetAsync(
+                            ActiveTextTargetReconnectGrace,
+                            cancellationToken)
+                        .ConfigureAwait(true);
+                }
+                if (target is null)
+                {
+                    ReportFailure("speech_no_focused_app");
+                    PublishFeedback(FeedbackEvents.Error(
+                        "Chưa có ô nhập văn bản đang hoạt động"));
+                    return;
+                }
+                targetSessionId = target.SessionId;
             }
             var apiKey = credentialVault.Read(CredentialTargets.SpeechmaticsApiKey);
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -1111,7 +1196,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             RecoverHost();
             await dictationCoordinator.StartAsync(
                     apiKey,
-                    target.SessionId,
+                    targetSessionId,
                     cancellationToken)
                 .ConfigureAwait(true);
         }
@@ -1479,7 +1564,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
             configuration = candidate;
             ApplyImportedConfigurationToRuntime();
-            configurationStore.SaveAsync(configuration, CancellationToken.None)
+            SaveConfigurationAsync(CancellationToken.None)
                 .GetAwaiter().GetResult();
             RecoverHost();
             PublishFeedback(FeedbackEvents.Success("Đã nhập cài đặt"));
@@ -1902,10 +1987,61 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         previous?.Dispose();
     }
 
-    private async Task SaveConfigurationAsync(CancellationToken cancellationToken)
+    private Task SaveConfigurationAsync(CancellationToken cancellationToken)
     {
-        await configurationStore.SaveAsync(configuration, cancellationToken)
+        var snapshot = configuration;
+        lock (configurationSaveSync)
+        {
+            pendingConfigurationSave = SaveAfterPreviousAsync(
+                pendingConfigurationSave,
+                snapshot,
+                cancellationToken);
+            return pendingConfigurationSave;
+        }
+    }
+
+    private async Task SaveAfterPreviousAsync(
+        Task previous,
+        KeyinaConfiguration snapshot,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await previous.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // A failed older snapshot must not block a newer valid snapshot.
+        }
+
+        await configurationStore.SaveAsync(snapshot, cancellationToken)
             .ConfigureAwait(false);
+        try
+        {
+            await runtimeInputProfileStore.PublishAsync(snapshot, cancellationToken)
+                .ConfigureAwait(false);
+            runtimeInputProfileReady = true;
+        }
+        catch (RuntimeInputProfileException)
+        {
+            runtimeInputProfileReady = false;
+        }
+    }
+
+    private void PublishRuntimeInputProfileAtStartup()
+    {
+        try
+        {
+            runtimeInputProfileStore.PublishAsync(
+                    configuration,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult();
+            runtimeInputProfileReady = true;
+        }
+        catch (RuntimeInputProfileException)
+        {
+            runtimeInputProfileReady = false;
+        }
     }
 
     private async Task SaveConfigurationSafelyAsync()
@@ -1917,6 +2053,23 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         catch (Exception)
         {
             ReportFailure("configuration_save_failed");
+        }
+    }
+
+    private void WaitForPendingConfigurationSave()
+    {
+        Task pending;
+        lock (configurationSaveSync)
+        {
+            pending = pendingConfigurationSave;
+        }
+        try
+        {
+            pending.GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            // Save failures are already mapped to stable host error codes.
         }
     }
 
@@ -1978,6 +2131,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             return;
         }
         disposed = true;
+        WaitForPendingConfigurationSave();
         lifetime.Cancel();
 
         CloseSettings();

@@ -13,6 +13,58 @@ namespace {
 constexpr int kAlreadyRunningExitCode = 17;
 constexpr wchar_t kMutexName[] = L"Local\\Keyina.NativeInput";
 
+std::uint32_t ComputeProfileChecksum(
+    const std::array<std::uint8_t, 36>& bytes) noexcept {
+  std::uint32_t hash = 2166136261u;
+  for (std::size_t index = 0; index < 32; ++index) {
+    hash ^= bytes[index];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+bool WriteRuntimeProfileVector(
+    const wchar_t* path,
+    bool vietnamese_enabled) noexcept {
+  std::array<std::uint8_t, 36> bytes{
+      0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x01, 0x06,
+      0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
+      0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
+      0x00, 0x1B, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+  };
+  if (!vietnamese_enabled) {
+    bytes[6] &= static_cast<std::uint8_t>(~0x01u);
+  }
+  const std::uint32_t checksum = ComputeProfileChecksum(bytes);
+  bytes[32] = static_cast<std::uint8_t>(checksum & 0xFFu);
+  bytes[33] = static_cast<std::uint8_t>((checksum >> 8u) & 0xFFu);
+  bytes[34] = static_cast<std::uint8_t>((checksum >> 16u) & 0xFFu);
+  bytes[35] = static_cast<std::uint8_t>((checksum >> 24u) & 0xFFu);
+
+  HANDLE file = CreateFileW(
+      path,
+      GENERIC_WRITE,
+      FILE_SHARE_READ,
+      nullptr,
+      CREATE_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  DWORD written = 0;
+  const BOOL success = WriteFile(
+      file,
+      bytes.data(),
+      static_cast<DWORD>(bytes.size()),
+      &written,
+      nullptr);
+  FlushFileBuffers(file);
+  CloseHandle(file);
+  return success && written == bytes.size();
+}
+
 bool HasArgument(int argument_count, wchar_t** arguments,
                  std::wstring_view expected) noexcept {
   for (int index = 1; index < argument_count; ++index) {
@@ -209,6 +261,83 @@ int RunTypingSelfTest() noexcept {
   return 1;
 }
 
+int RunProfileReloadSelfTest() noexcept {
+  std::array<wchar_t, 32768> previous_local_app_data{};
+  const DWORD previous_length = GetEnvironmentVariableW(
+      L"LOCALAPPDATA",
+      previous_local_app_data.data(),
+      static_cast<DWORD>(previous_local_app_data.size()));
+
+  std::array<wchar_t, MAX_PATH> temporary_root{};
+  if (GetTempPathW(
+          static_cast<DWORD>(temporary_root.size()),
+          temporary_root.data()) == 0) {
+    return 1;
+  }
+  std::array<wchar_t, 32768> test_directory{};
+  if (swprintf_s(
+          test_directory.data(),
+          test_directory.size(),
+          L"%lsKeyina.ProfileReload.%lu.%llu",
+          temporary_root.data(),
+          static_cast<unsigned long>(GetCurrentProcessId()),
+          static_cast<unsigned long long>(GetTickCount64())) <= 0 ||
+      !CreateDirectoryW(test_directory.data(), nullptr)) {
+    return 1;
+  }
+
+  std::array<wchar_t, 32768> keyina_directory{};
+  std::array<wchar_t, 32768> profile_path{};
+  const bool paths_ready =
+      swprintf_s(
+          keyina_directory.data(),
+          keyina_directory.size(),
+          L"%ls\\Keyina",
+          test_directory.data()) > 0 &&
+      CreateDirectoryW(keyina_directory.data(), nullptr) != FALSE &&
+      swprintf_s(
+          profile_path.data(),
+          profile_path.size(),
+          L"%ls\\runtime-input.bin",
+          keyina_directory.data()) > 0;
+  if (!paths_ready ||
+      !SetEnvironmentVariableW(L"LOCALAPPDATA", test_directory.data()) ||
+      !WriteRuntimeProfileVector(profile_path.data(), true)) {
+    RemoveDirectoryW(keyina_directory.data());
+    RemoveDirectoryW(test_directory.data());
+    return 1;
+  }
+
+  bool success = false;
+  {
+    auto profile = keyina::windows::LoadRuntimeInputProfileOrDefault();
+    keyina::windows::Win32InputRuntime runtime(profile, false);
+    if (profile.vietnamese_enabled && runtime.Start()) {
+      Sleep(20);
+      if (WriteRuntimeProfileVector(profile_path.data(), false)) {
+        runtime.PumpMessagesFor(2200);
+        success = !runtime.profile().vietnamese_enabled;
+      }
+      runtime.Stop();
+    }
+  }
+
+  if (previous_length > 0 && previous_length < previous_local_app_data.size()) {
+    SetEnvironmentVariableW(L"LOCALAPPDATA", previous_local_app_data.data());
+  } else {
+    SetEnvironmentVariableW(L"LOCALAPPDATA", nullptr);
+  }
+  DeleteFileW(profile_path.data());
+  RemoveDirectoryW(keyina_directory.data());
+  RemoveDirectoryW(test_directory.data());
+
+  WriteStandardOutput(
+      success
+          ? "profile_reload_self_test_pass\n"
+          : "profile_reload_self_test_failed\n");
+  return success ? 0 : 1;
+}
+
 int RunResourceSelfTest(bool enable_tray) noexcept {
   const auto baseline_threads = CountProcessThreads();
   const auto baseline_working_set = CurrentWorkingSet();
@@ -277,6 +406,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--typing-self-test");
   const bool tray_resource_self_test = HasArgument(
       __argc, __wargv, L"--tray-resource-self-test");
+  const bool profile_reload_self_test = HasArgument(
+      __argc, __wargv, L"--profile-reload-self-test");
 
   if (self_test) {
     WriteStandardOutput("keyina_input_ready\n");
@@ -287,6 +418,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   }
   if (typing_self_test) {
     return RunTypingSelfTest();
+  }
+  if (profile_reload_self_test) {
+    return RunProfileReloadSelfTest();
   }
 
   HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);

@@ -60,9 +60,7 @@ public sealed class WindowsStartupRegistration
     public static WindowsStartupRegistration CreateProduction() =>
         new(
             StartupRegistrationDefaults.ValueName,
-            static () => Environment.ProcessPath ??
-                throw new InvalidOperationException(
-                    "The current process executable path is unavailable."));
+            NativeResidentPathResolver.ResolveCurrentProcessSibling);
 
     public bool IsEnabled => string.Equals(
         RegisteredCommand,

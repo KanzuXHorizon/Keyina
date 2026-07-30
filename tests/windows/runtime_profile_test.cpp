@@ -13,15 +13,16 @@ namespace {
 using keyina::windows::RuntimeHotkeyGesture;
 using keyina::windows::RuntimeInputProfileError;
 
-constexpr std::array<std::uint8_t, 32> kDefaultVector{
-    0x4B, 0x49, 0x52, 0x50, 0x01, 0x20, 0x01, 0x05,
+constexpr std::array<std::uint8_t, 36> kDefaultVector{
+    0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x01, 0x06,
     0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
-    0x56, 0x00, 0x05, 0x54, 0x00, 0x00, 0x1B, 0x00,
-    0x01, 0x00, 0x00, 0x00, 0x8B, 0x7B, 0x42, 0x7A,
+    0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
+    0x00, 0x1B, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0xA6, 0xCE, 0x4F, 0x2A,
 };
 
 std::span<const std::byte> AsBytes(
-    const std::array<std::uint8_t, 32>& value) {
+    const std::array<std::uint8_t, 36>& value) {
   return std::as_bytes(std::span{value});
 }
 
@@ -34,12 +35,12 @@ std::uint32_t ComputeFnv1a(std::span<const std::uint8_t> bytes) {
   return hash;
 }
 
-void RewriteChecksum(std::array<std::uint8_t, 32>& bytes) {
-  const auto checksum = ComputeFnv1a(std::span{bytes}.first<28>());
-  bytes[28] = static_cast<std::uint8_t>(checksum & 0xFFu);
-  bytes[29] = static_cast<std::uint8_t>((checksum >> 8u) & 0xFFu);
-  bytes[30] = static_cast<std::uint8_t>((checksum >> 16u) & 0xFFu);
-  bytes[31] = static_cast<std::uint8_t>((checksum >> 24u) & 0xFFu);
+void RewriteChecksum(std::array<std::uint8_t, 36>& bytes) {
+  const auto checksum = ComputeFnv1a(std::span{bytes}.first<32>());
+  bytes[32] = static_cast<std::uint8_t>(checksum & 0xFFu);
+  bytes[33] = static_cast<std::uint8_t>((checksum >> 8u) & 0xFFu);
+  bytes[34] = static_cast<std::uint8_t>((checksum >> 16u) & 0xFFu);
+  bytes[35] = static_cast<std::uint8_t>((checksum >> 24u) & 0xFFu);
 }
 
 }  // namespace
@@ -62,7 +63,10 @@ KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   KEYINA_EXPECT_EQ(result.profile.hotkeys[1].virtual_key, 0x20);
   KEYINA_EXPECT_EQ(result.profile.hotkeys[4].gesture,
                    RuntimeHotkeyGesture::Press);
-  KEYINA_EXPECT_EQ(result.profile.hotkeys[4].virtual_key, 0x1B);
+  KEYINA_EXPECT_EQ(result.profile.hotkeys[4].virtual_key, 0x5A);
+  KEYINA_EXPECT_EQ(result.profile.hotkeys[5].gesture,
+                   RuntimeHotkeyGesture::Press);
+  KEYINA_EXPECT_EQ(result.profile.hotkeys[5].virtual_key, 0x1B);
 }
 
 KEYINA_TEST(runtime_input_profile_rejects_corruption) {
@@ -73,7 +77,7 @@ KEYINA_TEST(runtime_input_profile_rejects_corruption) {
       RuntimeInputProfileError::InvalidChecksum);
 
   auto unknown_version = kDefaultVector;
-  unknown_version[4] = 2;
+  unknown_version[4] = 3;
   RewriteChecksum(unknown_version);
   KEYINA_EXPECT_EQ(
       keyina::windows::DecodeRuntimeInputProfile(AsBytes(unknown_version)).error,
@@ -95,7 +99,7 @@ KEYINA_TEST(runtime_input_profile_rejects_corruption) {
 }
 
 KEYINA_TEST(runtime_input_profile_rejects_wrong_size) {
-  const auto short_bytes = AsBytes(kDefaultVector).first(31);
+  const auto short_bytes = AsBytes(kDefaultVector).first(35);
   KEYINA_EXPECT_EQ(
       keyina::windows::DecodeRuntimeInputProfile(short_bytes).error,
       RuntimeInputProfileError::InvalidLength);

@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Keyina.Host.Configuration;
 using Keyina.Host.Core;
+using Keyina.Host.Core.Configuration;
 using Keyina.Host.Diagnostics;
 using Keyina.Host.Hotkeys;
 using Keyina.Host.Runtime;
@@ -20,6 +22,8 @@ internal static class Program
 
     private const int AlreadyRunningExitCode = 17;
     private const string HostMutexName = "Local\\Keyina.Host";
+    private const string SettingsCompanionMutexName =
+        "Local\\Keyina.SettingsCompanion";
 
     private sealed record ResidentInputResourceSnapshot(
         double HookStartupMilliseconds,
@@ -136,7 +140,84 @@ internal static class Program
             return result.Success ? 0 : 1;
         }
 
+        var stateSelfTestIndex = Array.FindIndex(
+            args,
+            argument => string.Equals(
+                argument,
+                "--companion-state-self-test",
+                StringComparison.Ordinal));
+        if (stateSelfTestIndex >= 0)
+        {
+            if (stateSelfTestIndex + 1 >= args.Length ||
+                !Path.IsPathFullyQualified(args[stateSelfTestIndex + 1]))
+            {
+                Console.Error.WriteLine(
+                    "--companion-state-self-test requires an absolute temporary directory.");
+                return 2;
+            }
+
+            var directory = Path.GetFullPath(args[stateSelfTestIndex + 1]);
+            Directory.CreateDirectory(directory);
+            var configuration = KeyinaConfiguration.Default with
+            {
+                VietnameseEnabled = false,
+                FirstRunCompleted = true,
+            };
+            var configurationPath = Path.Combine(directory, "settings.json");
+            var profilePath = Path.Combine(directory, "runtime-input.bin");
+            new AtomicConfigurationStore(configurationPath)
+                .SaveAsync(configuration, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            new RuntimeInputProfileStore(profilePath)
+                .PublishAsync(configuration, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            var decoded = RuntimeInputProfileCodec.Decode(
+                File.ReadAllBytes(profilePath));
+            var passed = !decoded.VietnameseEnabled &&
+                File.Exists(configurationPath) &&
+                new FileInfo(profilePath).Length ==
+                    RuntimeInputProfileCodec.EncodedLength;
+            Console.WriteLine(
+                passed
+                    ? "companion_state_self_test_pass"
+                    : "companion_state_self_test_failed");
+            return passed ? 0 : 1;
+        }
+
         FluentTheme.InitializeApplicationColorMode();
+
+        var companionCommandArgument = args.FirstOrDefault(argument =>
+            CompanionCommandProtocol.TryParseArgument(argument, out _));
+        if (CompanionCommandProtocol.TryParseArgument(
+                companionCommandArgument,
+                out var companionCommand))
+        {
+            using var commandMutex = new Mutex(
+                initiallyOwned: true,
+                CompanionCommandProtocol.MutexName,
+                out var createdNew);
+            if (!createdNew)
+            {
+                return CompanionCommandSession.SignalExisting(companionCommand)
+                    ? 0
+                    : 1;
+            }
+
+            try
+            {
+                ApplicationConfiguration.Initialize();
+                using var context = new KeyinaApplicationContext(
+                    KeyinaRuntimeOptions.CreateProductionCommandCompanion());
+                using var session = new CompanionCommandSession(context);
+                session.Post(companionCommand);
+                Application.Run(context);
+                return 0;
+            }
+            finally
+            {
+                commandMutex.ReleaseMutex();
+            }
+        }
 
         var galleryIndex = Array.FindIndex(
             args,
@@ -158,6 +239,25 @@ internal static class Program
                 Console.WriteLine(path);
             }
             return 0;
+        }
+
+        if (args.Contains("--companion-settings", StringComparer.Ordinal))
+        {
+            if (!SingleInstanceGuard.TryAcquire(
+                    SettingsCompanionMutexName,
+                    out var settingsGuard))
+            {
+                return AlreadyRunningExitCode;
+            }
+
+            using (settingsGuard)
+            {
+                ApplicationConfiguration.Initialize();
+                using var context = new KeyinaApplicationContext(
+                    KeyinaRuntimeOptions.CreateProductionSettingsCompanion());
+                Application.Run(context);
+                return 0;
+            }
         }
 
         if (!SingleInstanceGuard.TryAcquire(HostMutexName, out var guard))
