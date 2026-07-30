@@ -65,6 +65,7 @@ internal static class SettingsFormTests
             "DeepL API key input should have a bounded length.");
         AssertEx.Equal(1, form.Controls.Find("openDeepLApiHelp", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationToggle", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("translationPreviewToggle", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationTargetLanguage", true).Length);
         AssertEx.Equal(1, form.Controls.Find("translationHotkeyStatus", true).Length);
         var privacy = (Label)form.Controls.Find("translationPrivacyWarning", true).Single();
@@ -142,6 +143,8 @@ internal static class SettingsFormTests
                      "hotkeyToggleDictationReset",
                      "hotkeyTranslationChange",
                      "hotkeyTranslationReset",
+                     "hotkeyUndoTranslationChange",
+                     "hotkeyUndoTranslationReset",
                      "hotkeyCancelChange",
                      "hotkeyCancelReset",
                      "resetAllHotkeys",
@@ -173,6 +176,29 @@ internal static class SettingsFormTests
             resetCommands.SequenceEqual([HotkeyCommand.TranslateSelection]),
             "Per-command restore invoked the wrong action.");
         AssertEx.Equal(1, resetAllCount);
+    }
+
+    [KeyinaTest("translation preview toggle updates runtime preferences without credential text")]
+    private static void TranslationPreviewToggleIsBound()
+    {
+        var values = new List<bool>();
+        var actions = SettingsActions.NoOp with
+        {
+            SetTranslationPreviewEnabled = values.Add,
+        };
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample with { TranslationPreviewEnabled = false },
+            actions);
+        var toggle = (CheckBox)form.Controls.Find(
+            "translationPreviewToggle",
+            true).Single();
+
+        toggle.Checked = true;
+
+        AssertEx.True(values.SequenceEqual([true]),
+            "Translation preview toggle did not update runtime preferences.");
+        AssertEx.Equal(string.Empty,
+            ((TextBox)form.Controls.Find("deepLApiKey", true).Single()).Text);
     }
 
     [KeyinaTest("hotkeys settings configure and preview non-intrusive feedback")]

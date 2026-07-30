@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Keyina.Host.Configuration;
 using Keyina.Host.Core;
 using Keyina.Host.Core.Applications;
@@ -31,6 +32,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private const int ToggleDictationHotkeyId = 2;
     private const int CancelDictationHotkeyId = 3;
     private const int TranslateSelectionHotkeyId = 4;
+    private const int UndoTranslationHotkeyId = 5;
 
     private readonly KeyinaRuntimeOptions options;
     private readonly AtomicConfigurationStore configurationStore;
@@ -50,6 +52,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem toggleVietnameseMenuItem;
     private readonly ToolStripMenuItem toggleDictationMenuItem;
     private readonly ToolStripMenuItem translateSelectionMenuItem;
+    private readonly ToolStripMenuItem undoTranslationMenuItem;
     private readonly ToolStripMenuItem startupMenuItem;
     private readonly ToolStripMenuItem settingsMenuItem;
     private readonly ToolStripMenuItem exitMenuItem;
@@ -70,6 +73,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private FeedbackCoordinator? feedbackCoordinator;
     private SettingsForm? settingsForm;
     private FirstRunForm? firstRunForm;
+    private TranslationPreviewForm? translationPreviewForm;
     private int drainScheduled;
     private bool hotkeysReady;
     private bool translationHotkeyReady;
@@ -161,6 +165,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 configuration.Hotkeys.TranslateSelection.Chord),
             AccessibleName = "Dịch văn bản đang chọn sang ngôn ngữ đã cài đặt",
         };
+        undoTranslationMenuItem = new ToolStripMenuItem
+        {
+            Name = "undoTranslation",
+            Text = "Hoàn tác bản dịch",
+            ShortcutKeyDisplayString = FormatShortcutDisplay(
+                configuration.Hotkeys.UndoTranslation.Chord),
+            AccessibleName = "Khôi phục văn bản gốc của lần dịch gần nhất",
+        };
         startupMenuItem = new ToolStripMenuItem
         {
             Name = "startup",
@@ -190,6 +202,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             toggleVietnameseMenuItem,
             toggleDictationMenuItem,
             translateSelectionMenuItem,
+            undoTranslationMenuItem,
             new ToolStripSeparator(),
             startupMenuItem,
             settingsMenuItem,
@@ -212,6 +225,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             PostCommand(HotkeyCommand.ToggleDictation);
         translateSelectionMenuItem.Click += (_, _) =>
             PostCommand(HotkeyCommand.TranslateSelection);
+        undoTranslationMenuItem.Click += (_, _) =>
+            PostCommand(HotkeyCommand.UndoTranslation);
         startupMenuItem.Click += (_, _) =>
             SetStartupEnabled(!startupRegistration.IsEnabled);
         settingsMenuItem.Click += (_, _) => OpenSettings();
@@ -298,6 +313,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 return;
             case HotkeyCommand.TranslateSelection:
                 await TranslateSelectionAsync(cancellationToken).ConfigureAwait(true);
+                return;
+            case HotkeyCommand.UndoTranslation:
+                await UndoTranslationAsync(cancellationToken).ConfigureAwait(true);
                 return;
             case HotkeyCommand.CancelDictation:
                 translationCoordinator.Cancel();
@@ -570,6 +588,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             preferences.ToggleDictation.Chord,
             HotkeyCommand.ToggleDictation),
         new(
+            UndoTranslationHotkeyId,
+            preferences.UndoTranslation.Chord,
+            HotkeyCommand.UndoTranslation),
+        new(
             CancelDictationHotkeyId,
             preferences.CancelActiveCommand.Chord,
             HotkeyCommand.CancelDictation),
@@ -731,6 +753,17 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 translationHotkeyReady = false;
             }
         }
+    }
+
+    private void SetTranslationPreviewEnabled(bool enabled)
+    {
+        configuration = configuration with { TranslationPreviewEnabled = enabled };
+        if (!enabled)
+        {
+            CloseTranslationPreview();
+        }
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
     }
 
     private void SetTranslationTargetLanguage(string targetLanguage)
@@ -1049,6 +1082,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
     private async Task TranslateSelectionAsync(CancellationToken cancellationToken)
     {
+        CloseTranslationPreview();
         if (!configuration.TranslationEnabled)
         {
             ReportFailure("translation_disabled");
@@ -1087,8 +1121,18 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         var outcome = await translationCoordinator.TranslateSelectionAsync(
                 apiKey,
                 configuration.TranslationTargetLanguage,
-                cancellationToken)
+                cancellationToken,
+                preview: configuration.TranslationPreviewEnabled)
             .ConfigureAwait(true);
+        if (outcome.Status == TranslationOutcomeStatus.PreviewReady &&
+            outcome.Preview is { } preview)
+        {
+            OpenTranslationPreview(preview);
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Bản dịch đã sẵn sàng để xem trước"));
+            RefreshVisualState();
+            return;
+        }
         if (outcome.Status == TranslationOutcomeStatus.Cancelled)
         {
             PublishFeedback(FeedbackEvents.TranslationCancelled());
@@ -1107,6 +1151,107 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         PublishFeedback(FeedbackEvents.Error(message));
     }
 
+    private void OpenTranslationPreview(TranslationPreview preview)
+    {
+        CloseTranslationPreview();
+        translationPreviewForm = new TranslationPreviewForm(
+            preview,
+            ApplyTranslationPreview,
+            CopyTranslationPreview,
+            () => PublishFeedback(FeedbackEvents.TranslationCancelled()));
+        translationPreviewForm.FormClosed += (_, _) => translationPreviewForm = null;
+        if (options.DisplaySettingsWindows)
+        {
+            translationPreviewForm.Show();
+            translationPreviewForm.Activate();
+        }
+    }
+
+    private void ApplyTranslationPreview(TranslationPreview preview)
+    {
+        var outcome = translationCoordinator.ApplyPreview(preview);
+        if (outcome.Status == TranslationOutcomeStatus.Succeeded)
+        {
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã thay thế bằng bản dịch"));
+            RefreshVisualState();
+            return;
+        }
+
+        var (errorCode, message) = MapTranslationFailure(outcome.FailureCode);
+        ReportFailure(errorCode);
+        PublishFeedback(FeedbackEvents.Error(message));
+        RefreshVisualState();
+    }
+
+    private void CopyTranslationPreview(string translatedText)
+    {
+        try
+        {
+            Clipboard.SetText(translatedText, TextDataFormat.UnicodeText);
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã sao chép bản dịch"));
+        }
+        catch (ExternalException)
+        {
+            ReportFailure("translation_preview_copy_failed");
+            PublishFeedback(FeedbackEvents.Error("Clipboard đang bận; hãy thử sao chép lại"));
+        }
+        RefreshVisualState();
+    }
+
+    private void CloseTranslationPreview()
+    {
+        var form = translationPreviewForm;
+        translationPreviewForm = null;
+        if (form is null)
+        {
+            return;
+        }
+        try
+        {
+            form.Close();
+            form.Dispose();
+        }
+        catch (Exception)
+        {
+            // Preview cleanup is optional and must not affect the resident host.
+        }
+    }
+
+    private async Task UndoTranslationAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var restored = await translationCoordinator.UndoAsync(cancellationToken)
+                .ConfigureAwait(true);
+            if (!restored)
+            {
+                ReportFailure("translation_undo_unavailable");
+                PublishFeedback(FeedbackEvents.Error(
+                    "Không còn bản dịch hợp lệ để hoàn tác"));
+                return;
+            }
+
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã khôi phục văn bản gốc"));
+        }
+        catch (OperationCanceledException)
+        {
+            PublishFeedback(FeedbackEvents.TranslationCancelled());
+        }
+        catch (Exception)
+        {
+            ReportFailure("translation_undo_failed");
+            PublishFeedback(FeedbackEvents.Error(
+                "Không thể hoàn tác vì vị trí nhập đã thay đổi"));
+        }
+        finally
+        {
+            RefreshVisualState();
+        }
+    }
+
     private static (string ErrorCode, string Message) MapTranslationFailure(
         TranslationFailureCode? failureCode) => failureCode switch
         {
@@ -1116,6 +1261,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationFailureCode.FocusChanged => (
                 "translation_focus_changed",
                 "Đã đổi vị trí nhập, không chèn bản dịch"),
+            TranslationFailureCode.PreviewExpired => (
+                "translation_preview_expired",
+                "Bản xem trước đã hết hạn; hãy dịch lại"),
             TranslationFailureCode.AuthenticationFailed => (
                 "translation_auth_failed",
                 "Khóa DeepL không hợp lệ"),
@@ -1330,6 +1478,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         SetTranslationEnabled = SetTranslationEnabled,
         SetTranslationTargetLanguage = SetTranslationTargetLanguage,
+        SetTranslationPreviewEnabled = SetTranslationPreviewEnabled,
         SaveDeepLApiKey = secret =>
         {
             try
@@ -1467,6 +1616,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             Health = health,
             TranslationEnabled = configuration.TranslationEnabled,
             TranslationCredentialConfigured = translationCredentialConfigured,
+            TranslationPreviewEnabled = configuration.TranslationPreviewEnabled,
             TranslationHotkeyRegistered = translationHotkeyReady,
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
             Hotkeys = configuration.Hotkeys,
@@ -1553,6 +1703,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                         ? FormatShortcutDisplay(
                             configuration.Hotkeys.TranslateSelection.Chord)
                         : "Phím tắt xung đột";
+        undoTranslationMenuItem.Enabled = translationCoordinator.CanUndo;
+        undoTranslationMenuItem.ShortcutKeyDisplayString =
+            translationCoordinator.CanUndo
+                ? FormatShortcutDisplay(configuration.Hotkeys.UndoTranslation.Chord)
+                : string.Empty;
         startupMenuItem.Checked = startupRegistration.IsEnabled;
         if (notifyIcon.Icon is { } trayIcon)
         {
@@ -1577,6 +1732,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ReplaceMenuImage(toggleVietnameseMenuItem, FluentTrayMenu.CreateGlyph("\uE765", palette));
         ReplaceMenuImage(toggleDictationMenuItem, FluentTrayMenu.CreateGlyph("\uE720", palette));
         ReplaceMenuImage(translateSelectionMenuItem, FluentTrayMenu.CreateGlyph("\uE8C1", palette));
+        ReplaceMenuImage(undoTranslationMenuItem, FluentTrayMenu.CreateGlyph("\uE7A7", palette));
         ReplaceMenuImage(startupMenuItem, FluentTrayMenu.CreateGlyph("\uE7E8", palette));
         ReplaceMenuImage(settingsMenuItem, FluentTrayMenu.CreateGlyph("\uE713", palette));
         ReplaceMenuImage(exitMenuItem, FluentTrayMenu.CreateGlyph("\uE7E8", palette, FluentTone.Error));
@@ -1695,6 +1851,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         lifetime.Cancel();
 
         CloseSettings();
+        CloseTranslationPreview();
         firstRunForm?.Close();
         firstRunForm?.Dispose();
         firstRunForm = null;

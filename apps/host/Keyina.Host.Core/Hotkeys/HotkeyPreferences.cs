@@ -23,6 +23,12 @@ public sealed record HotkeyPreferences(
     HotkeyPreference TranslateSelection,
     HotkeyPreference CancelActiveCommand)
 {
+    public HotkeyPreference UndoTranslation { get; init; } = new(
+        HotkeyGestureKind.Press,
+        new HotkeyChord(
+            HotkeyModifiers.Control | HotkeyModifiers.Alt,
+            VirtualKey.Z));
+
     private const HotkeyModifiers SupportedModifiers =
         HotkeyModifiers.Control |
         HotkeyModifiers.Shift |
@@ -60,6 +66,7 @@ public sealed record HotkeyPreferences(
         HotkeyCommand.PushToTalkPressed => PushToTalk,
         HotkeyCommand.ToggleDictation => ToggleDictation,
         HotkeyCommand.TranslateSelection => TranslateSelection,
+        HotkeyCommand.UndoTranslation => UndoTranslation,
         HotkeyCommand.CancelDictation => CancelActiveCommand,
         _ => throw new ArgumentOutOfRangeException(
             nameof(command),
@@ -86,6 +93,10 @@ public sealed record HotkeyPreferences(
         HotkeyCommand.TranslateSelection => this with
         {
             TranslateSelection = TranslateSelection with { Chord = chord },
+        },
+        HotkeyCommand.UndoTranslation => this with
+        {
+            UndoTranslation = UndoTranslation with { Chord = chord },
         },
         HotkeyCommand.CancelDictation => this with
         {
@@ -116,6 +127,10 @@ public sealed record HotkeyPreferences(
             TranslateSelection.GestureKind,
             TranslateSelection.Chord),
         new(
+            HotkeyCommand.UndoTranslation,
+            UndoTranslation.GestureKind,
+            UndoTranslation.Chord),
+        new(
             HotkeyCommand.CancelDictation,
             CancelActiveCommand.GestureKind,
             CancelActiveCommand.Chord),
@@ -138,6 +153,10 @@ public sealed record HotkeyPreferences(
         ValidatePreference(
             TranslateSelection,
             HotkeyCommand.TranslateSelection,
+            HotkeyGestureKind.Press);
+        ValidatePreference(
+            UndoTranslation,
+            HotkeyCommand.UndoTranslation,
             HotkeyGestureKind.Press);
         ValidatePreference(
             CancelActiveCommand,

@@ -6,6 +6,7 @@ public enum TranslationFailureCode
     CredentialMissing,
     NoSelection,
     FocusChanged,
+    PreviewExpired,
     AuthenticationFailed,
     RateLimited,
     QuotaExceeded,

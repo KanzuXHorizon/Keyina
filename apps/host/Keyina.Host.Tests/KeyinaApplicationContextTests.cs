@@ -442,6 +442,7 @@ internal static class KeyinaApplicationContextTests
                      "toggleVietnamese",
                      "toggleDictation",
                      "translateSelection",
+                     "undoTranslation",
                      "startup",
                      "settings",
                      "exit",
@@ -603,6 +604,101 @@ internal static class KeyinaApplicationContextTests
         AssertEx.Equal(0, overlay.Events.Count);
         AssertEx.Equal(1, sound.Cues.Count);
         AssertEx.Equal(FeedbackSoundCue.Disabled, sound.Cues[0]);
+    }
+
+    [KeyinaTest("resident context defers replacement while translation preview is enabled")]
+    private static void TranslationPreviewDefersReplacement()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    TranslationPreviewEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        var accessor = new FakeSelectionAccessor();
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault("test-key:fx"),
+            new FakeTranslationProvider(),
+            accessor);
+
+        context.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(0, accessor.ReplaceCount);
+        AssertEx.Equal(0, accessor.PreviewReplaceCount);
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "translationPreviewForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Translation preview field was not found.");
+        var form = (TranslationPreviewForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Translation preview form was not created.");
+        InvokeClick((Button)form.Controls.Find(
+            "replaceTranslationPreview",
+            true).Single());
+
+        AssertEx.Equal(1, accessor.PreviewReplaceCount);
+        AssertEx.Equal("Hello", accessor.LastReplacement);
+        context.DispatchCommandAsync(
+                HotkeyCommand.UndoTranslation,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        AssertEx.Equal(1, accessor.RestoreCount);
+    }
+
+    [KeyinaTest("resident context restores the last translation once")]
+    private static void TranslationUndoRestoresOnce()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        var accessor = new FakeSelectionAccessor();
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault("test-key:fx"),
+            new FakeTranslationProvider(),
+            accessor);
+
+        context.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        context.DispatchCommandAsync(
+                HotkeyCommand.UndoTranslation,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        context.DispatchCommandAsync(
+                HotkeyCommand.UndoTranslation,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(1, accessor.ReplaceCount);
+        AssertEx.Equal(1, accessor.RestoreCount);
+        AssertEx.Equal("Hello", accessor.ExpectedTranslatedText);
+        AssertEx.Equal("Xin chào", accessor.OriginalText);
+        AssertEx.Equal("translation_undo_unavailable", context.CurrentState.ErrorCode);
     }
 
     [KeyinaTest("resident context translates the selected text with configured DeepL credentials")]
@@ -800,7 +896,15 @@ internal static class KeyinaApplicationContextTests
     {
         public int ReplaceCount { get; private set; }
 
+        public int PreviewReplaceCount { get; private set; }
+
+        public int RestoreCount { get; private set; }
+
         public string? LastReplacement { get; private set; }
+
+        public string? ExpectedTranslatedText { get; private set; }
+
+        public string? OriginalText { get; private set; }
 
         public Task<SelectedTextCapture?> CaptureAsync(CancellationToken cancellationToken) =>
             Task.FromResult<SelectedTextCapture?>(
@@ -811,6 +915,27 @@ internal static class KeyinaApplicationContextTests
             ReplaceCount++;
             LastReplacement = translatedText;
             return true;
+        }
+
+        public bool TryReplaceFromPreview(
+            SelectedTextCapture selectedText,
+            string translatedText)
+        {
+            PreviewReplaceCount++;
+            LastReplacement = translatedText;
+            return true;
+        }
+
+        public Task<bool> TryRestoreAsync(
+            SelectedTextCapture selectedText,
+            string expectedTranslatedText,
+            string originalText,
+            CancellationToken cancellationToken)
+        {
+            RestoreCount++;
+            ExpectedTranslatedText = expectedTranslatedText;
+            OriginalText = originalText;
+            return Task.FromResult(true);
         }
     }
 

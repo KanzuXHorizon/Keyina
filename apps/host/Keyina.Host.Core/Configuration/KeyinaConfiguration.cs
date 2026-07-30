@@ -57,6 +57,8 @@ public sealed record KeyinaConfiguration(
 
     public bool TranslationEnabled { get; init; }
 
+    public bool TranslationPreviewEnabled { get; init; }
+
     public string TranslationTargetLanguage { get; init; } = "EN-US";
 
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;

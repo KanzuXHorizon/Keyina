@@ -55,6 +55,7 @@ public sealed class SettingsForm : Form
     private readonly FluentToggle vietnameseToggle;
     private readonly FluentToggle speechToggle;
     private readonly FluentToggle translationToggle;
+    private readonly FluentToggle translationPreviewToggle;
     private readonly FluentToggle startupToggle;
     private readonly FluentToggle typingLatencyToggle;
     private readonly ListView typingLatencyTable;
@@ -118,6 +119,9 @@ public sealed class SettingsForm : Form
         vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
         speechToggle = CreateToggle("speechToggle", "Bật nhập bằng giọng nói");
         translationToggle = CreateToggle("translationToggle", "Bật dịch nhanh văn bản đang chọn");
+        translationPreviewToggle = CreateToggle(
+            "translationPreviewToggle",
+            "Xem trước bản dịch trước khi thay thế");
         startupToggle = CreateToggle("startupToggle", "Khởi động Keyina cùng Windows");
         typingLatencyToggle = CreateToggle(
             "typingLatencyToggle",
@@ -341,6 +345,13 @@ public sealed class SettingsForm : Form
                 actions.SetTranslationTargetLanguage(targetLanguage);
             }
         };
+        translationPreviewToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetTranslationPreviewEnabled(translationPreviewToggle.Checked);
+            }
+        };
         startupToggle.CheckedChanged += (_, _) =>
         {
             if (!applyingSnapshot)
@@ -417,6 +428,7 @@ public sealed class SettingsForm : Form
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
             speechToggle.Checked = snapshot.SpeechEnabled;
             translationToggle.Checked = snapshot.TranslationEnabled;
+            translationPreviewToggle.Checked = snapshot.TranslationPreviewEnabled;
             translationTargetLanguage.SelectedValue = snapshot.TranslationTargetLanguage;
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
@@ -1088,6 +1100,14 @@ public sealed class SettingsForm : Form
         targetLayout.SetColumnSpan(targetHint, 2);
         stack.Controls.Add(targetCard);
 
+        stack.Controls.Add(CreateSettingRow(
+            "translationPreviewRow",
+            "\uE890",
+            "Xem trước trước khi thay thế",
+            "So sánh văn bản gốc và bản dịch trong cửa sổ riêng; chỉ chèn khi bạn bấm Thay thế.",
+            "Tùy chọn",
+            translationPreviewToggle));
+
         var credentialCard = CreateCard("translationCredentialCard", 270);
         var credentialLayout = new TableLayoutPanel
         {
@@ -1209,8 +1229,8 @@ public sealed class SettingsForm : Form
         var behaviorCard = CreateCard("translationBehaviorCard", 126);
         behaviorCard.Controls.Add(CreateIconTextLayout(
             "\uE73E",
-            "Giữ nguyên nội dung kỹ thuật",
-            "Code, URL, email, đường dẫn và placeholder được khóa bằng XML; yêu cầu hết hạn sau 8 giây và không chèn nếu bạn đã đổi cửa sổ."));
+            "Giữ nguyên nội dung kỹ thuật và hoàn tác an toàn",
+            "Code, URL, email, đường dẫn và placeholder được khóa bằng XML; Ctrl + Alt + Z hoàn tác một lần nếu focus và nội dung vẫn khớp."));
         stack.Controls.Add(behaviorCard);
         return page;
     }
@@ -1245,6 +1265,12 @@ public sealed class SettingsForm : Form
             "Dịch văn bản đang chọn",
             "Dịch sang ngôn ngữ đã cài đặt và giữ nguyên focus của ứng dụng.",
             HotkeyCommand.TranslateSelection));
+        stack.Controls.Add(CreateEditableShortcutRow(
+            "hotkeyUndoTranslation",
+            "\uE7A7",
+            "Hoàn tác bản dịch gần nhất",
+            "Khôi phục văn bản gốc trong thời gian ngắn nếu focus và nội dung vẫn khớp.",
+            HotkeyCommand.UndoTranslation));
         stack.Controls.Add(CreateEditableShortcutRow(
             "hotkeyCancel",
             "\uE711",

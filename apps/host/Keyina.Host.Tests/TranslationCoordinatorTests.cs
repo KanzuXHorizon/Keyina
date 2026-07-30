@@ -47,6 +47,77 @@ internal static class TranslationCoordinatorTests
         AssertEx.Equal("EN-US", provider.LastRequest.TargetLanguage);
         AssertEx.Equal(1, accessor.ReplaceCount);
         AssertEx.Equal("Hello", accessor.LastReplacement);
+        AssertEx.True(coordinator.CanUndo, "Successful translation did not create undo state.");
+        var undone = coordinator.UndoAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        AssertEx.True(undone, "Coordinator could not restore the original translation.");
+        AssertEx.Equal(1, accessor.RestoreCount);
+        AssertEx.Equal("Hello", accessor.ExpectedTranslatedText);
+        AssertEx.Equal("Xin chào", accessor.OriginalText);
+        AssertEx.False(coordinator.CanUndo, "Undo state remained after one use.");
+    }
+
+    [KeyinaTest("translation coordinator returns preview without replacing until explicitly applied")]
+    private static void PreviewDefersReplacementUntilApplied()
+    {
+        var now = new DateTimeOffset(2026, 7, 30, 11, 0, 0, TimeSpan.Zero);
+        var accessor = new FakeSelectionAccessor(
+            new SelectedTextCapture("Xin chào", (nint)42, (nint)420));
+        var provider = new FakeProvider(new TranslationResult("Hello", "VI", "Fake"));
+        using var coordinator = new TranslationCoordinator(
+            accessor,
+            provider,
+            clock: () => now,
+            previewLifetime: TimeSpan.FromMinutes(2));
+
+        var outcome = coordinator.TranslateSelectionAsync(
+                "key",
+                "EN-US",
+                CancellationToken.None,
+                preview: true)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(TranslationOutcomeStatus.PreviewReady, outcome.Status);
+        AssertEx.NotNull(outcome.Preview, "Preview result was missing.");
+        AssertEx.Equal(0, accessor.ReplaceCount);
+        AssertEx.Equal("Xin chào", outcome.Preview!.OriginalText);
+        AssertEx.Equal("Hello", outcome.Preview.TranslatedText);
+        AssertEx.Equal(now.AddMinutes(2), outcome.Preview.ExpiresAt);
+        AssertEx.False(coordinator.CanUndo, "Preview created undo before replacement.");
+
+        var applied = coordinator.ApplyPreview(outcome.Preview);
+
+        AssertEx.Equal(TranslationOutcomeStatus.Succeeded, applied.Status);
+        AssertEx.Equal(1, accessor.PreviewReplaceCount);
+        AssertEx.Equal("Hello", accessor.LastReplacement);
+        AssertEx.True(coordinator.CanUndo, "Applied preview did not create undo state.");
+    }
+
+    [KeyinaTest("translation coordinator rejects expired preview without replacing text")]
+    private static void ExpiredPreviewIsRejected()
+    {
+        var now = new DateTimeOffset(2026, 7, 30, 11, 0, 0, TimeSpan.Zero);
+        var accessor = new FakeSelectionAccessor(
+            new SelectedTextCapture("Xin chào", (nint)42, (nint)420));
+        using var coordinator = new TranslationCoordinator(
+            accessor,
+            new FakeProvider(new TranslationResult("Hello", "VI", "Fake")),
+            clock: () => now,
+            previewLifetime: TimeSpan.FromSeconds(5));
+        var previewOutcome = coordinator.TranslateSelectionAsync(
+                "key",
+                "EN-US",
+                CancellationToken.None,
+                preview: true)
+            .GetAwaiter().GetResult();
+        now = now.AddSeconds(6);
+
+        var applied = coordinator.ApplyPreview(previewOutcome.Preview!);
+
+        AssertEx.Equal(TranslationOutcomeStatus.Failed, applied.Status);
+        AssertEx.Equal(TranslationFailureCode.PreviewExpired, applied.FailureCode);
+        AssertEx.Equal(0, accessor.PreviewReplaceCount);
+        AssertEx.False(coordinator.CanUndo, "Expired preview created undo state.");
     }
 
     [KeyinaTest("translation coordinator refuses replacement after foreground focus changes")]
@@ -146,9 +217,19 @@ internal static class TranslationCoordinatorTests
     {
         public bool ReplacementResult { get; init; } = true;
 
+        public bool RestoreResult { get; init; } = true;
+
         public int ReplaceCount { get; private set; }
 
+        public int RestoreCount { get; private set; }
+
+        public int PreviewReplaceCount { get; private set; }
+
         public string? LastReplacement { get; private set; }
+
+        public string? ExpectedTranslatedText { get; private set; }
+
+        public string? OriginalText { get; private set; }
 
         public Task<SelectedTextCapture?> CaptureAsync(CancellationToken cancellationToken) =>
             Task.FromResult(capture);
@@ -158,6 +239,27 @@ internal static class TranslationCoordinatorTests
             ReplaceCount++;
             LastReplacement = translatedText;
             return ReplacementResult;
+        }
+
+        public bool TryReplaceFromPreview(
+            SelectedTextCapture selectedText,
+            string translatedText)
+        {
+            PreviewReplaceCount++;
+            LastReplacement = translatedText;
+            return ReplacementResult;
+        }
+
+        public Task<bool> TryRestoreAsync(
+            SelectedTextCapture selectedText,
+            string expectedTranslatedText,
+            string originalText,
+            CancellationToken cancellationToken)
+        {
+            RestoreCount++;
+            ExpectedTranslatedText = expectedTranslatedText;
+            OriginalText = originalText;
+            return Task.FromResult(RestoreResult);
         }
     }
 

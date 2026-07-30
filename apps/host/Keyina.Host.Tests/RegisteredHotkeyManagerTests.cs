@@ -15,7 +15,7 @@ internal static class RegisteredHotkeyManagerTests
         manager.CommandReceived += (_, command) => commands.Add(command);
 
         manager.Register(CreateRegisteredBindings());
-        AssertEx.Equal(4, native.Registered.Count);
+        AssertEx.Equal(5, native.Registered.Count);
         AssertEx.True(
             native.Registered.Values.Any(value =>
                 value.Modifiers == 0x4003 &&
@@ -29,7 +29,7 @@ internal static class RegisteredHotkeyManagerTests
 
         manager.Dispose();
         manager.Dispose();
-        AssertEx.Equal(4, native.Unregistered.Count);
+        AssertEx.Equal(5, native.Unregistered.Count);
     }
 
     [KeyinaTest("optional hotkey conflict preserves existing registrations")]
@@ -149,7 +149,7 @@ internal static class RegisteredHotkeyManagerTests
         AssertEx.True(replaced, "Complete hotkey replacement failed.");
         AssertEx.Equal(null, failure);
         AssertEx.Equal(4, manager.RegisteredCount);
-        AssertEx.True(native.Unregistered.Order().SequenceEqual([1, 2, 3, 4]),
+        AssertEx.True(native.Unregistered.Order().SequenceEqual([1, 2, 3, 4, 5]),
             "Old registered set was not fully released.");
         AssertEx.True(manager.TryDispatch(2), "Replacement binding did not dispatch.");
         AssertEx.True(commands.SequenceEqual([HotkeyCommand.ToggleDictation]),

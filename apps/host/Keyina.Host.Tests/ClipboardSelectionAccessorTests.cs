@@ -105,6 +105,65 @@ internal static class ClipboardSelectionAccessorTests
         AssertEx.Equal("translated", platform.InsertedText);
     }
 
+    [KeyinaTest("clipboard translation undo restores only an exact focused translated suffix")]
+    private static void UndoRestoresExactTranslatedSuffix()
+    {
+        var originalClipboard = new object();
+        var platform = new FakeClipboardPlatform
+        {
+            ForegroundWindow = (nint)42,
+            FocusedWindow = (nint)420,
+            ClipboardSequence = 10,
+            ClipboardSnapshot = originalClipboard,
+            SelectedText = "Hello",
+        };
+        var accessor = new ClipboardSelectionAccessor(platform);
+        var capture = new SelectedTextCapture("Xin chào", (nint)42, (nint)420);
+
+        var restored = accessor.TryRestoreAsync(
+                capture,
+                "Hello",
+                "Xin chào",
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.True(restored, "Exact translated suffix was not restored.");
+        AssertEx.Equal(5, platform.SelectedPreviousTextElements);
+        AssertEx.Equal(1, platform.CopyShortcutCount);
+        AssertEx.Equal(1, platform.InsertCount);
+        AssertEx.Equal("Xin chào", platform.InsertedText);
+        AssertEx.Equal(0, platform.CollapseSelectionCount);
+        AssertEx.Equal(1, platform.RestoreCount);
+        AssertEx.True(
+            ReferenceEquals(originalClipboard, platform.RestoredClipboard),
+            "Undo did not restore the original clipboard.");
+    }
+
+    [KeyinaTest("clipboard translation undo rejects mismatched text and collapses selection")]
+    private static void UndoRejectsMismatchedTranslatedSuffix()
+    {
+        var platform = new FakeClipboardPlatform
+        {
+            ForegroundWindow = (nint)42,
+            FocusedWindow = (nint)420,
+            ClipboardSequence = 10,
+            SelectedText = "Changed",
+        };
+        var accessor = new ClipboardSelectionAccessor(platform);
+
+        var restored = accessor.TryRestoreAsync(
+                new SelectedTextCapture("Xin chào", (nint)42, (nint)420),
+                "Hello",
+                "Xin chào",
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.False(restored, "Mismatched translated suffix was overwritten.");
+        AssertEx.Equal(0, platform.InsertCount);
+        AssertEx.Equal(1, platform.CollapseSelectionCount);
+        AssertEx.Equal(1, platform.RestoreCount);
+    }
+
     private sealed class ClipboardBusyException : ExternalException
     {
         public ClipboardBusyException()
@@ -139,6 +198,12 @@ internal static class ClipboardSelectionAccessorTests
 
         public string? InsertedText { get; private set; }
 
+        public int SelectedPreviousTextElements { get; private set; }
+
+        public int CollapseSelectionCount { get; private set; }
+
+        public bool RestoreFocusResult { get; set; }
+
         public nint GetForegroundWindow() => ForegroundWindow;
 
         public nint GetFocusedWindow() => FocusedWindow;
@@ -167,6 +232,22 @@ internal static class ClipboardSelectionAccessorTests
         {
             CopyShortcutCount++;
             ClipboardSequence++;
+        }
+
+        public void SelectPreviousText(int textElementCount) =>
+            SelectedPreviousTextElements = textElementCount;
+
+        public void CollapseSelectionToEnd() => CollapseSelectionCount++;
+
+        public bool TryRestoreFocus(nint foregroundWindow, nint focusedWindow)
+        {
+            if (!RestoreFocusResult)
+            {
+                return false;
+            }
+            ForegroundWindow = foregroundWindow;
+            FocusedWindow = focusedWindow;
+            return true;
         }
 
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)

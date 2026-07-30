@@ -25,6 +25,8 @@ public sealed record SettingsSnapshot(
 
     public bool TranslationCredentialConfigured { get; init; }
 
+    public bool TranslationPreviewEnabled { get; init; }
+
     public bool TranslationHotkeyRegistered { get; init; }
 
     public string TranslationTargetLanguage { get; init; } = "EN-US";
@@ -50,6 +52,7 @@ public sealed record SettingsSnapshot(
     {
         TranslationEnabled = true,
         TranslationCredentialConfigured = true,
+        TranslationPreviewEnabled = false,
         TranslationHotkeyRegistered = true,
         TranslationTargetLanguage = "EN-US",
         Hotkeys = HotkeyPreferences.Default,
@@ -76,6 +79,8 @@ public sealed record SettingsActions(
     public Action<bool> SetTranslationEnabled { get; init; } = _ => { };
 
     public Action<string> SetTranslationTargetLanguage { get; init; } = _ => { };
+
+    public Action<bool> SetTranslationPreviewEnabled { get; init; } = _ => { };
 
     public Action<string> SaveDeepLApiKey { get; init; } = _ => { };
 

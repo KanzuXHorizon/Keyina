@@ -319,6 +319,7 @@ public sealed class HotkeyCaptureDialog : Form
         HotkeyCommand.PushToTalkPressed => "Giữ để nhập bằng giọng nói",
         HotkeyCommand.ToggleDictation => "Bắt đầu hoặc dừng nhập giọng nói",
         HotkeyCommand.TranslateSelection => "Dịch văn bản đang chọn",
+        HotkeyCommand.UndoTranslation => "Hoàn tác bản dịch gần nhất",
         HotkeyCommand.CancelDictation => "Hủy thao tác đang chạy",
         _ => "Đổi phím tắt",
     };
