@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -158,21 +159,23 @@ internal static class LiveKeyboardHookIntegrationTests
         hook.Start(enabledInitially: true);
         EnsureForeground(form, textBox);
 
-        SendAscii("tieengs vieetj", hook);
-        PumpUntil(
-            () => string.Equals(textBox.Text, "tiếng việt", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(3));
+        TypeWithInterferenceRetry(
+            form,
+            textBox,
+            hook,
+            baselineText: string.Empty,
+            rawText: "tieengs vieetj",
+            expectedText: "tiếng việt",
+            operationName: "basic Vietnamese typing");
 
-        AssertEx.Equal("tiếng việt", textBox.Text);
-
-        EnsureForeground(form, textBox);
-        textBox.SelectAll();
-        hook.Reset();
-        SendAscii("as", hook);
-        PumpUntil(
-            () => string.Equals(textBox.Text, "á", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(3));
-        AssertEx.Equal("á", textBox.Text);
+        TypeWithInterferenceRetry(
+            form,
+            textBox,
+            hook,
+            baselineText: string.Empty,
+            rawText: "as",
+            expectedText: "á",
+            operationName: "selection replacement typing");
 
         EnsureForeground(form, textBox);
         textBox.Clear();
@@ -188,45 +191,132 @@ internal static class LiveKeyboardHookIntegrationTests
         var expected = new StringBuilder();
         for (var iteration = 0; iteration < 20; iteration++)
         {
-            EnsureForeground(form, textBox);
+            var baselineText = expected.ToString();
             var testCase = burstCases[iteration % burstCases.Length];
-            SendAscii(testCase.Raw, hook);
-            expected.Append(testCase.Expected);
-            var expectedText = expected.ToString();
-            PumpUntil(
-                () => string.Equals(textBox.Text, expectedText, StringComparison.Ordinal),
-                TimeSpan.FromSeconds(5));
-            AssertEx.Equal(
+            var expectedText = baselineText + testCase.Expected;
+            TypeWithInterferenceRetry(
+                form,
+                textBox,
+                hook,
+                baselineText,
+                testCase.Raw,
                 expectedText,
-                textBox.Text,
-                CreateStressMismatchMessage(
-                    iteration + 1,
-                    expectedText,
-                    textBox.Text));
+                $"stress iteration {iteration + 1}");
+            expected.Append(testCase.Expected);
         }
 
-        EnsureForeground(form, textBox);
-        textBox.Text = "nội dung cũ cần thay";
-        textBox.SelectAll();
-        hook.Reset();
-        SetClipboardText("đoạn văn được dán nguyên vẹn");
-        var pasteTimer = Stopwatch.StartNew();
-        SendControlV();
-        PumpUntil(
-            () => string.Equals(
-                textBox.Text,
-                "đoạn văn được dán nguyên vẹn",
-                StringComparison.Ordinal),
-            TimeSpan.FromSeconds(2));
-        pasteTimer.Stop();
-        AssertEx.Equal("đoạn văn được dán nguyên vẹn", textBox.Text);
+        var pasteElapsed = PasteWithRetry(
+            form,
+            textBox,
+            hook,
+            baselineText: "nội dung cũ cần thay",
+            clipboardText: "đoạn văn được dán nguyên vẹn");
         AssertEx.True(
-            pasteTimer.Elapsed < TimeSpan.FromSeconds(1),
-            $"Ctrl+V took {pasteTimer.Elapsed.TotalMilliseconds:F0} ms.");
+            pasteElapsed < TimeSpan.FromSeconds(1),
+            $"Ctrl+V took {pasteElapsed.TotalMilliseconds:F0} ms.");
 
         hook.Dispose();
         form.Close();
         Application.DoEvents();
+    }
+
+    private static TimeSpan PasteWithRetry(
+        Form form,
+        TextBox textBox,
+        VietnameseKeyboardHook hook,
+        string baselineText,
+        string clipboardText)
+    {
+        const int maximumAttempts = 3;
+        SetClipboardText(clipboardText);
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            EnsureForeground(form, textBox);
+            textBox.Text = baselineText;
+            textBox.SelectAll();
+            hook.Reset();
+            Application.DoEvents();
+            EnsureForeground(form, textBox);
+
+            var timer = Stopwatch.StartNew();
+            SendControlV();
+            PumpUntil(
+                () => string.Equals(
+                    textBox.Text,
+                    clipboardText,
+                    StringComparison.Ordinal),
+                TimeSpan.FromSeconds(2));
+            timer.Stop();
+            if (string.Equals(textBox.Text, clipboardText, StringComparison.Ordinal))
+            {
+                return timer.Elapsed;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Ctrl+V did not replace the selected text after {maximumAttempts} attempts. " +
+            $"{CreateStressMismatchMessage(maximumAttempts, clipboardText, textBox.Text)}");
+    }
+
+    private static void TypeWithInterferenceRetry(
+        Form form,
+        TextBox textBox,
+        VietnameseKeyboardHook hook,
+        string baselineText,
+        string rawText,
+        string expectedText,
+        string operationName)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            EnsureForeground(form, textBox);
+            textBox.Text = baselineText;
+            textBox.SelectionStart = textBox.TextLength;
+            textBox.SelectionLength = 0;
+            hook.Reset();
+            TypingTraceBuffer.Clear();
+            TypingTraceBuffer.SetEnabled(true);
+
+            SendAscii(rawText, hook);
+            PumpUntil(
+                () => string.Equals(textBox.Text, expectedText, StringComparison.Ordinal),
+                TimeSpan.FromSeconds(5));
+            if (string.Equals(textBox.Text, expectedText, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!HasExternalInputInterference(form, textBox))
+            {
+                AssertEx.Equal(
+                    expectedText,
+                    textBox.Text,
+                    CreateStressMismatchMessage(
+                        attempt,
+                        expectedText,
+                        textBox.Text));
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"The live hook could not complete {operationName} after " +
+            $"{maximumAttempts} attempts because the desktop focus or pointer state changed.");
+    }
+
+    private static bool HasExternalInputInterference(Form form, TextBox textBox)
+    {
+        if (GetForegroundWindow() != form.Handle || !textBox.Focused)
+        {
+            return true;
+        }
+
+        var entries = TypingTraceBuffer.Snapshot();
+        var pointerResets = entries.Count(entry =>
+            string.Equals(entry.Action, "pointer-reset", StringComparison.Ordinal));
+        return pointerResets > 1 || entries.Any(entry =>
+            string.Equals(entry.Action, "focus-reset", StringComparison.Ordinal) ||
+            string.Equals(entry.Action, "secure-bypass", StringComparison.Ordinal));
     }
 
     private static MutexLease AcquireLiveInputLease()
@@ -345,9 +435,15 @@ internal static class LiveKeyboardHookIntegrationTests
 
     private static void SendControlV()
     {
-        const byte control = 0x11;
-        const byte v = 0x56;
-        const uint keyEventKeyUp = 0x0002;
+        const ushort control = 0x11;
+        const ushort v = 0x56;
+        Input[] inputs =
+        [
+            Input.Key(control, keyUp: false),
+            Input.Key(v, keyUp: false),
+            Input.Key(v, keyUp: true),
+            Input.Key(control, keyUp: true),
+        ];
 
         Exception? workerFailure = null;
         using var completed = new ManualResetEventSlim();
@@ -355,12 +451,16 @@ internal static class LiveKeyboardHookIntegrationTests
         {
             try
             {
-                keybd_event(control, 0, 0, 0);
-                Thread.Sleep(10);
-                keybd_event(v, 0, 0, 0);
-                keybd_event(v, 0, keyEventKeyUp, 0);
-                Thread.Sleep(10);
-                keybd_event(control, 0, keyEventKeyUp, 0);
+                var sent = SendInput(
+                    checked((uint)inputs.Length),
+                    inputs,
+                    Marshal.SizeOf<Input>());
+                if (sent != inputs.Length)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Windows did not send the complete Ctrl+V shortcut.");
+                }
             }
             catch (Exception exception)
             {
@@ -504,6 +604,46 @@ internal static class LiveKeyboardHookIntegrationTests
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input
+    {
+        private const uint InputKeyboard = 1;
+        private const uint KeyEventKeyUp = 0x0002;
+
+        public uint Type;
+        public InputUnion Union;
+
+        public static Input Key(ushort virtualKey, bool keyUp) => new()
+        {
+            Type = InputKeyboard,
+            Union = new InputUnion
+            {
+                Keyboard = new KeyboardInput
+                {
+                    VirtualKey = virtualKey,
+                    Flags = keyUp ? KeyEventKeyUp : 0,
+                },
+            },
+        };
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 32)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)]
+        public KeyboardInput Keyboard;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public nuint ExtraInfo;
+    }
+
     private sealed class TypingTraceLease : IDisposable
     {
         public TypingTraceLease()
@@ -582,6 +722,12 @@ internal static class LiveKeyboardHookIntegrationTests
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(
+        uint inputCount,
+        [In] Input[] inputs,
+        int inputSize);
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(

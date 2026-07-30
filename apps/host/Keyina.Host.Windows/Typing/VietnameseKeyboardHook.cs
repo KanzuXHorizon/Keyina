@@ -932,10 +932,18 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 fixed (byte* storagePointer = storage)
                 {
                     var address = (nuint)storagePointer;
-                    var alignedAddress = (address + 7u) & ~7u;
+                    const nuint alignment = 8;
+                    var alignedAddress =
+                        (address + (alignment - 1)) & ~(alignment - 1);
+                    var alignmentOffset = alignedAddress - address;
+                    if (alignmentOffset >= (nuint)storage.Length)
+                    {
+                        return false;
+                    }
+
                     var pointer = (byte*)alignedAddress;
-                    var capacity = checked((uint)(storage.Length -
-                        checked((int)(alignedAddress - address))));
+                    var capacity = checked((uint)(
+                        (nuint)storage.Length - alignmentOffset));
                     var resetRequested = false;
 
                     while (true)
@@ -962,8 +970,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
                             }
 
                             resetRequested |= IsResetPacket(input);
-                            var alignedSize = checked((nuint)(
-                                (input->Header.Size + 7u) & ~7u));
+                            var packetSize = (nuint)input->Header.Size;
+                            var alignedSize =
+                                (packetSize + (alignment - 1)) & ~(alignment - 1);
+                            if (alignedSize < packetSize ||
+                                alignedSize > (nuint)(end - current))
+                            {
+                                return resetRequested;
+                            }
                             current += alignedSize;
                         }
                     }
