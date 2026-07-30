@@ -7,10 +7,136 @@ namespace Keyina.Host.Tests;
 
 internal static class LiveKeyboardHookIntegrationTests
 {
+    [KeyinaTest("native typing context refreshes password state on the same focused control")]
+    private static void NativeTypingContextRefreshesPasswordState()
+    {
+        using var liveInputLease = AcquireLiveInputLease();
+        using var form = new Form
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-1200, 100),
+            Size = new Size(320, 120),
+            ShowInTaskbar = false,
+        };
+        using var textBox = new TextBox { Dock = DockStyle.Fill };
+        form.Controls.Add(textBox);
+        form.Show();
+        EnsureForeground(form, textBox);
+
+        var nativeType = typeof(VietnameseKeyboardHook).GetNestedType(
+            "WindowsVietnameseKeyboardHookNativeApi",
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Native typing context provider was not found.");
+        var native = (IVietnameseKeyboardHookNativeApi?)Activator.CreateInstance(
+            nativeType,
+            nonPublic: true)
+            ?? throw new InvalidOperationException("Native typing context provider was not created.");
+
+        const int globalWindowStyle = -16;
+        const nint editStylePassword = 0x20;
+        var focusWindow = textBox.Handle;
+        var originalStyle = GetWindowLongPtrW(focusWindow, globalWindowStyle);
+        var ordinary = native.GetTypingContext();
+        try
+        {
+            _ = SetWindowLongPtrW(
+                focusWindow,
+                globalWindowStyle,
+                originalStyle | editStylePassword);
+            var password = native.GetTypingContext();
+
+            AssertEx.Equal(focusWindow, ordinary.FocusWindow);
+            AssertEx.False(ordinary.ShouldBypassTyping, "Ordinary text was classified as secure input.");
+            AssertEx.Equal(ordinary.FocusWindow, password.FocusWindow);
+            AssertEx.True(password.ShouldBypassTyping, "Password state was not refreshed for the same HWND.");
+        }
+        finally
+        {
+            _ = SetWindowLongPtrW(focusWindow, globalWindowStyle, originalStyle);
+        }
+    }
+
+    [KeyinaTest("live Windows hook remains responsive while its owner UI thread is blocked")]
+    private static void LiveHookUsesDedicatedMessageThread()
+    {
+        using var liveInputLease = AcquireLiveInputLease();
+        using var form = new Form
+        {
+            Text = $"Keyina Hook Thread Test {Guid.NewGuid():N}",
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-1200, 100),
+            Size = new Size(480, 180),
+            ShowInTaskbar = false,
+        };
+        using var textBox = new TextBox { Dock = DockStyle.Fill };
+        form.Controls.Add(textBox);
+        form.Show();
+        EnsureForeground(form, textBox);
+
+        using var hook = new VietnameseKeyboardHook();
+        hook.Start(enabledInitially: true);
+        EnsureForeground(form, textBox);
+
+        Exception? workerFailure = null;
+        var elapsed = TimeSpan.MaxValue;
+        using var start = new ManualResetEventSlim();
+        using var completed = new ManualResetEventSlim();
+        var processedBefore = hook.ProcessedPhysicalEventCount;
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                start.Wait();
+                var timer = Stopwatch.StartNew();
+                keybd_event(0x42, 0, 0, 0);
+                keybd_event(0x42, 0, 0x0002, 0);
+                WaitForProcessedEvents(
+                    hook,
+                    processedBefore + 2,
+                    "blocked-owner probe key");
+                timer.Stop();
+                elapsed = timer.Elapsed;
+            }
+            catch (Exception exception)
+            {
+                workerFailure = exception;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Keyina blocked-owner hook probe",
+        };
+
+        worker.Start();
+        start.Set();
+        Thread.Sleep(300);
+        AssertEx.True(
+            completed.Wait(TimeSpan.FromSeconds(2)),
+            "The dedicated typing hook did not process input while the UI thread was blocked.");
+        worker.Join();
+        if (workerFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "The blocked-owner hook probe failed.",
+                workerFailure);
+        }
+        AssertEx.True(
+            elapsed < TimeSpan.FromMilliseconds(250),
+            $"Typing hook callback waited {elapsed.TotalMilliseconds:F1} ms for the owner UI thread.");
+
+        Application.DoEvents();
+        form.Close();
+    }
+
     [KeyinaTest("live Windows hook types Vietnamese into a focused textbox without TSF")]
     private static void LiveHookTypesIntoFocusedTextbox()
     {
         using var liveInputLease = AcquireLiveInputLease();
+        using var typingTrace = new TypingTraceLease();
         using var form = new Form
         {
             Text = $"Keyina Hook Test {Guid.NewGuid():N}",
@@ -150,8 +276,12 @@ internal static class LiveKeyboardHookIntegrationTests
         var actualTail = actual.Length > contextStart
             ? actual[contextStart..]
             : string.Empty;
+        var recentActions = string.Join(
+            ",",
+            TypingTraceBuffer.Snapshot(32).Select(entry => entry.Action));
         return $"Live hook diverged at stress iteration {iteration}, index {mismatch}. " +
-            $"Expected tail '{expectedTail}', actual tail '{actualTail}'.";
+            $"Expected tail '{expectedTail}', actual tail '{actualTail}'. " +
+            $"Foreground=0x{GetForegroundWindow():X}, recent actions=[{recentActions}].";
     }
 
     private static void EnsureForeground(Form form, TextBox textBox)
@@ -218,10 +348,51 @@ internal static class LiveKeyboardHookIntegrationTests
         const byte control = 0x11;
         const byte v = 0x56;
         const uint keyEventKeyUp = 0x0002;
-        keybd_event(control, 0, 0, 0);
-        keybd_event(v, 0, 0, 0);
-        keybd_event(v, 0, keyEventKeyUp, 0);
-        keybd_event(control, 0, keyEventKeyUp, 0);
+
+        Exception? workerFailure = null;
+        using var completed = new ManualResetEventSlim();
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                keybd_event(control, 0, 0, 0);
+                Thread.Sleep(10);
+                keybd_event(v, 0, 0, 0);
+                keybd_event(v, 0, keyEventKeyUp, 0);
+                Thread.Sleep(10);
+                keybd_event(control, 0, keyEventKeyUp, 0);
+            }
+            catch (Exception exception)
+            {
+                workerFailure = exception;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Keyina live-hook paste source",
+        };
+
+        worker.Start();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!completed.IsSet && DateTime.UtcNow < deadline)
+        {
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+
+        AssertEx.True(completed.IsSet, "The Ctrl+V input worker timed out.");
+        worker.Join();
+        if (workerFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "The Ctrl+V input worker failed.",
+                workerFailure);
+        }
+        Application.DoEvents();
     }
 
     private static void SendAscii(string text, VietnameseKeyboardHook hook)
@@ -333,6 +504,17 @@ internal static class LiveKeyboardHookIntegrationTests
         }
     }
 
+    private sealed class TypingTraceLease : IDisposable
+    {
+        public TypingTraceLease()
+        {
+            TypingTraceBuffer.Clear();
+            TypingTraceBuffer.SetEnabled(true);
+        }
+
+        public void Dispose() => TypingTraceBuffer.Clear();
+    }
+
     private sealed class MutexLease(Mutex mutex) : IDisposable
     {
         private Mutex? ownedMutex = mutex;
@@ -373,6 +555,15 @@ internal static class LiveKeyboardHookIntegrationTests
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(nint window, int showCommand);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetWindowLongPtrW(nint window, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern nint SetWindowLongPtrW(
+        nint window,
+        int index,
+        nint newValue);
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();

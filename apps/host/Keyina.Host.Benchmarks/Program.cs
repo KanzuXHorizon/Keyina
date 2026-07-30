@@ -342,12 +342,13 @@ internal static class Program
             return NoopDisposable.Instance;
         }
 
-        public IDisposable InstallMouseReset(Action callback) =>
+        public IDisposable InstallPointerReset(Action callback) =>
             NoopDisposable.Instance;
 
-        public int GetForegroundProcessId() => 1;
-
-        public bool ShouldBypassTyping() => false;
+        public VietnameseTypingContext GetTypingContext() => new(
+            ForegroundProcessId: 1,
+            FocusWindow: (nint)1,
+            ShouldBypassTyping: false);
 
         public bool Dispatch(char virtualKey, char character) =>
             callback?.Invoke(new VietnameseKeyboardEvent(

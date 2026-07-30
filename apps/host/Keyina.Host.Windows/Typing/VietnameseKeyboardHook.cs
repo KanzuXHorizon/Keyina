@@ -17,12 +17,16 @@ public readonly record struct VietnameseKeyboardEvent(
     bool Windows,
     Rune Character);
 
+public readonly record struct VietnameseTypingContext(
+    int ForegroundProcessId,
+    nint FocusWindow,
+    bool ShouldBypassTyping);
+
 public interface IVietnameseKeyboardHookNativeApi
 {
-    IDisposable Install(Func<VietnameseKeyboardEvent, bool> callback);
-    IDisposable InstallMouseReset(Action callback);
-    int GetForegroundProcessId();
-    bool ShouldBypassTyping();
+    IDisposable Install(Func<VietnameseKeyboardEvent, bool> keyboardCallback);
+    IDisposable InstallPointerReset(Action pointerResetCallback);
+    VietnameseTypingContext GetTypingContext();
 }
 
 public sealed class VietnameseKeyboardHook : IDisposable
@@ -32,9 +36,10 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private readonly IVietnameseKeyboardHookNativeApi nativeApi;
     private readonly bool[] suppressedKeys = new bool[256];
     private IDisposable? installation;
-    private IDisposable? mouseInstallation;
+    private IDisposable? pointerInstallation;
     private long processedPhysicalEventCount;
-    private int foregroundProcessId;
+    private int resetRequested;
+    private VietnameseTypingContext typingContext;
     private bool enabled;
     private bool disposed;
 
@@ -61,9 +66,19 @@ public sealed class VietnameseKeyboardHook : IDisposable
             throw new InvalidOperationException("Vietnamese keyboard hook is already installed.");
         }
         enabled = enabledInitially;
-        foregroundProcessId = nativeApi.GetForegroundProcessId();
-        installation = nativeApi.Install(ProcessRawEvent);
-        mouseInstallation = nativeApi.InstallMouseReset(Reset);
+        typingContext = nativeApi.GetTypingContext();
+        var keyboard = nativeApi.Install(ProcessRawEvent);
+        try
+        {
+            var pointer = nativeApi.InstallPointerReset(RequestReset);
+            installation = keyboard;
+            pointerInstallation = pointer;
+        }
+        catch
+        {
+            keyboard.Dispose();
+            throw;
+        }
     }
 
     public void SetEnabled(bool value)
@@ -74,15 +89,10 @@ public sealed class VietnameseKeyboardHook : IDisposable
             return;
         }
         enabled = value;
-        Reset();
+        RequestReset();
     }
 
-    public void Reset()
-    {
-        engine.Reset();
-        Array.Clear(suppressedKeys);
-        foregroundProcessId = nativeApi.GetForegroundProcessId();
-    }
+    public void Reset() => RequestReset();
 
     public void Dispose()
     {
@@ -91,10 +101,21 @@ public sealed class VietnameseKeyboardHook : IDisposable
             return;
         }
         disposed = true;
-        Interlocked.Exchange(ref mouseInstallation, null)?.Dispose();
-        Interlocked.Exchange(ref installation, null)?.Dispose();
-        engine.Dispose();
+        List<Exception>? failures = null;
+        DisposeResource(
+            Interlocked.Exchange(ref pointerInstallation, null),
+            ref failures);
+        DisposeResource(
+            Interlocked.Exchange(ref installation, null),
+            ref failures);
+        DisposeResource(engine, ref failures);
         Array.Clear(suppressedKeys);
+        if (failures is not null)
+        {
+            throw new AggregateException(
+                "Keyina could not release every typing resource.",
+                failures);
+        }
     }
 
     private bool ProcessRawEvent(VietnameseKeyboardEvent keyboardEvent)
@@ -104,11 +125,16 @@ public sealed class VietnameseKeyboardHook : IDisposable
             return false;
         }
 
+        var resetPending = Interlocked.Exchange(ref resetRequested, 0) != 0;
         var keyIndex = keyboardEvent.VirtualKey;
         if (!keyboardEvent.IsKeyDown)
         {
             try
             {
+                if (resetPending)
+                {
+                    ResetEngineState();
+                }
                 if ((uint)keyIndex < (uint)suppressedKeys.Length && suppressedKeys[keyIndex])
                 {
                     suppressedKeys[keyIndex] = false;
@@ -126,18 +152,20 @@ public sealed class VietnameseKeyboardHook : IDisposable
         var callbackStartedAt = profiling ? Stopwatch.GetTimestamp() : 0;
         try
         {
-            var currentProcessId = foregroundProcessId;
+            var currentContext = typingContext;
             var foregroundStartedAt = profiling ? Stopwatch.GetTimestamp() : 0;
             try
             {
-                currentProcessId = nativeApi.GetForegroundProcessId();
-                if (currentProcessId != foregroundProcessId)
+                currentContext = nativeApi.GetTypingContext();
+                if (resetPending || HasContextChanged(typingContext, currentContext))
                 {
-                    TypingTraceBuffer.Record("focus-reset", keyIndex, currentProcessId);
-                    engine.Reset();
-                    Array.Clear(suppressedKeys);
-                    foregroundProcessId = currentProcessId;
+                    TypingTraceBuffer.Record(
+                        resetPending ? "pointer-reset" : "focus-reset",
+                        keyIndex,
+                        currentContext.ForegroundProcessId);
+                    ResetEngineState();
                 }
+                typingContext = currentContext;
             }
             finally
             {
@@ -157,7 +185,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
                     TypingTraceBuffer.Record(
                         "shortcut-bypass",
                         keyIndex,
-                        currentProcessId,
+                        currentContext.ForegroundProcessId,
                         keyboardEvent.Shift,
                         keyboardEvent.Control,
                         keyboardEvent.Alt,
@@ -165,16 +193,22 @@ public sealed class VietnameseKeyboardHook : IDisposable
                     engine.Reset();
                     return false;
                 }
-                if (nativeApi.ShouldBypassTyping())
+                if (currentContext.ShouldBypassTyping)
                 {
-                    TypingTraceBuffer.Record("secure-bypass", keyIndex, currentProcessId);
+                    TypingTraceBuffer.Record(
+                        "secure-bypass",
+                        keyIndex,
+                        currentContext.ForegroundProcessId);
                     engine.Reset();
                     return false;
                 }
 
                 if (keyboardEvent.VirtualKey == 0x08)
                 {
-                    TypingTraceBuffer.Record("backspace-pass", keyIndex, currentProcessId);
+                    TypingTraceBuffer.Record(
+                        "backspace-pass",
+                        keyIndex,
+                        currentContext.ForegroundProcessId);
                     engine.Reset();
                     return false;
                 }
@@ -258,7 +292,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
                         TypingTraceBuffer.Record(
                             "transform",
                             keyIndex,
-                            currentProcessId,
+                            currentContext.ForegroundProcessId,
                             keyboardEvent.Shift,
                             detail: $"backspaces={edit.BackspaceCount};insertUnits={edit.InsertText.Length}");
                     }
@@ -272,7 +306,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
                         TypingTraceBuffer.Record(
                             "inject-failed",
                             keyIndex,
-                            currentProcessId,
+                            currentContext.ForegroundProcessId,
                             detail: exception.GetType().Name);
                     }
                     engine.Reset();
@@ -307,6 +341,37 @@ public sealed class VietnameseKeyboardHook : IDisposable
         }
     }
 
+    private static void DisposeResource(
+        IDisposable? resource,
+        ref List<Exception>? failures)
+    {
+        if (resource is null)
+        {
+            return;
+        }
+        try
+        {
+            resource.Dispose();
+        }
+        catch (Exception exception)
+        {
+            (failures ??= []).Add(exception);
+        }
+    }
+
+    private void RequestReset() =>
+        Interlocked.Exchange(ref resetRequested, 1);
+
+    private void ResetEngineState()
+    {
+        engine.Reset();
+        Array.Clear(suppressedKeys);
+    }
+
+    private static bool HasContextChanged(
+        VietnameseTypingContext previous,
+        VietnameseTypingContext current) => previous != current;
+
     private static bool IsLiteralPassThrough(HookEdit edit, Rune character) =>
         edit.BackspaceCount == 0 &&
         character.Value is > 0 and <= char.MaxValue &&
@@ -330,14 +395,22 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private sealed class WindowsVietnameseKeyboardHookNativeApi :
         IVietnameseKeyboardHookNativeApi
     {
-        private const int WhMouseLowLevel = 14;
         private const int WhKeyboardLowLevel = 13;
         private const int WmKeyDown = 0x0100;
         private const int WmKeyUp = 0x0101;
         private const int WmSysKeyDown = 0x0104;
         private const int WmSysKeyUp = 0x0105;
+        private const int GlobalWindowStyle = -16;
+        private const nint EditStylePassword = 0x20;
         private const uint LlkhfLowerIntegrityInjected = 0x00000002;
         private const uint LlkhfInjected = 0x00000010;
+        private static readonly uint GuiThreadInfoSize =
+            checked((uint)Marshal.SizeOf<GuiThreadInfo>());
+
+        private nint cachedActiveWindow;
+        private int cachedProcessId;
+        private nint cachedFocusWindow;
+        private bool cachedShouldBypass = true;
 
         public IDisposable Install(Func<VietnameseKeyboardEvent, bool> callback)
         {
@@ -345,72 +418,192 @@ public sealed class VietnameseKeyboardHook : IDisposable
             return new HookLease(callback);
         }
 
-        public IDisposable InstallMouseReset(Action callback)
+        public IDisposable InstallPointerReset(Action callback)
         {
             ArgumentNullException.ThrowIfNull(callback);
-            return new MouseHookLease(callback);
+            return new RawMouseResetLease(callback);
         }
 
-        public int GetForegroundProcessId()
+        public VietnameseTypingContext GetTypingContext()
         {
-            var window = GetForegroundWindow();
-            if (window == 0)
-            {
-                return 0;
-            }
-            _ = GetWindowThreadProcessId(window, out var processId);
-            return checked((int)processId);
-        }
-
-        public bool ShouldBypassTyping()
-        {
-            var info = new GuiThreadInfo
-            {
-                Size = checked((uint)Marshal.SizeOf<GuiThreadInfo>()),
-            };
+            var info = new GuiThreadInfo { Size = GuiThreadInfoSize };
             if (!GetGUIThreadInfo(0, ref info) || info.FocusWindow == 0)
             {
-                return false;
+                cachedActiveWindow = 0;
+                cachedProcessId = 0;
+                cachedFocusWindow = 0;
+                cachedShouldBypass = true;
+                return new VietnameseTypingContext(0, 0, ShouldBypassTyping: true);
             }
 
-            const int globalWindowStyle = -16;
-            const nint editStylePassword = 0x20;
-            var style = GetWindowLongPtrW(info.FocusWindow, globalWindowStyle);
-            return (style & editStylePassword) != 0;
+            var activeWindow = info.ActiveWindow != 0
+                ? info.ActiveWindow
+                : info.FocusWindow;
+            if (activeWindow != cachedActiveWindow)
+            {
+                _ = GetWindowThreadProcessId(activeWindow, out var processId);
+                cachedActiveWindow = activeWindow;
+                cachedProcessId = checked((int)processId);
+            }
+
+            var style = GetWindowLongPtrW(info.FocusWindow, GlobalWindowStyle);
+            cachedFocusWindow = info.FocusWindow;
+            cachedShouldBypass = (style & EditStylePassword) != 0;
+
+            return new VietnameseTypingContext(
+                cachedProcessId,
+                cachedFocusWindow,
+                cachedShouldBypass);
         }
 
         private sealed class HookLease : IDisposable
         {
+            private const uint WmQuit = 0x0012;
+            private const uint PeekMessageNoRemove = 0x0000;
+            private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(5);
+            private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
+
             private readonly Func<VietnameseKeyboardEvent, bool> callback;
             private readonly LowLevelKeyboardProcedure procedure;
             private readonly bool[] pressedKeys = new bool[256];
+            private readonly ManualResetEventSlim ready = new(initialState: false);
+            private readonly Thread thread;
+            private Exception? startupFailure;
+            private Exception? shutdownFailure;
+            private uint threadId;
             private nint hookHandle;
+            private int disposed;
 
             public HookLease(Func<VietnameseKeyboardEvent, bool> callback)
             {
                 this.callback = callback;
                 procedure = HookCallback;
-                hookHandle = SetWindowsHookExW(
-                    WhKeyboardLowLevel,
-                    procedure,
-                    0,
-                    0);
-                if (hookHandle == 0)
+                thread = new Thread(Run, maxStackSize: 256 * 1024)
                 {
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Windows rejected the Keyina typing hook.");
+                    IsBackground = true,
+                    Name = "Keyina typing hook",
+                };
+                thread.Start();
+
+                if (!ready.Wait(StartupTimeout))
+                {
+                    RequestThreadExit();
+                    _ = thread.Join(ShutdownTimeout);
+                    ready.Dispose();
+                    throw new TimeoutException(
+                        "The Keyina typing hook thread did not become ready in time.");
+                }
+
+                if (startupFailure is not null)
+                {
+                    _ = thread.Join(ShutdownTimeout);
+                    ready.Dispose();
+                    throw new InvalidOperationException(
+                        "The Keyina typing hook thread could not start.",
+                        startupFailure);
                 }
             }
 
             public void Dispose()
             {
-                var handle = Interlocked.Exchange(ref hookHandle, 0);
-                if (handle != 0 && !UnhookWindowsHookEx(handle))
+                if (Interlocked.Exchange(ref disposed, 1) != 0)
                 {
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Windows could not remove the Keyina typing hook.");
+                    return;
+                }
+
+                RequestThreadExit();
+                if (!thread.Join(ShutdownTimeout))
+                {
+                    ready.Dispose();
+                    throw new TimeoutException(
+                        "The Keyina typing hook thread did not stop in time.");
+                }
+
+                ready.Dispose();
+                if (shutdownFailure is not null)
+                {
+                    throw new InvalidOperationException(
+                        "The Keyina typing hook thread stopped with an error.",
+                        shutdownFailure);
+                }
+            }
+
+            private void Run()
+            {
+                threadId = GetCurrentThreadId();
+                try
+                {
+                    _ = PeekMessageW(
+                        out _,
+                        Window: 0,
+                        MinimumMessage: 0,
+                        MaximumMessage: 0,
+                        PeekMessageNoRemove);
+                    hookHandle = SetWindowsHookExW(
+                        WhKeyboardLowLevel,
+                        procedure,
+                        0,
+                        0);
+                    if (hookHandle == 0)
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows rejected the Keyina typing hook.");
+                    }
+
+                    ready.Set();
+                    while (true)
+                    {
+                        var result = GetMessageW(out var message, 0, 0, 0);
+                        if (result == 0)
+                        {
+                            break;
+                        }
+                        if (result < 0)
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "The Keyina typing hook message loop failed.");
+                        }
+
+                        _ = TranslateMessage(ref message);
+                        _ = DispatchMessageW(ref message);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    if (!ready.IsSet)
+                    {
+                        startupFailure = exception;
+                        ready.Set();
+                    }
+                    else
+                    {
+                        shutdownFailure = exception;
+                    }
+                }
+                finally
+                {
+                    var handle = Interlocked.Exchange(ref hookHandle, 0);
+                    if (handle != 0 && !UnhookWindowsHookEx(handle))
+                    {
+                        shutdownFailure ??= new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows could not remove the Keyina typing hook.");
+                    }
+                    if (!ready.IsSet)
+                    {
+                        ready.Set();
+                    }
+                }
+            }
+
+            private void RequestThreadExit()
+            {
+                var id = Volatile.Read(ref threadId);
+                if (id != 0 && thread.IsAlive)
+                {
+                    _ = PostThreadMessageW(id, WmQuit, 0, 0);
                 }
             }
 
@@ -489,64 +682,314 @@ public sealed class VietnameseKeyboardHook : IDisposable
             }
         }
 
-        private sealed class MouseHookLease : IDisposable
+        private sealed class RawMouseResetLease : IDisposable
         {
-            private const int WmLeftButtonDown = 0x0201;
-            private const int WmRightButtonDown = 0x0204;
-            private const int WmMiddleButtonDown = 0x0207;
-            private const int WmMouseWheel = 0x020A;
-            private const int WmXButtonDown = 0x020B;
+            private const uint WmInput = 0x00FF;
+            private const uint WmQuit = 0x0012;
+            private const uint RidInput = 0x10000003;
+            private const uint RimTypeMouse = 0;
+            private const uint RidevRemove = 0x00000001;
+            private const uint RidevInputSink = 0x00000100;
+            private const ushort MouseLeftDown = 0x0001;
+            private const ushort MouseRightDown = 0x0004;
+            private const ushort MouseMiddleDown = 0x0010;
+            private const ushort MouseButton4Down = 0x0040;
+            private const ushort MouseButton5Down = 0x0100;
+            private const ushort MouseWheel = 0x0400;
+            private const ushort MouseHorizontalWheel = 0x0800;
+            private static readonly nint MessageOnlyWindow = new(-3);
+            private static readonly uint RawInputDeviceSize =
+                checked((uint)Marshal.SizeOf<RawInputDevice>());
+            private static readonly uint RawInputHeaderSize =
+                checked((uint)Marshal.SizeOf<RawInputHeader>());
+            private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(5);
+            private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
 
             private readonly Action callback;
-            private readonly LowLevelMouseProcedure procedure;
-            private nint hookHandle;
+            private readonly ManualResetEventSlim ready = new(initialState: false);
+            private readonly Thread thread;
+            private Exception? startupFailure;
+            private Exception? shutdownFailure;
+            private uint threadId;
+            private nint window;
+            private int disposed;
 
-            public MouseHookLease(Action callback)
+            public RawMouseResetLease(Action callback)
             {
                 this.callback = callback;
-                procedure = HookCallback;
-                hookHandle = SetWindowsMouseHookExW(
-                    WhMouseLowLevel,
-                    procedure,
-                    0,
-                    0);
-                if (hookHandle == 0)
+                thread = new Thread(Run, maxStackSize: 128 * 1024)
                 {
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Windows rejected the Keyina mouse reset hook.");
+                    IsBackground = true,
+                    Name = "Keyina pointer observer",
+                };
+                thread.Start();
+
+                if (!ready.Wait(StartupTimeout))
+                {
+                    RequestThreadExit();
+                    _ = thread.Join(ShutdownTimeout);
+                    ready.Dispose();
+                    throw new TimeoutException(
+                        "The Keyina pointer observer did not become ready in time.");
+                }
+
+                if (startupFailure is not null)
+                {
+                    _ = thread.Join(ShutdownTimeout);
+                    ready.Dispose();
+                    throw new InvalidOperationException(
+                        "The Keyina pointer observer could not start.",
+                        startupFailure);
                 }
             }
 
             public void Dispose()
             {
-                var handle = Interlocked.Exchange(ref hookHandle, 0);
-                if (handle != 0 && !UnhookWindowsHookEx(handle))
+                if (Interlocked.Exchange(ref disposed, 1) != 0)
                 {
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
-                        "Windows could not remove the Keyina mouse reset hook.");
+                    return;
+                }
+
+                RequestThreadExit();
+                if (!thread.Join(ShutdownTimeout))
+                {
+                    ready.Dispose();
+                    throw new TimeoutException(
+                        "The Keyina pointer observer did not stop in time.");
+                }
+
+                ready.Dispose();
+                if (shutdownFailure is not null)
+                {
+                    throw new InvalidOperationException(
+                        "The Keyina pointer observer stopped with an error.",
+                        shutdownFailure);
                 }
             }
 
-            private nint HookCallback(int code, nint message, nint data)
+            private void Run()
             {
-                static bool IsResetMessage(int value) => value is
-                    WmLeftButtonDown or WmRightButtonDown or
-                    WmMiddleButtonDown or WmMouseWheel or WmXButtonDown;
+                threadId = GetCurrentThreadId();
+                var registered = false;
+                try
+                {
+                    window = CreateWindowExW(
+                        ExtendedStyle: 0,
+                        ClassName: "STATIC",
+                        WindowName: "Keyina pointer observer",
+                        Style: 0,
+                        X: 0,
+                        Y: 0,
+                        Width: 0,
+                        Height: 0,
+                        Parent: MessageOnlyWindow,
+                        Menu: 0,
+                        Instance: 0,
+                        Parameter: 0);
+                    if (window == 0)
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows could not create the Keyina raw-input window.");
+                    }
+
+                    var device = new RawInputDevice
+                    {
+                        UsagePage = 0x01,
+                        Usage = 0x02,
+                        Flags = RidevInputSink,
+                        TargetWindow = window,
+                    };
+                    if (!RegisterRawInputDevices(ref device, 1, RawInputDeviceSize))
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows rejected Keyina raw mouse input registration.");
+                    }
+                    registered = true;
+                    ready.Set();
+
+                    while (true)
+                    {
+                        var result = GetMessageW(out var message, 0, 0, 0);
+                        if (result == 0)
+                        {
+                            break;
+                        }
+                        if (result < 0)
+                        {
+                            throw new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "The Keyina pointer observer message loop failed.");
+                        }
+
+                        if (message.Message == WmInput && message.Window == window)
+                        {
+                            ProcessRawInput(message.LParam);
+                            _ = DefWindowProcW(
+                                message.Window,
+                                message.Message,
+                                message.WParam,
+                                message.LParam);
+                            continue;
+                        }
+
+                        _ = TranslateMessage(ref message);
+                        _ = DispatchMessageW(ref message);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    if (!ready.IsSet)
+                    {
+                        startupFailure = exception;
+                        ready.Set();
+                    }
+                    else
+                    {
+                        shutdownFailure = exception;
+                    }
+                }
+                finally
+                {
+                    if (registered)
+                    {
+                        var device = new RawInputDevice
+                        {
+                            UsagePage = 0x01,
+                            Usage = 0x02,
+                            Flags = RidevRemove,
+                            TargetWindow = 0,
+                        };
+                        if (!RegisterRawInputDevices(ref device, 1, RawInputDeviceSize))
+                        {
+                            shutdownFailure ??= new Win32Exception(
+                                Marshal.GetLastWin32Error(),
+                                "Windows could not unregister Keyina raw mouse input.");
+                        }
+                    }
+
+                    var handle = Interlocked.Exchange(ref window, 0);
+                    if (handle != 0 && !DestroyWindow(handle))
+                    {
+                        shutdownFailure ??= new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "Windows could not destroy the Keyina raw-input window.");
+                    }
+                    if (!ready.IsSet)
+                    {
+                        ready.Set();
+                    }
+                }
+            }
+
+            private unsafe void ProcessRawInput(nint rawInputHandle)
+            {
+                var resetRequested = ReadCurrentPacket(rawInputHandle) |
+                    DrainBufferedPackets();
+                if (!resetRequested)
+                {
+                    return;
+                }
 
                 try
                 {
-                    if (code >= 0 && IsResetMessage(unchecked((int)message)))
-                    {
-                        callback();
-                    }
+                    callback();
                 }
                 catch (Exception)
                 {
-                    // Mouse reset is defensive; failures must never block input.
+                    // Pointer observation is defensive and must not disrupt
+                    // the asynchronous raw-input message loop.
                 }
-                return CallNextHookEx(0, code, message, data);
+            }
+
+            private static unsafe bool ReadCurrentPacket(nint rawInputHandle)
+            {
+                Span<byte> buffer = stackalloc byte[64];
+                var size = checked((uint)buffer.Length);
+                fixed (byte* pointer = buffer)
+                {
+                    var copied = GetRawInputData(
+                        rawInputHandle,
+                        RidInput,
+                        (nint)pointer,
+                        ref size,
+                        RawInputHeaderSize);
+                    if (copied == uint.MaxValue ||
+                        copied < RawInputHeaderSize ||
+                        size > buffer.Length)
+                    {
+                        return false;
+                    }
+
+                    return IsResetPacket((RawInput*)pointer);
+                }
+            }
+
+            private static unsafe bool DrainBufferedPackets()
+            {
+                Span<byte> storage = stackalloc byte[4_096 + 8];
+                fixed (byte* storagePointer = storage)
+                {
+                    var address = (nuint)storagePointer;
+                    var alignedAddress = (address + 7u) & ~7u;
+                    var pointer = (byte*)alignedAddress;
+                    var capacity = checked((uint)(storage.Length -
+                        checked((int)(alignedAddress - address))));
+                    var resetRequested = false;
+
+                    while (true)
+                    {
+                        var size = capacity;
+                        var count = GetRawInputBuffer(
+                            (nint)pointer,
+                            ref size,
+                            RawInputHeaderSize);
+                        if (count == uint.MaxValue || count == 0)
+                        {
+                            return resetRequested;
+                        }
+
+                        var current = pointer;
+                        var end = pointer + capacity;
+                        for (var index = 0u; index < count; index++)
+                        {
+                            var input = (RawInput*)current;
+                            if (input->Header.Size < RawInputHeaderSize ||
+                                current + input->Header.Size > end)
+                            {
+                                return resetRequested;
+                            }
+
+                            resetRequested |= IsResetPacket(input);
+                            var alignedSize = checked((nuint)(
+                                (input->Header.Size + 7u) & ~7u));
+                            current += alignedSize;
+                        }
+                    }
+                }
+            }
+
+            private static unsafe bool IsResetPacket(RawInput* input) =>
+                input->Header.Type == RimTypeMouse &&
+                IsResetButtonFlags(input->Mouse.ButtonFlags);
+
+            private static bool IsResetButtonFlags(ushort flags) =>
+                (flags & (MouseLeftDown |
+                          MouseRightDown |
+                          MouseMiddleDown |
+                          MouseButton4Down |
+                          MouseButton5Down |
+                          MouseWheel |
+                          MouseHorizontalWheel)) != 0;
+
+            private void RequestThreadExit()
+            {
+                var id = Volatile.Read(ref threadId);
+                if (id != 0 && thread.IsAlive)
+                {
+                    _ = PostThreadMessageW(id, WmQuit, 0, 0);
+                }
             }
         }
 
@@ -574,20 +1017,62 @@ public sealed class VietnameseKeyboardHook : IDisposable
             public readonly nuint ExtraInfo;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawInputDevice
+        {
+            public ushort UsagePage;
+            public ushort Usage;
+            public uint Flags;
+            public nint TargetWindow;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawInputHeader
+        {
+            public uint Type;
+            public uint Size;
+            public nint Device;
+            public nuint WParam;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawMouse
+        {
+            public ushort Flags;
+            public ushort Padding;
+            public ushort ButtonFlags;
+            public ushort ButtonData;
+            public uint RawButtons;
+            public int LastX;
+            public int LastY;
+            public uint ExtraInformation;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RawInput
+        {
+            public RawInputHeader Header;
+            public RawMouse Mouse;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeMessage
+        {
+            public nint Window;
+            public uint Message;
+            public nuint WParam;
+            public nint LParam;
+            public uint Time;
+            public Point Point;
+            public uint Private;
+        }
+
         private delegate nint LowLevelKeyboardProcedure(int code, nint message, nint data);
-        private delegate nint LowLevelMouseProcedure(int code, nint message, nint data);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern nint SetWindowsHookExW(
             int hookId,
             LowLevelKeyboardProcedure procedure,
-            nint module,
-            uint threadId);
-
-        [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW", SetLastError = true)]
-        private static extern nint SetWindowsMouseHookExW(
-            int hookId,
-            LowLevelMouseProcedure procedure,
             nint module,
             uint threadId);
 
@@ -598,11 +1083,86 @@ public sealed class VietnameseKeyboardHook : IDisposable
         [DllImport("user32.dll")]
         private static extern nint CallNextHookEx(nint hook, int code, nint message, nint data);
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        private static extern nint GetModuleHandleW(string? moduleName);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool RegisterRawInputDevices(
+            ref RawInputDevice devices,
+            uint deviceCount,
+            uint deviceSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetRawInputData(
+            nint rawInput,
+            uint command,
+            nint data,
+            ref uint size,
+            uint headerSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetRawInputBuffer(
+            nint data,
+            ref uint size,
+            uint headerSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern nint CreateWindowExW(
+            uint ExtendedStyle,
+            string ClassName,
+            string? WindowName,
+            uint Style,
+            int X,
+            int Y,
+            int Width,
+            int Height,
+            nint Parent,
+            nint Menu,
+            nint Instance,
+            nint Parameter);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DestroyWindow(nint window);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetMessageW(
+            out NativeMessage message,
+            nint window,
+            uint minimumMessage,
+            uint maximumMessage);
 
         [DllImport("user32.dll")]
-        private static extern nint GetForegroundWindow();
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PeekMessageW(
+            out NativeMessage message,
+            nint Window,
+            uint MinimumMessage,
+            uint MaximumMessage,
+            uint RemoveMessage);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TranslateMessage(ref NativeMessage message);
+
+        [DllImport("user32.dll")]
+        private static extern nint DispatchMessageW(ref NativeMessage message);
+
+        [DllImport("user32.dll")]
+        private static extern nint DefWindowProcW(
+            nint window,
+            uint message,
+            nuint wParam,
+            nint lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostThreadMessageW(
+            uint threadId,
+            uint message,
+            nuint wParam,
+            nint lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
 
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(nint window, out uint processId);

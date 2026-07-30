@@ -5,6 +5,32 @@ namespace Keyina.Host.Tests;
 
 internal static class VietnameseKeyboardHookTests
 {
+    [KeyinaTest("resident hook releases the keyboard hook when pointer observation cannot start")]
+    private static void HookCleansUpPartialStartup()
+    {
+        var native = new FakeHookNativeApi { ThrowOnPointerInstall = true };
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            new TextModelInjector(),
+            native);
+
+        Exception? failure = null;
+        try
+        {
+            hook.Start(enabledInitially: true);
+        }
+        catch (InvalidOperationException exception)
+        {
+            failure = exception;
+        }
+
+        AssertEx.NotNull(failure, "Pointer startup failure was not propagated.");
+        AssertEx.True(
+            native.KeyboardInstallationDisposed,
+            "The keyboard hook remained installed after pointer startup failed.");
+        AssertEx.False(hook.IsRunning, "A partially started hook reported itself as running.");
+    }
+
     [KeyinaTest("resident hook composes Telex without a Windows language profile")]
     private static void HookComposesVietnamese()
     {
@@ -22,8 +48,8 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("tiếng Việt", injector.Text);
     }
 
-    [KeyinaTest("resident hook ignores injected edits and resets on mouse interaction")]
-    private static void HookAvoidsLoopsAndResetsOnMouse()
+    [KeyinaTest("resident hook ignores injected edits and resets on asynchronous pointer interaction")]
+    private static void HookAvoidsLoopsAndResetsOnPointerInteraction()
     {
         var native = new FakeHookNativeApi();
         var injector = new TextModelInjector();
@@ -34,8 +60,8 @@ internal static class VietnameseKeyboardHookTests
             native);
         hook.Start(enabledInitially: true);
 
-        Type(native, "tieengs");
-        AssertEx.Equal("tiếng", injector.Text);
+        Type(native, "a");
+        AssertEx.Equal("a", injector.Text);
 
         var injectedWasSuppressed = native.KeyboardCallback!(new VietnameseKeyboardEvent(
             VirtualKey: 'A',
@@ -49,10 +75,28 @@ internal static class VietnameseKeyboardHookTests
             new Rune('a')));
         AssertEx.False(injectedWasSuppressed, "Injected Keyina events must bypass the hook.");
 
-        native.MouseResetCallback!();
-        injector.Text += " ";
-        Type(native, "as");
-        AssertEx.Equal("tiếng á", injector.Text);
+        native.PointerResetCallback!();
+        Type(native, "s");
+        AssertEx.Equal("as", injector.Text);
+    }
+
+    [KeyinaTest("resident hook resets when the focused control changes")]
+    private static void HookResetsWhenFocusedControlChanges()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+
+        Type(native, "a");
+        native.TypingContext = native.TypingContext with { FocusWindow = (nint)2 };
+        Type(native, "s");
+
+        AssertEx.Equal("as", injector.Text);
     }
 
     [KeyinaTest("resident hook restores invalid Telex before punctuation boundaries")]
@@ -269,25 +313,41 @@ internal static class VietnameseKeyboardHookTests
     private sealed class FakeHookNativeApi : IVietnameseKeyboardHookNativeApi
     {
         public Func<VietnameseKeyboardEvent, bool>? KeyboardCallback { get; private set; }
-        public Action? MouseResetCallback { get; private set; }
-        public int ForegroundProcessId { get; set; } = 100;
+        public Action? PointerResetCallback { get; private set; }
+        public VietnameseTypingContext TypingContext { get; set; } = new(
+            ForegroundProcessId: 100,
+            FocusWindow: (nint)1,
+            ShouldBypassTyping: false);
+        public int ForegroundProcessId
+        {
+            get => TypingContext.ForegroundProcessId;
+            set => TypingContext = TypingContext with { ForegroundProcessId = value };
+        }
+        public bool ThrowOnPointerInstall { get; set; }
+        public bool KeyboardInstallationDisposed { get; private set; }
         public TextModelInjector? Target { get; set; }
 
         public IDisposable Install(Func<VietnameseKeyboardEvent, bool> callback)
         {
             KeyboardCallback = callback;
-            return new DelegateDisposable(() => KeyboardCallback = null);
+            return new DelegateDisposable(() =>
+            {
+                KeyboardCallback = null;
+                KeyboardInstallationDisposed = true;
+            });
         }
 
-        public IDisposable InstallMouseReset(Action callback)
+        public IDisposable InstallPointerReset(Action callback)
         {
-            MouseResetCallback = callback;
-            return new DelegateDisposable(() => MouseResetCallback = null);
+            if (ThrowOnPointerInstall)
+            {
+                throw new InvalidOperationException("Pointer observer unavailable.");
+            }
+            PointerResetCallback = callback;
+            return new DelegateDisposable(() => PointerResetCallback = null);
         }
 
-        public int GetForegroundProcessId() => ForegroundProcessId;
-
-        public bool ShouldBypassTyping() => false;
+        public VietnameseTypingContext GetTypingContext() => TypingContext;
 
         public bool SendCharacter(
             char virtualKey,
