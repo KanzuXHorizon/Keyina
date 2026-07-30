@@ -994,6 +994,8 @@ NativeResidentResourceSnapshot MeasureNativeResidentResources(
   FILETIME kernel_after{}, user_after{};
   GetProcessTimes(
       GetCurrentProcess(), &creation, &exit, &kernel_before, &user_before);
+  const std::uint64_t processed_before =
+      runtime.processed_keyboard_events();
 
   runtime.PumpMessagesFor(duration_milliseconds);
 
@@ -1030,13 +1032,20 @@ NativeResidentResourceSnapshot MeasureNativeResidentResources(
                              ? 0.0
                              : static_cast<double>(cpu_100ns) * 100.0 /
                                    available_100ns;
-  snapshot.processed_keyboard_events =
+  const std::uint64_t processed_after =
       runtime.processed_keyboard_events();
+  snapshot.processed_keyboard_events =
+      processed_after >= processed_before
+          ? processed_after - processed_before
+          : 0;
   snapshot.hook_running = runtime.hook_running();
   snapshot.contaminated_by_input =
       snapshot.processed_keyboard_events != 0;
+  // Physical desktop input can legitimately arrive while this global-hook
+  // probe is running. Keep that fact in the snapshot so benchmark callers
+  // can reject contaminated samples, but do not turn unrelated user input
+  // into a product resource-budget failure.
   snapshot.budget_pass = snapshot.hook_running &&
-      !snapshot.contaminated_by_input &&
       snapshot.private_working_set_bytes <= kTenMiB &&
       snapshot.private_memory_bytes <= kTenMiB &&
       snapshot.thread_count_delta == 0;

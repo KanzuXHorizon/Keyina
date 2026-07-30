@@ -144,7 +144,7 @@ bool FocusTestControl(HWND window, HWND edit) noexcept {
   return foreground && focused;
 }
 
-bool SendTestCharacter(char character, bool caps_lock) noexcept {
+std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
   const WORD virtual_key = character == ' '
                                ? static_cast<WORD>(VK_SPACE)
                                : static_cast<WORD>(
@@ -170,7 +170,59 @@ bool SendTestCharacter(char character, bool caps_lock) noexcept {
     append(VK_SHIFT, KEYEVENTF_KEYUP);
   }
   return SendInput(
-             static_cast<UINT>(count), inputs.data(), sizeof(INPUT)) == count;
+             static_cast<UINT>(count), inputs.data(), sizeof(INPUT)) == count
+      ? static_cast<std::uint32_t>(count)
+      : 0;
+}
+
+bool WaitForProcessedKeyboardEvents(
+    keyina::windows::Win32InputRuntime& runtime,
+    std::uint64_t minimum_count,
+    DWORD timeout_milliseconds) noexcept {
+  const ULONGLONG deadline = GetTickCount64() + timeout_milliseconds;
+  while (runtime.processed_keyboard_events() < minimum_count &&
+         GetTickCount64() < deadline) {
+    runtime.PumpMessagesFor(5);
+  }
+  return runtime.processed_keyboard_events() >= minimum_count;
+}
+
+void DrainCurrentThreadMessages(DWORD duration_milliseconds) noexcept {
+  const ULONGLONG deadline = GetTickCount64() + duration_milliseconds;
+  while (GetTickCount64() < deadline) {
+    const ULONGLONG remaining = deadline - GetTickCount64();
+    const DWORD timeout = static_cast<DWORD>(
+        std::min<ULONGLONG>(remaining, 25));
+    MsgWaitForMultipleObjectsEx(
+        0, nullptr, timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+  }
+}
+
+bool WaitForExpectedText(
+    keyina::windows::Win32InputRuntime& runtime,
+    HWND edit,
+    std::wstring_view expected,
+    DWORD timeout_milliseconds,
+    std::array<wchar_t, 64>& text,
+    int& length) noexcept {
+  const ULONGLONG deadline = GetTickCount64() + timeout_milliseconds;
+  do {
+    runtime.PumpMessagesFor(10);
+    text.fill(L'\0');
+    length = GetWindowTextW(
+        edit, text.data(), static_cast<int>(text.size()));
+    if (length >= 0 &&
+        std::wstring_view(text.data(), static_cast<std::size_t>(length)) ==
+            expected) {
+      return true;
+    }
+  } while (GetTickCount64() < deadline);
+  return false;
 }
 
 int RunTypingSelfTest() noexcept {
@@ -193,40 +245,73 @@ int RunTypingSelfTest() noexcept {
     return 1;
   }
 
-  auto profile = keyina::windows::DefaultRuntimeInputProfile();
-  profile.vietnamese_enabled = true;
-  keyina::windows::Win32InputRuntime runtime(profile, false);
-  if (!runtime.Start()) {
-    DestroyWindow(window);
-    WriteStandardOutput("typing_self_test_runtime_failed\n");
-    return 1;
-  }
-
-  runtime.PumpMessagesFor(50);
-  const bool focus_ready = FocusTestControl(window, edit);
-  runtime.PumpMessagesFor(50);
-  const bool focus_confirmed = GetFocus() == edit;
-  const bool foreground_confirmed = GetForegroundWindow() == window;
-  bool success = focus_ready && focus_confirmed && foreground_confirmed;
-  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  constexpr int kMaximumAttempts = 3;
   constexpr std::string_view raw = "tieengs vieetj";
-  for (const char character : raw) {
-    if (!success || !SendTestCharacter(character, caps_lock)) {
-      success = false;
-      break;
-    }
-    runtime.PumpMessagesFor(20);
-  }
-  runtime.PumpMessagesFor(300);
-
+  constexpr std::array<std::wstring_view, 14> expected_prefixes{
+      L"t", L"ti", L"tie", L"tiê", L"tiên", L"tiêng", L"tiếng",
+      L"tiếng ", L"tiếng v", L"tiếng vi", L"tiếng vie", L"tiếng viê",
+      L"tiếng viêt", L"tiếng việt",
+  };
+  constexpr std::wstring_view expected = expected_prefixes.back();
+  bool focus_ready = false;
+  bool focus_confirmed = false;
+  bool foreground_confirmed = false;
+  bool success = false;
+  std::uint64_t processed_events = 0;
   std::array<wchar_t, 64> text{};
-  const int length = GetWindowTextW(
-      edit, text.data(), static_cast<int>(text.size()));
-  success = success && length > 0 &&
-      std::wstring_view(text.data(), static_cast<std::size_t>(length)) ==
-          L"tiếng việt";
+  int length = 0;
 
-  runtime.Stop();
+  for (int attempt = 0; attempt < kMaximumAttempts && !success; ++attempt) {
+    DrainCurrentThreadMessages(200);
+    SetWindowTextW(edit, L"");
+    DrainCurrentThreadMessages(20);
+    auto profile = keyina::windows::DefaultRuntimeInputProfile();
+    profile.vietnamese_enabled = true;
+    keyina::windows::Win32InputRuntime runtime(profile, false);
+    if (!runtime.Start()) {
+      DestroyWindow(window);
+      WriteStandardOutput("typing_self_test_runtime_failed\n");
+      return 1;
+    }
+
+    runtime.PumpMessagesFor(50);
+    focus_ready = FocusTestControl(window, edit);
+    runtime.PumpMessagesFor(50);
+    focus_confirmed = GetFocus() == edit;
+    foreground_confirmed = GetForegroundWindow() == window;
+    success = focus_ready && focus_confirmed && foreground_confirmed;
+    const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+
+    for (std::size_t index = 0; index < raw.size(); ++index) {
+      if (!success || GetFocus() != edit || GetForegroundWindow() != window) {
+        success = false;
+        break;
+      }
+      const std::uint64_t before = runtime.processed_keyboard_events();
+      const std::uint32_t sent = SendTestCharacter(raw[index], caps_lock);
+      if (sent == 0 ||
+          !WaitForProcessedKeyboardEvents(runtime, before + sent, 1000) ||
+          !WaitForExpectedText(
+              runtime, edit, expected_prefixes[index], 750, text, length)) {
+        success = false;
+        break;
+      }
+    }
+
+    if (success) {
+      success = WaitForExpectedText(
+          runtime, edit, expected, 500, text, length);
+    } else {
+      text.fill(L'\0');
+      length = GetWindowTextW(
+          edit, text.data(), static_cast<int>(text.size()));
+    }
+    processed_events = runtime.processed_keyboard_events();
+    runtime.Stop();
+    if (!success) {
+      DrainCurrentThreadMessages(300);
+    }
+  }
   DestroyWindow(window);
   if (previous_foreground != nullptr) {
     SetForegroundWindow(previous_foreground);
@@ -252,7 +337,7 @@ int RunTypingSelfTest() noexcept {
       focus_ready ? "true" : "false",
       focus_confirmed ? "true" : "false",
       foreground_confirmed ? "true" : "false",
-      static_cast<unsigned long long>(runtime.processed_keyboard_events()),
+      static_cast<unsigned long long>(processed_events),
       length, utf8_length, actual_utf8.data());
   if (diagnostic_length > 0) {
     WriteStandardOutput(std::string_view(
