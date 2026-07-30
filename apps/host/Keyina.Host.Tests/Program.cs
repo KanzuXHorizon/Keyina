@@ -26,9 +26,20 @@ internal static class Program
 
         if (args.Length > 0)
         {
+            var exclusions = args
+                .Where(filter => filter.StartsWith('!'))
+                .Select(filter => filter[1..])
+                .Where(filter => filter.Length > 0)
+                .ToArray();
+            var inclusions = args
+                .Where(filter => !filter.StartsWith('!'))
+                .ToArray();
+
             tests = tests
-                .Where(test => args.Any(filter =>
+                .Where(test => inclusions.Length == 0 || inclusions.Any(filter =>
                     test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+                .Where(test => exclusions.All(filter =>
+                    !test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
         }
 

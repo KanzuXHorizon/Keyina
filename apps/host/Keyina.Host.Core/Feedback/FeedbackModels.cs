@@ -13,6 +13,28 @@ public sealed record FeedbackPreferences(FeedbackMode Mode)
     public static FeedbackPreferences Default { get; } = new(FeedbackMode.Automatic);
 }
 
+public enum FeedbackEventKind
+{
+    VietnameseEnabled,
+    VietnameseDisabled,
+    DictationConnecting,
+    DictationListening,
+    DictationFinalizing,
+    DictationInserted,
+    DictationCancelled,
+    Error,
+    Preview,
+}
+
+public enum FeedbackTone
+{
+    Neutral,
+    Accent,
+    Success,
+    Warning,
+    Error,
+}
+
 public enum FeedbackSoundCue
 {
     None,
@@ -23,6 +45,13 @@ public enum FeedbackSoundCue
     Cancel,
     Error,
 }
+
+public sealed record FeedbackEvent(
+    FeedbackEventKind Kind,
+    string Message,
+    FeedbackTone Tone,
+    FeedbackSoundCue SoundCue,
+    TimeSpan Duration);
 
 public enum ForegroundPresentationState
 {

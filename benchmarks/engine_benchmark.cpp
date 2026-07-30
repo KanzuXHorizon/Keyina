@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <new>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -12,6 +14,31 @@
 #include <keyina/context_guard.h>
 #include <keyina/engine.h>
 #include <keyina/vietnamese_syllable.h>
+
+namespace {
+std::atomic<std::uint64_t> g_allocation_count{0};
+}
+
+void* operator new(std::size_t size) {
+  g_allocation_count.fetch_add(1, std::memory_order_relaxed);
+  if (void* memory = std::malloc(size)) {
+    return memory;
+  }
+  throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size) {
+  g_allocation_count.fetch_add(1, std::memory_order_relaxed);
+  if (void* memory = std::malloc(size)) {
+    return memory;
+  }
+  throw std::bad_alloc{};
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -23,6 +50,7 @@ struct Result {
   double p95_ns;
   double p99_ns;
   double maximum_ns;
+  double allocations_per_operation;
 };
 
 std::string JsonEscape(std::string_view value) {
@@ -67,6 +95,17 @@ Result Measure(std::string_view name, Operation&& operation, std::size_t warmup,
     checksum += operation();
   }
 
+  const auto allocation_start =
+      g_allocation_count.load(std::memory_order_relaxed);
+  for (std::size_t index = 0; index < iterations; ++index) {
+    checksum += operation();
+  }
+  const auto allocation_finish =
+      g_allocation_count.load(std::memory_order_relaxed);
+  const double allocations_per_operation =
+      static_cast<double>(allocation_finish - allocation_start) /
+      static_cast<double>(iterations);
+
   std::vector<std::uint64_t> samples;
   samples.reserve(iterations);
   for (std::size_t index = 0; index < iterations; ++index) {
@@ -85,6 +124,7 @@ Result Measure(std::string_view name, Operation&& operation, std::size_t warmup,
       Percentile(samples, 95, 100),
       Percentile(samples, 99, 100),
       static_cast<double>(samples.back()),
+      allocations_per_operation,
   };
 }
 
@@ -310,7 +350,9 @@ int main() {
               << "\", \"median_ns\": " << result.median_ns
               << ", \"p95_ns\": " << result.p95_ns
               << ", \"p99_ns\": " << result.p99_ns
-              << ", \"max_ns\": " << result.maximum_ns << "}";
+              << ", \"max_ns\": " << result.maximum_ns
+              << ", \"allocations_per_operation\": "
+              << result.allocations_per_operation << "}";
     std::cout << (index + 1 == results.size() ? "\n" : ",\n");
   }
   std::cout << "  ],\n"
