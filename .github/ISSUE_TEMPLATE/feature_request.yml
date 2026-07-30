@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a focused improvement for Keyina
+title: "[Feature]: "
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user task or compatibility gap is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe observable behavior rather than an implementation preference.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Vietnamese input engine
+        - Windows keyboard hook
+        - Compatibility and safety
+        - Settings and tray UI
+        - Snippets and productivity
+        - Speech input
+        - Build, packaging, or documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Examples or evidence
+      description: Add non-sensitive examples, application names, or measurable acceptance criteria.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: The proposal preserves offline ordinary typing and safe literal fallback.
+          required: true
+        - label: The proposal does not require copying incompatible third-party source.
+          required: true

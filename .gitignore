@@ -2,7 +2,7 @@
 Start-DevSpace-MCP-Cloudflared.ps1
 
 # Build outputs
-/build/
+**/build/
 /out/
 /artifacts/
 **/bin/
@@ -18,6 +18,15 @@ CMakeUserPresets.json
 .DS_Store
 Thumbs.db
 
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*secrets*.json
+appsettings.*.local.json
+
 # Windows packaging/signing
 *.appx
 *.appxbundle
@@ -25,6 +34,9 @@ Thumbs.db
 *.msixbundle
 *.pfx
 *.cer
+
+# Accidental Windows device-name artifact
+NUL
 
 # Test and benchmark outputs
 Testing/

@@ -1,99 +1,142 @@
-# Keyina
+<p align="center">
+  <img src="brand/generated/lockup/keyina-lockup-1680x512.png" alt="Keyina" width="760">
+</p>
 
-![Keyina](brand/generated/lockup/keyina-lockup-1680x512.png)
+<p align="center">
+  A privacy-first Vietnamese input method for Windows, built around a native C++ engine and a safe resident keyboard hook.
+</p>
 
-Keyina is a privacy-first Vietnamese input platform for Windows. It is not a visual remake of UniKey or EVKey. The project focuses on measurable behavior:
+<p align="center">
+  <a href="https://github.com/KanzuXHorizon/Keyina/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/KanzuXHorizon/Keyina/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4">
+  <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C">
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4">
+  <img alt="Development status" src="https://img.shields.io/badge/status-public%20preview-orange">
+</p>
 
-1. **Reversible composition** — transformations can be undone without losing the original keystrokes.
-2. **Context Guard** — deterministic protection for source code, URLs, email addresses, commands, paths, identifiers, and English-heavy tokens.
-3. **Native TSF integration** — text edits use Windows Text Services Framework compositions instead of blind global Backspace injection.
-4. **Isolated productivity host** — tray, hotkeys, snippets, and optional speech run outside the keystroke DLL.
-5. **Evidence-driven releases** — tests, benchmarks, generated-asset hashes, compatibility evidence, and explicit blocked gates replace unsupported claims.
+> [!IMPORTANT]
+> Keyina is an active **public preview**. The source, tests, benchmarks, and Windows host are available, but a signed installer and stable compatibility promise are not. Build from source for evaluation; do not treat the current branch as a production release.
+
+## Why Keyina
+
+Keyina is a clean-room Vietnamese input platform focused on behavior that can be measured and tested rather than recreating another application's interface.
+
+- **No `Win + Space` requirement** — the default path is a resident keyboard hook, similar to familiar Vietnamese input utilities.
+- **Reversible composition** — transformations preserve enough state to reconstruct the original physical keystrokes.
+- **Context Guard** — deterministic protection for source code, URLs, email addresses, commands, paths, identifiers, and English-heavy tokens.
+- **Offline ordinary typing** — the native typing path does not need a network connection, cloud model, clipboard replacement, or telemetry.
+- **Fail-open safety** — secure, elevated, unsupported, and uncertain contexts fall back to literal physical input.
+- **Optional productivity layer** — tray controls, hotkeys, snippets, diagnostics, and opt-in Vietnamese speech input remain outside the native engine.
+
+## Interface
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/overview.png" alt="Keyina overview screen"></td>
+    <td><img src="docs/screenshots/typing.png" alt="Keyina typing settings"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/hotkeys.png" alt="Keyina hotkey settings"></td>
+    <td><img src="docs/screenshots/snippets.png" alt="Keyina snippet settings"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/speech.png" alt="Keyina speech settings"></td>
+    <td><img src="docs/screenshots/diagnostics.png" alt="Keyina diagnostics screen"></td>
+  </tr>
+</table>
 
 ## Architecture
 
 ```text
-Focused Windows application
-        ↕ TSF composition/edit sessions
-KeyinaTsf.dll — C++20, native, offline hot path
-        ↕ bounded versioned local IPC protocol
-Keyina.Host.exe — .NET 10 LTS Windows resident process
-  - tray and settings lifecycle
-  - familiar input-mode hotkeys
-  - deterministic snippets
-  - optional Speechmatics Vietnamese dictation
-  - Windows Credential Manager integration
+Physical keyboard events
+        ↓ WH_KEYBOARD_LL, strict bypass rules
+Keyina.Host.exe — .NET 10 Windows resident process
+  ├─ input mode and hotkey state
+  ├─ compatibility boundaries and diagnostics
+  ├─ snippets and optional speech
+  └─ minimal Backspace + Unicode SendInput edits
+        ↕ narrow C ABI
+KeyinaEngine.dll — C++20, native, deterministic, offline
+  ├─ Telex composition
+  ├─ tone placement and syllable validation
+  ├─ raw-key rollback
+  └─ Context Guard
 ```
 
-`KeyinaTsf.dll` does not access the network, microphone, settings UI, clipboard, or Speechmatics. A host/provider failure must not delay normal Vietnamese typing.
+The keyboard hook processes only supported plain-text events. Injected events carry a private marker and are never reprocessed. Modifier shortcuts, password fields, elevated targets, navigation or selection-risk boundaries, raw-input software, and unknown failures reset state and pass literal input through.
 
-## Current verified capabilities
+The older Windows Text Services Framework implementation remains optional behind `KEYINA_BUILD_TSF=ON`; it is not required for the default typing flow.
 
-### Native input engine
+## Current capabilities
+
+### Native Vietnamese engine
 
 - Telex letter modifiers and tone keys.
 - Modern and traditional tone placement.
+- Vietnamese syllable validation with flexible recovery for practical typing.
 - Exact raw-key rollback and Backspace reconstruction.
-- 64-key bounded active composition.
-- Context transition recovery, such as converting an earlier `á` back to raw `as_` when the token becomes an identifier.
-- UTF-32 to validated UTF-16 edit translation.
-- Real local `ITfThreadMgr`/`ITfContext`/`ITextStoreACP` integration tests.
-- Secure-mode pass-through.
+- Bounded active composition and UTF-32 to validated UTF-16 translation.
+- Context transitions that recover literal identifiers, paths, URLs, and mixed-language tokens.
+- Native unit, invariant, integration, golden-vector, and latency tests.
 
-### Host, productivity, and speech foundation
+### Windows host
 
-- Deterministic .NET 10 LTS host/core solution with warnings as errors and package lock files.
-- Immutable tray/dictation reducers and named-mutex single-instance guard.
-- Familiar `Ctrl+Shift` input-mode state machine with left/right modifier, repeat, and shortcut contamination tests.
-- Scoped deterministic snippet matcher with secure-input bypass and built-ins such as `;kvi`, `;kvoice`, and `;kdate`.
-- Cross-language C#/C++ IPC codec with a shared golden frame, strict UTF-8, 64 KiB frame limit, session ID, and focus generation.
-- Optional Speechmatics Realtime protocol/session with 500-chunk backpressure, final ordering, fake-server tests, and offline `--speech-self-test`.
-- Windows Credential Manager API-key storage.
-- WASAPI microphone adapter, streaming source conversion, and strict 64,000-byte audio buffer.
-- Multi-resolution app/tray icons, five vector sources, and 42 generated PNG/ICO assets with SHA-256 verification.
+- Resident WinForms host on .NET 10 with a Fluent-inspired light, dark, and high-contrast interface.
+- Familiar `Ctrl + Shift` Vietnamese input toggle.
+- Native-engine bridge and low-level keyboard hook with injection-loop protection.
+- Deterministic snippets and secure-input bypass.
+- Tray lifecycle, startup registration, diagnostics, and self-tests.
+- Optional Speechmatics Vietnamese dictation with Windows Credential Manager storage.
+- Deterministic generated icons, lockups, and screenshot gallery.
 
-## Verification snapshot
+## Privacy and security model
 
-Fresh local verification on 2026-07-29:
+Ordinary Vietnamese typing stays local. `KeyinaEngine.dll` has no responsibility for network access, microphone capture, cloud credentials, telemetry, settings UI, or clipboard replacement.
 
-- Native Debug: 3/3 tests pass.
-- Native Release: 3/3 tests pass.
-- Host/.NET: 77/77 tests pass before benchmark-only additions.
-- Golden Telex vectors: 100 validated.
-- Benchmark comparator: 4/4 tests pass.
-- Brand regeneration: byte-identical output and no Git diff.
-- Native p99 latency:
-  - ASCII pass-through: 0.2 µs
-  - letter modifier: 0.4 µs
-  - tone update: 0.4 µs
-  - protected URL path: 7.5 µs
-  - 64-code-point Context Guard: 0.7 µs
+Speech input is explicitly optional and isolated in the host. Its API credential must be stored in Windows Credential Manager and must never be committed to the repository or written to normal configuration files.
 
-- Release speech/host benchmarks:
-  - Speechmatics final JSON parse: 13.2 µs p99, 256 B/op
-  - transcript partial update: 0.6 µs p99, 256 B/op
-  - 30 ms audio conversion: 20.0 µs p99, 2,041 B/op
-  - final IPC encode: 0.4 µs p99, 72 B/op
-- Release idle host probe: about 21.1 MiB working set, 6.6 MiB private memory, and no measured CPU time over approximately three seconds on the test machine.
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting and [docs/compatibility/typing.md](docs/compatibility/typing.md) for compatibility boundaries.
 
-See `docs/brand/verification.md` and `docs/compatibility/speechmatics.md` for commands, environment, limits, and blocked gates.
+## Build from source
 
-## Repository layout
+### Requirements
 
-```text
-core/                       Deterministic platform-independent input engine
-platform/windows/tsf/       Windows TSF/COM adapter and integration contracts
-apps/host/                  .NET host, Windows adapters, speech client, tests, and benchmarks
-brand/                      Vector sources and generated Windows assets
-benchmarks/                 Native latency benchmarks
-tests/                      Native unit, invariant, and TSF integration tests
-tools/brand/                Deterministic brand catalog/vector/raster generator
-docs/                       Specs, plans, compatibility, brand, and evidence
+- Windows 10 version 2004 or newer, or Windows 11, x64.
+- Visual Studio 2022 with **Desktop development with C++**.
+- CMake 3.25 or newer.
+- The .NET SDK selected by [`global.json`](global.json).
+- Python 3 for validation scripts.
+
+### Clone and configure
+
+```powershell
+git clone https://github.com/KanzuXHorizon/Keyina.git
+cd Keyina
+cmake --preset windows-msvc-debug
 ```
 
-## Build and test
+### Build and test
 
-### Native Windows
+```powershell
+cmake --build --preset windows-msvc-debug
+ctest --preset windows-msvc-debug --output-on-failure
+
+dotnet build Keyina.slnx -c Debug
+dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
+```
+
+### Run the development host
+
+```powershell
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --show-settings
+```
+
+The development host is unsigned. Windows or security software may warn about locally built keyboard-hook software. Review the source and build it yourself; do not bypass organizational security policy.
+
+## Verification lanes
+
+### Native Debug and Release
 
 ```powershell
 cmake --preset windows-msvc-debug
@@ -103,38 +146,75 @@ ctest --preset windows-msvc-debug --output-on-failure
 cmake --preset windows-msvc-release
 cmake --build --preset windows-msvc-release
 ctest --preset windows-msvc-release --output-on-failure
+
+python tools/check_vectors.py
+python tools/test_compare_benchmark.py
 ```
 
-### Host and brand
+### Host, speech, resources, and benchmarks
 
 ```powershell
 dotnet build Keyina.slnx -c Debug
 dotnet run --project apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj -c Debug --no-build
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --self-test
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --speech-self-test
+dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --hotkey-self-test
+
 dotnet build Keyina.slnx -c Release
-dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --speech-self-test
 dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --resource-self-test
 dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build
-dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root F:\Keyina
+```
+
+### Deterministic brand assets
+
+```powershell
+dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root $PWD
 git diff --exit-code -- docs/brand brand
 ```
 
-## Product principles
+Performance results are hardware-specific. Reproducible commands, comparison thresholds, and evidence live in [`docs/benchmarks/`](docs/benchmarks/) and [`docs/brand/`](docs/brand/).
 
-- Clean-room Apache-2.0 implementation; no source is copied from existing Vietnamese input engines.
-- No keystroke logging or cloud telemetry by default.
-- Password and secure input scopes are bypassed.
-- Speech is optional and isolated from ordinary typing.
-- Speech credentials must live in Windows Credential Manager, never config files or the repository.
-- Literal input is the fallback for inconsistent native state.
-- Production readiness requires signed installation, elevated TSF registration, manual application compatibility, accessibility checks, and a live opt-in Speechmatics smoke test.
+## Repository map
 
-## Status
+```text
+core/                       Platform-independent C++ input engine
+platform/windows/hook/      Native C ABI bridge for the default hook backend
+platform/windows/tsf/       Optional legacy TSF/COM backend
+apps/host/                  .NET host, Windows adapters, speech, UI, tests, benchmarks
+brand/                      Vector sources and deterministic generated assets
+benchmarks/                 Native latency benchmarks
+tests/                      Native unit, invariant, and Windows integration tests
+tools/                      Brand and verification utilities
+docs/                       Architecture, compatibility, evidence, specs, and plans
+```
 
-Keyina currently has a verified native engine, focused TSF external edits, current-user IPC routing, deterministic brand assets, familiar Windows hotkeys, tested snippet/IPC cores, and an offline-verified Speechmatics/audio pipeline on .NET 10 LTS. It is **not yet a production-ready installer**. Persistent tray/settings UI, signed installation, elevated TSF registration, live-provider validation, and the third-party compatibility matrix remain active release gates.
+## Release gates
 
-Design and execution documents:
+The project is public before it is production-ready. A stable release still requires:
 
-- `docs/superpowers/specs/2026-07-29-keyina-vietnamese-text-platform-design.md`
-- `docs/superpowers/specs/2026-07-29-keyina-host-speech-brand-design.md`
-- `docs/superpowers/plans/2026-07-29-keyina-functional-tsf.md`
-- `docs/superpowers/plans/2026-07-29-keyina-brand-host-foundation.md`
+- A signed, reproducible installer and uninstall path.
+- Wider manual compatibility coverage across browsers, editors, terminals, Office applications, accessibility tools, Remote Desktop, and elevated applications.
+- Accessibility and keyboard-navigation verification for the settings interface.
+- Live opt-in speech-provider validation without exposing credentials.
+- Release artifact provenance, checksums, and a documented update strategy.
+
+Open work is tracked through GitHub issues and the design/implementation documents under [`docs/superpowers/`](docs/superpowers/).
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. The project accepts focused, tested contributions that preserve privacy, literal fallback, deterministic behavior, and clean-room licensing boundaries.
+
+- Bug reports and feature requests use the structured GitHub issue forms.
+- Security vulnerabilities use the private process in [SECURITY.md](SECURITY.md).
+- Community behavior follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- General support scope is documented in [SUPPORT.md](SUPPORT.md).
+
+## Clean-room notice
+
+Keyina is not affiliated with UniKey, EVKey, OpenKey, Microsoft, or Speechmatics. No source code from existing Vietnamese input engines is copied into this repository. Product and company names are used only to explain compatibility or user expectations.
+
+## License
+
+Copyright 2026 Keyina contributors.
+
+Licensed under the [Apache License 2.0](LICENSE).

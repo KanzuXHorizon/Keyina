@@ -4,13 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: keyina-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -21,6 +27,9 @@ jobs:
             **/packages.lock.json
             **/*.csproj
             global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Build .NET host (Debug)
         run: dotnet build Keyina.slnx -c Debug
@@ -54,8 +63,8 @@ jobs:
         shell: pwsh
         run: git diff --exit-code -- docs/brand brand
 
-      - name: Configure native Debug
-        run: cmake --preset windows-msvc-debug
+      - name: Configure native Debug with optional TSF coverage
+        run: cmake --preset windows-msvc-debug -DKEYINA_BUILD_TSF=ON
       - name: Build native Debug
         run: cmake --build --preset windows-msvc-debug
       - name: Test native Debug
@@ -65,8 +74,8 @@ jobs:
       - name: Test benchmark comparator
         run: python tools/test_compare_benchmark.py
 
-      - name: Configure native Release
-        run: cmake --preset windows-msvc-release
+      - name: Configure native Release with optional TSF coverage
+        run: cmake --preset windows-msvc-release -DKEYINA_BUILD_TSF=ON
       - name: Build native Release
         run: cmake --build --preset windows-msvc-release
       - name: Test native Release
@@ -87,6 +96,7 @@ jobs:
 
   linux-clang-sanitizers:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Configure

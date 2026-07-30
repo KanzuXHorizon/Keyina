@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible Keyina defect
+title: "[Bug]: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not post credentials, private documents, raw sensitive keystrokes, or security vulnerabilities here. Use SECURITY.md for vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: Keyina version
+      description: Commit SHA or release version
+      placeholder: 27a325b
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: input
+    id: application
+    attributes:
+      label: Target application
+      placeholder: Notepad 11.x, Edge 150, VS Code 1.x
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include exact physical keystrokes where relevant.
+      placeholder: |
+        1. Start Keyina
+        2. Focus ...
+        3. Type ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: notepad
+    attributes:
+      label: Does it reproduce in Notepad?
+      options:
+        - "Yes"
+        - "No"
+        - "Not tested"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Non-sensitive diagnostics
+      description: Paste only relevant output after removing private data.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed credentials, private text, and personal information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
