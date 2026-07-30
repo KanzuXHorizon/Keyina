@@ -65,6 +65,16 @@ constexpr KeyRoute RouteBoundary(std::uint32_t virtual_key,
 constexpr KeyRoute RouteTechnical(std::uint32_t virtual_key,
                                   bool shift) noexcept {
   switch (virtual_key) {
+    case VK_ADD:
+      return {KeyRouteKind::Character, U'+'};
+    case VK_SUBTRACT:
+      return {KeyRouteKind::Character, U'-'};
+    case VK_MULTIPLY:
+      return {KeyRouteKind::Character, U'*'};
+    case VK_DIVIDE:
+      return {KeyRouteKind::Character, U'/'};
+    case VK_DECIMAL:
+      return {KeyRouteKind::Character, U'.'};
     case VK_OEM_MINUS:
       return {KeyRouteKind::Character, shift ? U'_' : U'-'};
     case VK_OEM_PLUS:
@@ -114,6 +124,13 @@ KeyRoute RouteKey(const KeyRoutingInput& input) noexcept {
         input.virtual_key - static_cast<std::uint32_t>('A'));
     return {KeyRouteKind::Character,
             (uppercase ? U'A' : U'a') + offset};
+  }
+
+  if (input.virtual_key >= VK_NUMPAD0 && input.virtual_key <= VK_NUMPAD9) {
+    const char32_t character =
+        U'0' + static_cast<char32_t>(input.virtual_key - VK_NUMPAD0);
+    return OwnedOnly({KeyRouteKind::Character, character},
+                     input.active_composition);
   }
 
   if (input.virtual_key >= static_cast<std::uint32_t>('0') &&

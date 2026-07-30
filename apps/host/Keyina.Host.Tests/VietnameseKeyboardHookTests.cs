@@ -48,6 +48,23 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("tiếng Việt", injector.Text);
     }
 
+    [KeyinaTest("resident hook supports literal tone-key escape and flexible late vowel shape")]
+    private static void HookHandlesLiteralUxAndLateShapeToneOrder()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+
+        Type(native, "uxx loixo ");
+
+        AssertEx.Equal("ux lỗi ", injector.Text);
+    }
+
     [KeyinaTest("resident hook restores Latin words without requiring manual engine configuration")]
     private static void HookRestoresLatinWordsByDefault()
     {
@@ -247,8 +264,8 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("as", injector.Text);
     }
 
-    [KeyinaTest("resident hook restores invalid Telex before punctuation boundaries")]
-    private static void HookRestoresBeforePunctuation()
+    [KeyinaTest("resident hook keeps visible text stable at punctuation boundaries")]
+    private static void HookKeepsVisibleTextAtPunctuation()
     {
         var native = new FakeHookNativeApi();
         var injector = new TextModelInjector();
@@ -266,7 +283,7 @@ internal static class VietnameseKeyboardHookTests
             injector.Text += ".";
         }
 
-        AssertEx.Equal("haahhaahhaahh.", injector.Text);
+        AssertEx.Equal("hâhhâhhâhh.", injector.Text);
     }
 
     [KeyinaTest("resident hook preserves Caps Lock casing while applying Telex")]

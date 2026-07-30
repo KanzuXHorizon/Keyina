@@ -199,7 +199,7 @@ bool ApplyDModifier(std::u32string& visible) {
   // Accept delayed Telex order such as "duocd" and "dongd" only when
   // replacing the initial d produces a structurally plausible Vietnamese
   // syllable. This keeps ordinary Latin tokens such as "david" literal.
-  if (visible.size() >= 3 &&
+  if (visible.size() >= 2 &&
       (visible.front() == U'd' || visible.front() == U'D')) {
     const char32_t original = visible.front();
     visible.front() = original == U'd' ? U'đ' : U'Đ';
@@ -350,9 +350,8 @@ std::size_t SelectToneTarget(std::u32string_view visible,
   const auto second_letter = DecomposeVietnamese(visible[second]);
   const bool modern_open_cluster =
       first_letter.has_value() && second_letter.has_value() &&
-      ((first_letter->base == U'o' &&
-        (second_letter->base == U'a' || second_letter->base == U'e')) ||
-       (first_letter->base == U'u' && second_letter->base == U'y'));
+      first_letter->base == U'o' &&
+      (second_letter->base == U'a' || second_letter->base == U'e');
   if (placement == TonePlacement::Modern && modern_open_cluster) {
     return second;
   }
@@ -401,18 +400,12 @@ TextEdit Engine::Process(const KeyEvent& event) {
     return {};
   }
   if (event.kind == KeyKind::CommitBoundary) {
-    TextEdit edit;
-    if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
-        AnalyzeVietnameseSyllable(visible_text_).status !=
-            SyllableStatus::Valid) {
-      composition_buffer_.assign(raw_keys_);
-      if (event.character != U'\0') {
-        composition_buffer_.push_back(event.character);
-      }
-      edit = Difference(visible_text_, composition_buffer_, true);
-    }
+    // Match established Vietnamese IME behavior: separators only commit the
+    // current composition. They must never rewrite the word that the user has
+    // already seen, because that feels like autocorrect and makes Space
+    // destructive.
     Reset();
-    return edit;
+    return {};
   }
   if (event.control || event.alt) {
     Reset();

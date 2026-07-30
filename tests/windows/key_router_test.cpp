@@ -64,6 +64,21 @@ KEYINA_TEST(routes_whitespace_and_sentence_punctuation_as_boundaries) {
   }
 }
 
+KEYINA_TEST(routes_numpad_digits_while_composing) {
+  for (unsigned int offset = 0; offset <= 9; ++offset) {
+    const auto inactive = keyina::tsf::RouteKey(
+        {.virtual_key = VK_NUMPAD0 + offset});
+    KEYINA_EXPECT_EQ(inactive.kind, KeyRouteKind::PassThrough);
+
+    const auto active = keyina::tsf::RouteKey(
+        {.virtual_key = VK_NUMPAD0 + offset,
+         .active_composition = true});
+    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Character);
+    KEYINA_EXPECT_EQ(active.character,
+                     static_cast<char32_t>(U'0' + offset));
+  }
+}
+
 KEYINA_TEST(routes_technical_token_characters_while_composing) {
   struct TechnicalCase {
     unsigned int virtual_key;
@@ -89,6 +104,31 @@ KEYINA_TEST(routes_technical_token_characters_while_composing) {
          .active_composition = true});
     KEYINA_EXPECT_EQ(route.kind, KeyRouteKind::Character);
     KEYINA_EXPECT_EQ(route.character, test.expected);
+  }
+}
+
+KEYINA_TEST(routes_numpad_operators_while_composing) {
+  struct NumpadOperatorCase {
+    unsigned int virtual_key;
+    char32_t expected;
+  };
+  constexpr std::array<NumpadOperatorCase, 5> cases = {{
+      {VK_ADD, U'+'},
+      {VK_SUBTRACT, U'-'},
+      {VK_MULTIPLY, U'*'},
+      {VK_DIVIDE, U'/'},
+      {VK_DECIMAL, U'.'},
+  }};
+
+  for (const auto& test : cases) {
+    const auto inactive =
+        keyina::tsf::RouteKey({.virtual_key = test.virtual_key});
+    KEYINA_EXPECT_EQ(inactive.kind, KeyRouteKind::PassThrough);
+
+    const auto active = keyina::tsf::RouteKey(
+        {.virtual_key = test.virtual_key, .active_composition = true});
+    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Character);
+    KEYINA_EXPECT_EQ(active.character, test.expected);
   }
 }
 

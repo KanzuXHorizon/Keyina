@@ -68,27 +68,19 @@ KEYINA_TEST(rejects_structurally_invalid_vietnamese_syllables) {
   }
 }
 
-KEYINA_TEST(restore_invalid_word_is_opt_in_and_happens_at_boundary) {
-  keyina::Engine disabled;
-  KEYINA_EXPECT_EQ(TypeSequence(disabled, U"haahhaahhaahh"), U"hâhhâhhâhh");
-  const auto disabled_boundary = disabled.Process(
-      {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
-  KEYINA_EXPECT_EQ(disabled_boundary, keyina::TextEdit{});
-
-  keyina::Engine enabled({
+KEYINA_TEST(commit_boundary_never_rewrites_visible_text) {
+  keyina::Engine engine({
       .tone_placement = keyina::TonePlacement::Modern,
       .application_bypass = false,
       .restore_invalid_word = true,
   });
-  std::u32string external = TypeSequence(enabled, U"haahhaahhaahh");
+  const auto external = TypeSequence(engine, U"haahhaahhaahh");
   KEYINA_EXPECT_EQ(external, U"hâhhâhhâhh");
 
-  const auto boundary = enabled.Process(
+  const auto boundary = engine.Process(
       {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
-  ApplyEdit(external, boundary);
-  KEYINA_EXPECT_TRUE(boundary.consumed);
-  KEYINA_EXPECT_EQ(external, U"haahhaahhaahh ");
-  KEYINA_EXPECT_TRUE(enabled.VisibleText().empty());
+  KEYINA_EXPECT_EQ(boundary, keyina::TextEdit{});
+  KEYINA_EXPECT_TRUE(engine.VisibleText().empty());
 }
 
 KEYINA_TEST(restore_invalid_word_keeps_valid_telex_and_literal_latin) {
@@ -176,7 +168,7 @@ KEYINA_TEST(classifies_foreign_shaped_tokens_as_ambiguous_without_hiding_garbage
   KEYINA_EXPECT_EQ(repeated.status, keyina::SyllableStatus::Impossible);
 }
 
-KEYINA_TEST(restore_invalid_word_restores_ambiguous_foreign_shaped_tokens) {
+KEYINA_TEST(commit_boundary_does_not_autocorrect_ambiguous_tokens) {
   keyina::Engine engine({
       .tone_placement = keyina::TonePlacement::Modern,
       .application_bypass = false,
@@ -184,20 +176,10 @@ KEYINA_TEST(restore_invalid_word_restores_ambiguous_foreign_shaped_tokens) {
   });
   const auto rendered = TypeSequence(engine, U"cazees");
   KEYINA_EXPECT_TRUE(rendered != std::u32string{U"cazees"});
-  const auto rendered_analysis = keyina::AnalyzeVietnameseSyllable(rendered);
-  if (rendered_analysis.status != keyina::SyllableStatus::Ambiguous) {
-    throw std::runtime_error(
-        "foreign-shaped Telex token status=" +
-        std::to_string(static_cast<int>(rendered_analysis.status)) +
-        " error=" + std::to_string(static_cast<int>(rendered_analysis.error)));
-  }
 
-  auto external = rendered;
   const auto boundary = engine.Process(
       {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
-  ApplyEdit(external, boundary);
-  KEYINA_EXPECT_TRUE(boundary.consumed);
-  KEYINA_EXPECT_EQ(external, U"cazees ");
+  KEYINA_EXPECT_EQ(boundary, keyina::TextEdit{});
 }
 
 KEYINA_TEST(validates_broad_dictionary_derived_edge_corpus) {

@@ -39,8 +39,8 @@ internal static class NativeHookBackendTests
         AssertEx.Equal("tiếng Việt", visible);
     }
 
-    [KeyinaTest("native hook engine restores invalid transformed words when enabled")]
-    private static void NativeEngineRestoresInvalidWord()
+    [KeyinaTest("native hook engine never rewrites visible text at a boundary")]
+    private static void NativeEngineKeepsVisibleTextAtBoundary()
     {
         using var engine = new NativeEngineClient();
         engine.Configure(restoreInvalidWord: true);
@@ -57,8 +57,10 @@ internal static class NativeHookBackendTests
         var boundary = engine.Process(
             NativeEngineKeyKind.CommitBoundary,
             new Rune(' '));
-        AssertEx.True(boundary.ConsumePhysicalKey, "Restore must consume the boundary key.");
-        AssertEx.Equal("haahhaahhaahh ", Apply(visible, boundary));
+        AssertEx.False(
+            boundary.ConsumePhysicalKey,
+            "A commit boundary must remain owned by the target application.");
+        AssertEx.Equal("hâhhâhhâhh ", visible + " ");
     }
 
     [KeyinaTest("unicode injector emits minimal backspaces and UTF16 events")]
