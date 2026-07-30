@@ -403,9 +403,8 @@ TextEdit Engine::Process(const KeyEvent& event) {
   if (event.kind == KeyKind::CommitBoundary) {
     TextEdit edit;
     if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
-        (AnalyzeVietnameseSyllable(visible_text_).status !=
-             SyllableStatus::Valid ||
-         HasSuspiciousToneBeforeNewVowel(raw_keys_))) {
+        AnalyzeVietnameseSyllable(visible_text_).status !=
+            SyllableStatus::Valid) {
       composition_buffer_.assign(raw_keys_);
       if (event.character != U'\0') {
         composition_buffer_.push_back(event.character);

@@ -61,6 +61,39 @@ KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
   }
 }
 
+KEYINA_TEST(valid_flexible_telex_survives_word_boundaries) {
+  constexpr std::array<TelexCase, 5> cases = {{
+      {U"nuwxa", U"nữa"},
+      {U"nuawx", U"nữa"},
+      {U"dduowjc", U"được"},
+      {U"tieesng", U"tiếng"},
+      {U"uuw", U"ưu"},
+  }};
+
+  for (std::size_t case_index = 0; case_index < cases.size(); ++case_index) {
+    const auto& test = cases[case_index];
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    auto external = TypeSequence(engine, test.raw);
+    const auto edit = engine.Process(
+        {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
+    KEYINA_EXPECT_TRUE(edit.erase_codepoints <= external.size());
+    external.erase(external.size() - edit.erase_codepoints);
+    external.append(edit.insert);
+    if (!edit.consumed) {
+      external.push_back(U' ');
+    }
+    std::u32string expected{test.expected};
+    expected.push_back(U' ');
+    if (external != expected) {
+      throw std::runtime_error(
+          "valid flexible boundary changed case " +
+          std::to_string(case_index));
+    }
+  }
+}
+
 KEYINA_TEST(keeps_latin_tokens_literal_while_they_are_still_being_typed) {
   constexpr std::array<std::u32string_view, 3> cases = {{
       U"user",
