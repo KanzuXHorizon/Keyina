@@ -155,6 +155,7 @@ Invoke-Checked 'dotnet.exe' (@(
     '--self-contained', 'true',
     '-p:PublishReadyToRun=false',
     '-p:SatelliteResourceLanguages=en',
+    '-p:NuGetLockFilePath=obj\publish-packages.lock.json',
     '-p:DebugType=None',
     '-p:DebugSymbols=false',
     '-o', $publishDir

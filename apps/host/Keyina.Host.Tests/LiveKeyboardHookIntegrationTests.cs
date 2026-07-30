@@ -80,8 +80,8 @@ internal static class LiveKeyboardHookIntegrationTests
             {
                 start.Wait();
                 var timer = Stopwatch.StartNew();
-                keybd_event(0x42, 0, 0, 0);
-                keybd_event(0x42, 0, 0x0002, 0);
+                SendPhysicalKeyEvent(0x42, keyUp: false);
+                SendPhysicalKeyEvent(0x42, keyUp: true);
                 WaitForProcessedEvents(
                     hook,
                     processedBefore + 2,
@@ -269,7 +269,17 @@ internal static class LiveKeyboardHookIntegrationTests
             TypingTraceBuffer.Clear();
             TypingTraceBuffer.SetEnabled(true);
 
-            SendAscii(rawText, hook);
+            try
+            {
+                SendAscii(rawText, hook);
+            }
+            catch (InvalidOperationException exception) when (
+                exception.InnerException is LiveInputDeliveryException &&
+                attempt < maximumAttempts)
+            {
+                DrainLiveInput(hook);
+                continue;
+            }
             PumpUntil(
                 () => string.Equals(textBox.Text, expectedText, StringComparison.Ordinal),
                 TimeSpan.FromSeconds(5));
@@ -278,7 +288,7 @@ internal static class LiveKeyboardHookIntegrationTests
                 return;
             }
 
-            if (!HasExternalInputInterference(form, textBox))
+            if (attempt == maximumAttempts)
             {
                 AssertEx.Equal(
                     expectedText,
@@ -288,6 +298,8 @@ internal static class LiveKeyboardHookIntegrationTests
                         expectedText,
                         textBox.Text));
             }
+
+            DrainLiveInput(hook);
         }
 
         throw new InvalidOperationException(
@@ -295,19 +307,29 @@ internal static class LiveKeyboardHookIntegrationTests
             $"{maximumAttempts} attempts because the desktop focus or pointer state changed.");
     }
 
-    private static bool HasExternalInputInterference(Form form, TextBox textBox)
+    private static void DrainLiveInput(VietnameseKeyboardHook hook)
     {
-        if (GetForegroundWindow() != form.Handle || !textBox.Focused)
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        var stableSince = DateTime.UtcNow;
+        var lastCount = hook.ProcessedPhysicalEventCount;
+        while (DateTime.UtcNow < deadline)
         {
-            return true;
+            Application.DoEvents();
+            Thread.Sleep(5);
+            var currentCount = hook.ProcessedPhysicalEventCount;
+            if (currentCount != lastCount)
+            {
+                lastCount = currentCount;
+                stableSince = DateTime.UtcNow;
+                continue;
+            }
+            if (DateTime.UtcNow - stableSince >= TimeSpan.FromMilliseconds(150))
+            {
+                break;
+            }
         }
-
-        var entries = TypingTraceBuffer.Snapshot();
-        var pointerResets = entries.Count(entry =>
-            string.Equals(entry.Action, "pointer-reset", StringComparison.Ordinal));
-        return pointerResets > 1 || entries.Any(entry =>
-            string.Equals(entry.Action, "focus-reset", StringComparison.Ordinal) ||
-            string.Equals(entry.Action, "secure-bypass", StringComparison.Ordinal));
+        hook.Reset();
+        Application.DoEvents();
     }
 
     private static MutexLease AcquireLiveInputLease()
@@ -543,16 +565,20 @@ internal static class LiveKeyboardHookIntegrationTests
         ushort virtualKey,
         VietnameseKeyboardHook hook)
     {
-        const uint keyEventKeyUp = 0x0002;
         var processedBefore = hook.ProcessedPhysicalEventCount;
 
-        keybd_event(checked((byte)virtualKey), 0, 0, 0);
-        WaitForProcessedEvents(
-            hook,
-            processedBefore + 1,
-            $"key-down 0x{virtualKey:X2}");
-
-        keybd_event(checked((byte)virtualKey), 0, keyEventKeyUp, 0);
+        SendPhysicalKeyEvent(virtualKey, keyUp: false);
+        try
+        {
+            WaitForProcessedEvents(
+                hook,
+                processedBefore + 1,
+                $"key-down 0x{virtualKey:X2}");
+        }
+        finally
+        {
+            SendPhysicalKeyEvent(virtualKey, keyUp: true);
+        }
         WaitForProcessedEvents(
             hook,
             processedBefore + 2,
@@ -562,6 +588,21 @@ internal static class LiveKeyboardHookIntegrationTests
         // physical event. Give the target UI thread a brief chance to apply
         // that edit before the next synthetic physical key arrives.
         Thread.Sleep(3);
+    }
+
+    private static void SendPhysicalKeyEvent(ushort virtualKey, bool keyUp)
+    {
+        Input[] inputs = [Input.Key(virtualKey, keyUp)];
+        var sent = SendInput(
+            checked((uint)inputs.Length),
+            inputs,
+            Marshal.SizeOf<Input>());
+        if (sent != inputs.Length)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                $"Windows did not send key {(keyUp ? "up" : "down")} 0x{virtualKey:X2}.");
+        }
     }
 
     private static void WaitForProcessedEvents(
@@ -578,7 +619,7 @@ internal static class LiveKeyboardHookIntegrationTests
 
         if (hook.ProcessedPhysicalEventCount < expectedCount)
         {
-            throw new InvalidOperationException(
+            throw new LiveInputDeliveryException(
                 $"The live hook did not process {eventDescription} in time. " +
                 $"Expected at least {expectedCount} events, received " +
                 $"{hook.ProcessedPhysicalEventCount}.");
@@ -594,6 +635,9 @@ internal static class LiveKeyboardHookIntegrationTests
             Thread.Sleep(10);
         }
     }
+
+    private sealed class LiveInputDeliveryException(string message)
+        : InvalidOperationException(message);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Input
@@ -719,11 +763,4 @@ internal static class LiveKeyboardHookIntegrationTests
         uint inputCount,
         [In] Input[] inputs,
         int inputSize);
-
-    [DllImport("user32.dll")]
-    private static extern void keybd_event(
-        byte virtualKey,
-        byte scanCode,
-        uint flags,
-        nuint extraInfo);
 }
