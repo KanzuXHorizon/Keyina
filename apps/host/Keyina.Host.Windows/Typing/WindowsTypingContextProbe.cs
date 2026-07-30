@@ -16,29 +16,36 @@ public static class WindowsTypingContextProbe
     public static VietnameseTypingContext Capture()
     {
         var info = new GuiThreadInfo { Size = GuiThreadInfoSize };
-        if (!GetGUIThreadInfo(0, ref info) || info.FocusWindow == 0)
+        if (!GetGUIThreadInfo(0, ref info))
         {
             return new VietnameseTypingContext(0, 0, ShouldBypassTyping: true);
         }
 
         var activeWindow = info.ActiveWindow != 0
             ? info.ActiveWindow
-            : info.FocusWindow;
+            : GetForegroundWindow();
+        var focusWindow = info.FocusWindow != 0
+            ? info.FocusWindow
+            : activeWindow;
+        if (activeWindow == 0 || focusWindow == 0)
+        {
+            return new VietnameseTypingContext(0, 0, ShouldBypassTyping: true);
+        }
         var processId = ResolveProcessId(activeWindow);
         if (processId == 0)
         {
             return new VietnameseTypingContext(
                 0,
-                info.FocusWindow,
+                focusWindow,
                 ShouldBypassTyping: true);
         }
 
         Marshal.SetLastPInvokeError(0);
-        var style = GetWindowLongPtrW(info.FocusWindow, GlobalWindowStyle);
+        var style = GetWindowLongPtrW(focusWindow, GlobalWindowStyle);
         var styleReadFailed = style == 0 && Marshal.GetLastPInvokeError() != 0;
         return new VietnameseTypingContext(
             processId,
-            info.FocusWindow,
+            focusWindow,
             styleReadFailed || (style & EditStylePassword) != 0);
     }
 
@@ -76,6 +83,9 @@ public static class WindowsTypingContextProbe
         public nint CaretWindow;
         public System.Drawing.Rectangle CaretRectangle;
     }
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(

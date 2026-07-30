@@ -108,10 +108,11 @@ KEYINA_TEST(repeated_tone_key_escapes_back_to_literal_telex) {
 }
 
 KEYINA_TEST(keeps_latin_tokens_literal_while_they_are_still_being_typed) {
-  constexpr std::array<std::u32string_view, 4> cases = {{
+  constexpr std::array<std::u32string_view, 5> cases = {{
       U"user",
       U"research",
       U"tele",
+      U"fix",
       U"Uk362src",
   }};
 

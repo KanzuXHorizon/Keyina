@@ -33,6 +33,26 @@ internal static class ClipboardSelectionAccessorTests
             "The original clipboard snapshot was not restored.");
     }
 
+    [KeyinaTest("clipboard selection capture uses the foreground window when Chromium exposes no focused child")]
+    private static void ChromiumFocusFallbackCapturesSelection()
+    {
+        var platform = new FakeClipboardPlatform
+        {
+            ForegroundWindow = (nint)42,
+            FocusedWindow = nint.Zero,
+            ClipboardSequence = 10,
+            SelectedText = "Đoạn đã chọn",
+        };
+        var accessor = new ClipboardSelectionAccessor(platform);
+
+        var capture = accessor.CaptureAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.NotNull(capture, "Chromium selection was rejected because no child HWND was reported.");
+        AssertEx.Equal((nint)42, capture!.FocusedWindow);
+        AssertEx.Equal("Đoạn đã chọn", capture.Text);
+    }
+
     [KeyinaTest("clipboard selection capture returns no selection when copy produces no Unicode text")]
     private static void EmptyCopyReturnsNoSelection()
     {

@@ -52,8 +52,11 @@ public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
     {
         var foregroundWindow = platform.GetForegroundWindow();
         var focusedWindow = platform.GetFocusedWindow();
+        if (focusedWindow == nint.Zero)
+        {
+            focusedWindow = foregroundWindow;
+        }
         if (foregroundWindow == nint.Zero ||
-            focusedWindow == nint.Zero ||
             platform.GetForegroundWindow() != foregroundWindow)
         {
             return null;

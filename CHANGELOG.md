@@ -20,6 +20,9 @@ The format is based on Keep a Changelog, and the project intends to use Semantic
 
 ### Changed
 
+- Telex composition now follows reversible buffer and repeated-key escape behavior for flexible key order without rewriting visible text at word boundaries.
+- Speech dictation tolerates the short TSF target reconnect window caused by global hotkeys before reporting that no text field is active.
+- Overview status cards now fill their grid cells, avoid horizontal overflow, and use clearer Vietnamese status copy.
 - The keyboard-hook backend is now the default typing path.
 - The Windows TSF backend is optional and disabled by default.
 - Translation configuration is provider-neutral and stores DeepL and LibreTranslate credentials separately in Windows Credential Manager.

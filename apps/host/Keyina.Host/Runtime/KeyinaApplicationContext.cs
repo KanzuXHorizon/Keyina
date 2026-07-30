@@ -72,6 +72,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private ModifierKeyboardHook? modifierHook;
     private VietnameseKeyboardHook? typingHook;
     private NamedPipeEnvelopeServer? pipeServer;
+    private ActivePipeEnvelopeWriter? textEnvelopeWriter;
     private DictationCoordinator? dictationCoordinator;
     private DictationOverlayModel? dictationOverlay;
     private FeedbackCoordinator? feedbackCoordinator;
@@ -602,13 +603,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             dictationOverlay = new DictationOverlayModel();
             dictationOverlay.StateChanged += (_, _) =>
                 PostSignal(HandleDictationStateChanged);
+            textEnvelopeWriter = new ActivePipeEnvelopeWriter(pipeServer);
             dictationCoordinator = new DictationCoordinator(
                 new SpeechmaticsSessionFactory(),
                 new WasapiMicrophoneCapture(),
-                new ActivePipeEnvelopeWriter(pipeServer),
+                textEnvelopeWriter,
                 dictationOverlay,
                 hostEvent => PostSignal(() => ApplyHostEvent(hostEvent)),
-                () => pipeServer.ActiveTarget?.FocusGeneration ?? 0,
+                () => textEnvelopeWriter.CurrentFocusGeneration,
                 TimeSpan.FromSeconds(5));
         }
     }
@@ -1086,14 +1088,12 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     "Nhập giọng nói đã tắt cho ứng dụng này"));
                 return;
             }
-            var target = pipeServer?.ActiveTarget;
-            if (target is null && pipeServer is not null)
-            {
-                target = await pipeServer.WaitForActiveTargetAsync(
+            var target = textEnvelopeWriter is null
+                ? null
+                : await textEnvelopeWriter.CaptureTargetAsync(
                         ActiveTextTargetReconnectGrace,
                         cancellationToken)
                     .ConfigureAwait(true);
-            }
             if (target is null)
             {
                 ReportFailure("speech_no_focused_app");

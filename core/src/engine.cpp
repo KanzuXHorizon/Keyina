@@ -456,11 +456,16 @@ void Engine::BuildVisibleForRaw() {
   const GuardResult guard = ClassifyToken(raw_keys_, context);
   if (guard.transform) {
     ComposeRaw(composition_buffer_);
-    if (config_.restore_invalid_word && composition_buffer_ != raw_keys_ &&
-        HasSuspiciousToneBeforeNewVowel(raw_keys_) &&
-        AnalyzeVietnameseSyllable(composition_buffer_).status !=
-            SyllableStatus::Valid) {
-      composition_buffer_.assign(raw_keys_);
+    if (config_.restore_invalid_word && composition_buffer_ != raw_keys_) {
+      const auto analysis = AnalyzeVietnameseSyllable(composition_buffer_);
+      const bool irreversible_invalid_prefix =
+          analysis.error == SyllableError::InvalidOnset ||
+          analysis.error == SyllableError::InvalidOrthography;
+      if ((HasSuspiciousToneBeforeNewVowel(raw_keys_) &&
+           analysis.status != SyllableStatus::Valid) ||
+          irreversible_invalid_prefix) {
+        composition_buffer_.assign(raw_keys_);
+      }
     }
   } else {
     composition_buffer_.assign(raw_keys_);
