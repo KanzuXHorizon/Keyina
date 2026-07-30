@@ -1,5 +1,6 @@
 #include <keyina/context_guard.h>
 
+#include <cassert>
 #include <cstddef>
 #include <string_view>
 
@@ -182,10 +183,8 @@ bool IsShellToken(std::u32string_view token) noexcept {
          token.find(U'=') != std::u32string_view::npos;
 }
 
-}  // namespace
-
-GuardResult ClassifyToken(std::u32string_view token,
-                          const GuardContext& context) noexcept {
+GuardResult ClassifyTokenReference(std::u32string_view token,
+                                   const GuardContext& context) noexcept {
   if (context.modifier_chord) {
     return {false, GuardReason::ModifierChord};
   }
@@ -211,6 +210,51 @@ GuardResult ClassifyToken(std::u32string_view token,
     return {false, GuardReason::ApplicationBypass};
   }
   return {true, GuardReason::None};
+}
+
+GuardResult ClassifyTokenFast(std::u32string_view token,
+                              const GuardContext& context) noexcept {
+  if (context.modifier_chord) {
+    return {false, GuardReason::ModifierChord};
+  }
+
+  bool previous_lower = false;
+  bool ascii_identifier_eligible = true;
+  bool case_transition = false;
+  for (const char32_t value : token) {
+    if (IsAsciiLetter(value)) {
+      case_transition = case_transition ||
+                        (ascii_identifier_eligible && previous_lower &&
+                         IsAsciiUpper(value));
+      previous_lower = IsAsciiLower(value);
+      continue;
+    }
+    if (value > 0x7FU) {
+      ascii_identifier_eligible = false;
+      previous_lower = false;
+      continue;
+    }
+    return ClassifyTokenReference(token, context);
+  }
+
+  if (ascii_identifier_eligible && case_transition) {
+    return {false, GuardReason::Identifier};
+  }
+  if (context.application_bypass) {
+    return {false, GuardReason::ApplicationBypass};
+  }
+  return {true, GuardReason::None};
+}
+
+}  // namespace
+
+GuardResult ClassifyToken(std::u32string_view token,
+                          const GuardContext& context) noexcept {
+  const GuardResult result = ClassifyTokenFast(token, context);
+#ifndef NDEBUG
+  assert(result == ClassifyTokenReference(token, context));
+#endif
+  return result;
 }
 
 }  // namespace keyina

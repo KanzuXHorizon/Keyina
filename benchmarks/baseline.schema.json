@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://keyina.dev/schemas/benchmark-result-v1.json",
+  "$id": "https://keyina.dev/schemas/benchmark-result-v2.json",
   "title": "Keyina benchmark result",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "environment", "cases", "checksum"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "environment": {
       "type": "object",
       "additionalProperties": false,
@@ -33,13 +33,25 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "median_ns", "p95_ns", "p99_ns", "max_ns"],
+        "required": [
+          "name",
+          "median_ns",
+          "p95_ns",
+          "p99_ns",
+          "max_ns",
+          "allocations_per_operation",
+          "allocation_budget",
+          "budget_pass"
+        ],
         "properties": {
           "name": {"type": "string", "minLength": 1},
           "median_ns": {"type": "number", "minimum": 0},
           "p95_ns": {"type": "number", "minimum": 0},
           "p99_ns": {"type": "number", "minimum": 0},
-          "max_ns": {"type": "number", "minimum": 0}
+          "max_ns": {"type": "number", "minimum": 0},
+          "allocations_per_operation": {"type": "number", "minimum": 0},
+          "allocation_budget": {"type": "number", "minimum": 0},
+          "budget_pass": {"type": "boolean"}
         }
       }
     },

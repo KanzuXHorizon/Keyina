@@ -1,5 +1,6 @@
 add_executable(keyina_tests
   context_guard_test.cpp
+  engine_endurance_test.cpp
   engine_flexible_telex_test.cpp
   engine_history_test.cpp
   engine_letter_test.cpp

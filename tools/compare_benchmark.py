@@ -31,6 +31,26 @@ def _case_map(document: dict[str, Any], label: str) -> dict[str, dict[str, Any]]
     return result
 
 
+def _validate_v2_case(case: dict[str, Any], label: str, name: str) -> None:
+    allocations = case.get("allocations_per_operation")
+    budget = case.get("allocation_budget")
+    budget_pass = case.get("budget_pass")
+    if (
+        not isinstance(allocations, (int, float))
+        or isinstance(allocations, bool)
+        or allocations < 0
+    ):
+        raise ValueError(
+            f"{label}: case {name!r} has invalid allocations_per_operation"
+        )
+    if not isinstance(budget, (int, float)) or isinstance(budget, bool) or budget < 0:
+        raise ValueError(f"{label}: case {name!r} has invalid allocation_budget")
+    if not isinstance(budget_pass, bool):
+        raise ValueError(f"{label}: case {name!r} has invalid budget_pass")
+    if budget_pass != (float(allocations) <= float(budget)):
+        raise ValueError(f"{label}: case {name!r} has inconsistent budget_pass")
+
+
 def compare_documents(
     baseline: dict[str, Any],
     current: dict[str, Any],
@@ -46,12 +66,24 @@ def compare_documents(
             "schema_version mismatch: "
             f"baseline={baseline_schema} current={current_schema}"
         ]
-    if baseline_schema != 1:
+    if baseline_schema not in {1, 2}:
         return [f"unsupported schema_version: {baseline_schema}"]
 
     baseline_cases = _case_map(baseline, "baseline")
     current_cases = _case_map(current, "current")
     errors: list[str] = []
+
+    if current_schema == 2:
+        for name, case in baseline_cases.items():
+            _validate_v2_case(case, "baseline", name)
+        for name, case in current_cases.items():
+            _validate_v2_case(case, "current", name)
+            if not case["budget_pass"]:
+                errors.append(
+                    f"{name}: allocation budget failed "
+                    f"({float(case['allocations_per_operation']):.2f} > "
+                    f"{float(case['allocation_budget']):.2f})"
+                )
 
     for name, baseline_case in baseline_cases.items():
         current_case = current_cases.get(name)

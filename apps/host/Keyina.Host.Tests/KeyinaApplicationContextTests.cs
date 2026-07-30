@@ -1,6 +1,9 @@
+using System.Reflection;
+using Keyina.Host.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Runtime;
+using Keyina.Host.UI;
 using Keyina.Host.UI.Feedback;
 using Keyina.Host.Windows.Feedback;
 
@@ -99,6 +102,54 @@ internal static class KeyinaApplicationContextTests
         AssertEx.Equal(1, sound.Cues.Count);
     }
 
+    [KeyinaTest("resident settings persist feedback mode and preview the selected channels")]
+    private static void FeedbackSettingsPersistAndPreview()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var overlay = new RecordingOverlay();
+        var sound = new RecordingSoundPlayer();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            ForegroundPresentationProbeFactory =
+                static () => new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = () => overlay,
+            FeedbackSoundPlayerFactory = () => sound,
+        };
+
+        using var context = new KeyinaApplicationContext(options);
+        context.OpenSettings();
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        var form = (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Settings form was not created.");
+        var selector = (ComboBox)form.Controls.Find("feedbackMode", true).Single();
+        var preview = (Button)form.Controls.Find("previewFeedback", true).Single();
+
+        selector.SelectedIndex = 2;
+        InvokeClick(preview);
+
+        AssertEx.Equal(FeedbackMode.AudioOnly, context.CurrentSettingsSnapshot.FeedbackMode);
+        AssertEx.Equal(0, overlay.Events.Count);
+        AssertEx.Equal(1, sound.Cues.Count);
+        AssertEx.True(
+            SpinWait.SpinUntil(
+                () => ConfigurationSaveCompleted(
+                    configurationPath,
+                    FeedbackMode.AudioOnly),
+                TimeSpan.FromSeconds(2)),
+            "Feedback settings were not persisted atomically.");
+        var persisted = new AtomicConfigurationStore(configurationPath)
+            .LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        AssertEx.Equal(FeedbackMode.AudioOnly, persisted.Feedback!.Mode);
+        context.CloseSettings();
+    }
+
     [KeyinaTest("resident context never reports ready without native TSF and focused typing evidence")]
     private static void RuntimeReadinessIsTruthful()
     {
@@ -142,6 +193,41 @@ internal static class KeyinaApplicationContextTests
         {
             AssertEx.True(commands.Contains(expected, StringComparer.Ordinal),
                 $"Tray command {expected} was missing.");
+        }
+    }
+
+    private static void InvokeClick(Button button)
+    {
+        var onClick = button.GetType().GetMethod(
+            "OnClick",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Button click handler could not be invoked.");
+        _ = onClick.Invoke(button, [EventArgs.Empty]);
+    }
+
+    private static bool ConfigurationSaveCompleted(
+        string path,
+        FeedbackMode expectedMode)
+    {
+        if (!File.Exists(path) || File.Exists(path + ".tmp"))
+        {
+            return false;
+        }
+
+        try
+        {
+            var persisted = new AtomicConfigurationStore(path)
+                .LoadAsync(CancellationToken.None)
+                .GetAwaiter().GetResult();
+            return persisted.Feedback?.Mode == expectedMode;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

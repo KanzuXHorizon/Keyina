@@ -10,6 +10,7 @@ internal static class LiveKeyboardHookIntegrationTests
     [KeyinaTest("live Windows hook types Vietnamese into a focused textbox without TSF")]
     private static void LiveHookTypesIntoFocusedTextbox()
     {
+        using var liveInputLease = AcquireLiveInputLease();
         using var form = new Form
         {
             Text = $"Keyina Hook Test {Guid.NewGuid():N}",
@@ -31,7 +32,7 @@ internal static class LiveKeyboardHookIntegrationTests
         hook.Start(enabledInitially: true);
         EnsureForeground(form, textBox);
 
-        SendAscii("tieengs vieetj");
+        SendAscii("tieengs vieetj", hook);
         PumpUntil(
             () => string.Equals(textBox.Text, "tiếng việt", StringComparison.Ordinal),
             TimeSpan.FromSeconds(3));
@@ -41,7 +42,7 @@ internal static class LiveKeyboardHookIntegrationTests
         EnsureForeground(form, textBox);
         textBox.SelectAll();
         hook.Reset();
-        SendAscii("as");
+        SendAscii("as", hook);
         PumpUntil(
             () => string.Equals(textBox.Text, "á", StringComparison.Ordinal),
             TimeSpan.FromSeconds(3));
@@ -61,14 +62,22 @@ internal static class LiveKeyboardHookIntegrationTests
         var expected = new StringBuilder();
         for (var iteration = 0; iteration < 20; iteration++)
         {
+            EnsureForeground(form, textBox);
             var testCase = burstCases[iteration % burstCases.Length];
-            SendAscii(testCase.Raw, pumpEachKey: true);
+            SendAscii(testCase.Raw, hook);
             expected.Append(testCase.Expected);
+            var expectedText = expected.ToString();
+            PumpUntil(
+                () => string.Equals(textBox.Text, expectedText, StringComparison.Ordinal),
+                TimeSpan.FromSeconds(5));
+            AssertEx.Equal(
+                expectedText,
+                textBox.Text,
+                CreateStressMismatchMessage(
+                    iteration + 1,
+                    expectedText,
+                    textBox.Text));
         }
-        PumpUntil(
-            () => textBox.Text.Length >= expected.Length,
-            TimeSpan.FromSeconds(5));
-        AssertEx.Equal(expected.ToString(), textBox.Text);
 
         EnsureForeground(form, textBox);
         textBox.Text = "nội dung cũ cần thay";
@@ -92,6 +101,57 @@ internal static class LiveKeyboardHookIntegrationTests
         hook.Dispose();
         form.Close();
         Application.DoEvents();
+    }
+
+    private static MutexLease AcquireLiveInputLease()
+    {
+        var mutex = new Mutex(
+            initiallyOwned: false,
+            name: @"Local\Keyina.Host.Tests.LiveKeyboardInput");
+        try
+        {
+            try
+            {
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(30)))
+                {
+                    throw new InvalidOperationException(
+                        "Timed out waiting for exclusive access to live Windows input.");
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                // Windows grants ownership when the previous test process ended
+                // without releasing the desktop-input lease.
+            }
+            return new MutexLease(mutex);
+        }
+        catch
+        {
+            mutex.Dispose();
+            throw;
+        }
+    }
+
+    private static string CreateStressMismatchMessage(
+        int iteration,
+        string expected,
+        string actual)
+    {
+        var mismatch = 0;
+        var commonLength = Math.Min(expected.Length, actual.Length);
+        while (mismatch < commonLength && expected[mismatch] == actual[mismatch])
+        {
+            mismatch++;
+        }
+
+        const int contextLength = 48;
+        var contextStart = Math.Max(0, mismatch - contextLength);
+        var expectedTail = expected[contextStart..];
+        var actualTail = actual.Length > contextStart
+            ? actual[contextStart..]
+            : string.Empty;
+        return $"Live hook diverged at stress iteration {iteration}, index {mismatch}. " +
+            $"Expected tail '{expectedTail}', actual tail '{actualTail}'.";
     }
 
     private static void EnsureForeground(Form form, TextBox textBox)
@@ -164,42 +224,102 @@ internal static class LiveKeyboardHookIntegrationTests
         keybd_event(control, 0, keyEventKeyUp, 0);
     }
 
-    private static void SendAscii(string text, bool pumpEachKey = true)
+    private static void SendAscii(string text, VietnameseKeyboardHook hook)
     {
-        var queuedSincePump = 0;
-        foreach (var character in text)
+        ArgumentException.ThrowIfNullOrEmpty(text);
+        ArgumentNullException.ThrowIfNull(hook);
+
+        Exception? workerFailure = null;
+        using var completed = new ManualResetEventSlim();
+        var worker = new Thread(() =>
         {
-            if (character == ' ')
+            try
             {
-                SendVirtualKey(0x20, pumpEachKey);
+                foreach (var character in text)
+                {
+                    var virtualKey = character == ' '
+                        ? checked((ushort)0x20)
+                        : checked((ushort)char.ToUpperInvariant(character));
+                    SendVirtualKeyFromWorker(virtualKey, hook);
+                }
             }
-            else
+            catch (Exception exception)
             {
-                var virtualKey = checked((ushort)char.ToUpperInvariant(character));
-                SendVirtualKey(virtualKey, pumpEachKey);
+                workerFailure = exception;
             }
+            finally
+            {
+                completed.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Keyina live-hook input source",
+        };
 
-            if (!pumpEachKey && ++queuedSincePump >= 8)
-            {
-                Application.DoEvents();
-                queuedSincePump = 0;
-            }
-        }
-
-        if (!pumpEachKey)
+        worker.Start();
+        var timeout = TimeSpan.FromSeconds(Math.Max(5, text.Length * 0.05));
+        var deadline = DateTime.UtcNow + timeout;
+        while (!completed.IsSet && DateTime.UtcNow < deadline)
         {
             Application.DoEvents();
+            Thread.Sleep(1);
         }
+
+        AssertEx.True(completed.IsSet, "The live-hook input worker timed out.");
+        worker.Join();
+        if (workerFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "The live-hook input worker failed.",
+                workerFailure);
+        }
+        Application.DoEvents();
     }
 
-    private static void SendVirtualKey(ushort virtualKey, bool pumpEachKey = true)
+    private static void SendVirtualKeyFromWorker(
+        ushort virtualKey,
+        VietnameseKeyboardHook hook)
     {
         const uint keyEventKeyUp = 0x0002;
+        var processedBefore = hook.ProcessedPhysicalEventCount;
+
         keybd_event(checked((byte)virtualKey), 0, 0, 0);
+        WaitForProcessedEvents(
+            hook,
+            processedBefore + 1,
+            $"key-down 0x{virtualKey:X2}");
+
         keybd_event(checked((byte)virtualKey), 0, keyEventKeyUp, 0);
-        if (pumpEachKey)
+        WaitForProcessedEvents(
+            hook,
+            processedBefore + 2,
+            $"key-up 0x{virtualKey:X2}");
+
+        // The hook callback can enqueue Unicode replacement input after the
+        // physical event. Give the target UI thread a brief chance to apply
+        // that edit before the next synthetic physical key arrives.
+        Thread.Sleep(3);
+    }
+
+    private static void WaitForProcessedEvents(
+        VietnameseKeyboardHook hook,
+        long expectedCount,
+        string eventDescription)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (hook.ProcessedPhysicalEventCount < expectedCount &&
+               DateTime.UtcNow < deadline)
         {
-            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+
+        if (hook.ProcessedPhysicalEventCount < expectedCount)
+        {
+            throw new InvalidOperationException(
+                $"The live hook did not process {eventDescription} in time. " +
+                $"Expected at least {expectedCount} events, received " +
+                $"{hook.ProcessedPhysicalEventCount}.");
         }
     }
 
@@ -210,6 +330,29 @@ internal static class LiveKeyboardHookIntegrationTests
         {
             Application.DoEvents();
             Thread.Sleep(10);
+        }
+    }
+
+    private sealed class MutexLease(Mutex mutex) : IDisposable
+    {
+        private Mutex? ownedMutex = mutex;
+
+        public void Dispose()
+        {
+            var mutex = Interlocked.Exchange(ref ownedMutex, null);
+            if (mutex is null)
+            {
+                return;
+            }
+
+            try
+            {
+                mutex.ReleaseMutex();
+            }
+            finally
+            {
+                mutex.Dispose();
+            }
         }
     }
 

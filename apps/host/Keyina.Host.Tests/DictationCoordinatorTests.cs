@@ -75,7 +75,10 @@ internal static class DictationCoordinatorTests
             Reason = "redacted",
         });
 
-        await WaitUntilAsync(() => coordinator.State.Status == DictationStatus.Error);
+        await WaitUntilAsync(() =>
+            coordinator.State.Status == DictationStatus.Error &&
+            hostState.ErrorCode == "speech_provider_error" &&
+            !hostState.Listening);
         AssertEx.True(hostState.VietnameseEnabled, "Speech failure disabled native Vietnamese input.");
         AssertEx.True(!hostState.Listening, "Speech failure left listening state active.");
         AssertEx.Equal("speech_provider_error", hostState.ErrorCode);

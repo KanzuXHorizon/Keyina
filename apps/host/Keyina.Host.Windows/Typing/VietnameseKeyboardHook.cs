@@ -33,6 +33,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private readonly bool[] suppressedKeys = new bool[256];
     private IDisposable? installation;
     private IDisposable? mouseInstallation;
+    private long processedPhysicalEventCount;
     private int foregroundProcessId;
     private bool enabled;
     private bool disposed;
@@ -48,6 +49,9 @@ public sealed class VietnameseKeyboardHook : IDisposable
     }
 
     public bool IsRunning => installation is not null;
+
+    public long ProcessedPhysicalEventCount =>
+        Interlocked.Read(ref processedPhysicalEventCount);
 
     public void Start(bool enabledInitially)
     {
@@ -103,12 +107,19 @@ public sealed class VietnameseKeyboardHook : IDisposable
         var keyIndex = keyboardEvent.VirtualKey;
         if (!keyboardEvent.IsKeyDown)
         {
-            if ((uint)keyIndex < (uint)suppressedKeys.Length && suppressedKeys[keyIndex])
+            try
             {
-                suppressedKeys[keyIndex] = false;
-                return true;
+                if ((uint)keyIndex < (uint)suppressedKeys.Length && suppressedKeys[keyIndex])
+                {
+                    suppressedKeys[keyIndex] = false;
+                    return true;
+                }
+                return false;
             }
-            return false;
+            finally
+            {
+                Interlocked.Increment(ref processedPhysicalEventCount);
+            }
         }
 
         var profiling = TypingLatencyProfiler.IsEnabled;
@@ -292,6 +303,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
                     TypingLatencyStage.CallbackTotal,
                     callbackStartedAt);
             }
+            Interlocked.Increment(ref processedPhysicalEventCount);
         }
     }
 

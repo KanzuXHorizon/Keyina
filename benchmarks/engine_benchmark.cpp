@@ -338,7 +338,7 @@ int main() {
       kWarmup, kIterations, checksum));
 
   std::cout << "{\n"
-            << "  \"schema_version\": 1,\n"
+            << "  \"schema_version\": 2,\n"
             << "  \"environment\": {\n"
             << "    \"os\": \"" << JsonEscape(OperatingSystem()) << "\",\n"
             << "    \"processor\": \"" << JsonEscape(Processor()) << "\",\n"
