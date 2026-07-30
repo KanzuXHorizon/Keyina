@@ -99,18 +99,18 @@ foreach ($line in Get-Content -LiteralPath $checksumsPath) {
 }
 
 $publishDir = Join-Path $artifactRoot ([string]$manifest.runtime_identifier)
-$host = Join-Path $publishDir 'Keyina.Host.exe'
-if (-not (Test-Path -LiteralPath $host -PathType Leaf)) {
-    throw "Published host not found: $host"
+$publishedHost = Join-Path $publishDir 'Keyina.Host.exe'
+if (-not (Test-Path -LiteralPath $publishedHost -PathType Leaf)) {
+    throw "Published host not found: $publishedHost"
 }
 
-$versionResult = Invoke-CheckedCapturedProcess $host '--version' $publishDir
+$versionResult = Invoke-CheckedCapturedProcess $publishedHost '--version' $publishDir
 $reportedVersion = (($versionResult.StandardOutput -split "`r?`n") | Select-Object -First 1).Trim()
 if ($reportedVersion -ne [string]$manifest.version) {
     throw "Published host reports '$reportedVersion'; manifest expects '$($manifest.version)'."
 }
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
-    $null = Invoke-CheckedCapturedProcess $host $selfTest $publishDir
+    $null = Invoke-CheckedCapturedProcess $publishedHost $selfTest $publishDir
 }
 
 if ([bool]$manifest.signed) {
