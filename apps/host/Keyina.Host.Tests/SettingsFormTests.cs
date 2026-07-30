@@ -226,6 +226,26 @@ internal static class SettingsFormTests
         AssertEx.False(results[1], "Failed focused typing was not recorded.");
     }
 
+    [KeyinaTest("diagnostics exposes safe settings import and export controls")]
+    private static void DiagnosticsExposesSafeSettingsPortability()
+    {
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample,
+            SettingsActions.NoOp);
+
+        AssertEx.Equal(1, form.Controls.Find("exportSettings", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("importSettings", true).Length);
+        var privacy = (Label)form.Controls.Find(
+            "settingsPortabilityPrivacy",
+            true).Single();
+        AssertEx.True(
+            privacy.Text.Contains("API key", StringComparison.OrdinalIgnoreCase),
+            "Settings portability copy did not exclude API keys.");
+        AssertEx.True(
+            privacy.Text.Contains("không bao giờ", StringComparison.OrdinalIgnoreCase),
+            "Settings portability copy did not make the privacy invariant explicit.");
+    }
+
     [KeyinaTest("diagnostics exposes opt-in per-stage typing latency without content capture")]
     private static void DiagnosticsExposesTypingLatency()
     {

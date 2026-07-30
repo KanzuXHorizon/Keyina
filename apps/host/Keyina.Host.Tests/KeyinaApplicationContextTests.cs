@@ -224,6 +224,148 @@ internal static class KeyinaApplicationContextTests
             "Custom shortcut was not persisted atomically.");
     }
 
+    [KeyinaTest("new installations show first-run once and persist completion")]
+    private static void NewInstallationFirstRunPersistsCompletion()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            DisplaySettingsWindows = true,
+        };
+
+        using (var context = new KeyinaApplicationContext(options))
+        {
+            AssertEx.True(context.FirstRunCreated,
+                "New installation did not show first-run guidance.");
+            var method = typeof(KeyinaApplicationContext).GetMethod(
+                "CompleteFirstRun",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("CompleteFirstRun method was not found.");
+            _ = method.Invoke(context, null);
+            AssertEx.True(
+                SpinWait.SpinUntil(
+                    () => File.Exists(configurationPath) &&
+                        new AtomicConfigurationStore(configurationPath)
+                            .LoadAsync(CancellationToken.None)
+                            .GetAwaiter().GetResult()
+                            .FirstRunCompleted == true,
+                    TimeSpan.FromSeconds(2)),
+                "First-run completion was not persisted.");
+        }
+
+        using var restarted = new KeyinaApplicationContext(options);
+        AssertEx.False(restarted.FirstRunCreated,
+            "Completed first-run guidance appeared again after restart.");
+    }
+
+    [KeyinaTest("existing configurations never reopen first-run guidance")]
+    private static void ExistingConfigurationSkipsFirstRun()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { FirstRunCompleted = true },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            DisplaySettingsWindows = true,
+        };
+
+        using var context = new KeyinaApplicationContext(options);
+
+        AssertEx.False(context.FirstRunCreated,
+            "Existing configuration incorrectly reopened first-run guidance.");
+    }
+
+    [KeyinaTest("resident context imports portable settings atomically without credentials")]
+    private static void RuntimeImportsPortableSettingsAtomically()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var importPath = Path.Combine(directory.Path, "import.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        var importedHotkeys = HotkeyPreferences.Default with
+        {
+            ToggleDictation = HotkeyPreferences.Default.ToggleDictation with
+            {
+                Chord = new HotkeyChord(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    VirtualKey.D),
+            },
+        };
+        var candidate = KeyinaConfiguration.Default with
+        {
+            VietnameseEnabled = false,
+            SpeechEnabled = true,
+            TranslationTargetLanguage = "JA",
+            Hotkeys = importedHotkeys,
+            FirstRunCompleted = false,
+        };
+        PortableSettingsService.ExportAsync(
+                importPath,
+                candidate,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(options);
+        var method = typeof(KeyinaApplicationContext).GetMethod(
+            "ImportPortableSettings",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ImportPortableSettings method was not found.");
+        _ = method.Invoke(context, [importPath]);
+
+        AssertEx.False(context.CurrentState.VietnameseEnabled,
+            "Imported Vietnamese input state was not applied.");
+        AssertEx.Equal("JA", context.CurrentSettingsSnapshot.TranslationTargetLanguage);
+        AssertEx.Equal(importedHotkeys, context.CurrentSettingsSnapshot.Hotkeys);
+        AssertEx.True(
+            SpinWait.SpinUntil(
+                () => File.Exists(configurationPath) &&
+                    new AtomicConfigurationStore(configurationPath)
+                        .LoadAsync(CancellationToken.None)
+                        .GetAwaiter().GetResult()
+                        .FirstRunCompleted == true,
+                TimeSpan.FromSeconds(2)),
+            "Imported settings were not persisted or first-run was not normalized.");
+    }
+
+    [KeyinaTest("resident context keeps current settings when portable import is invalid")]
+    private static void RuntimeRejectsInvalidPortableSettings()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var importPath = Path.Combine(directory.Path, "invalid.json");
+        File.WriteAllText(importPath, "{\"format_version\":999}");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+
+        using var context = new KeyinaApplicationContext(options);
+        var before = context.CurrentSettingsSnapshot;
+        var method = typeof(KeyinaApplicationContext).GetMethod(
+            "ImportPortableSettings",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ImportPortableSettings method was not found.");
+        _ = method.Invoke(context, [importPath]);
+
+        AssertEx.Equal(before.Hotkeys, context.CurrentSettingsSnapshot.Hotkeys);
+        AssertEx.Equal(
+            before.TranslationTargetLanguage,
+            context.CurrentSettingsSnapshot.TranslationTargetLanguage);
+        AssertEx.Equal(
+            "settings_import_failed",
+            context.CurrentState.ErrorCode);
+    }
+
     [KeyinaTest("resident context never reports ready without native TSF and focused typing evidence")]
     private static void RuntimeReadinessIsTruthful()
     {

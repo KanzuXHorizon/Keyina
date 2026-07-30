@@ -25,6 +25,7 @@ public enum FeedbackEventKind
     TranslationStarted,
     TranslationCompleted,
     TranslationCancelled,
+    Success,
     Error,
     Preview,
 }

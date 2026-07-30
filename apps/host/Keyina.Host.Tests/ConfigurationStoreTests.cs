@@ -132,6 +132,23 @@ internal static class ConfigurationStoreTests
         AssertEx.Equal("EN-US", loaded.TranslationTargetLanguage);
     }
 
+    [KeyinaTest("schema one existing configuration skips first-run onboarding")]
+    private static void LegacySchemaOneSkipsFirstRunOnboarding()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        File.WriteAllText(
+            path,
+            "{\"schema_version\":1,\"vietnamese_enabled\":true,\"speech_enabled\":false,\"theme\":\"system\",\"snippets\":[]}");
+
+        var loaded = store.LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(true, loaded.FirstRunCompleted);
+        AssertEx.Equal(false, KeyinaConfiguration.Default.FirstRunCompleted);
+    }
+
     [KeyinaTest("schema one configuration without hotkeys uses safe familiar defaults")]
     private static void LegacySchemaOneUsesHotkeyDefaults()
     {

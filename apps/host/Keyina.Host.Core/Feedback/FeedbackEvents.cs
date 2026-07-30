@@ -86,6 +86,17 @@ public static class FeedbackEvents
         FeedbackSoundCue.Cancel,
         StandardDuration);
 
+    public static FeedbackEvent Success(string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        return new FeedbackEvent(
+            FeedbackEventKind.Success,
+            message,
+            FeedbackTone.Success,
+            FeedbackSoundCue.Success,
+            StandardDuration);
+    }
+
     public static FeedbackEvent Error(string message)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);

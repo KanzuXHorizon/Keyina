@@ -323,6 +323,7 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
         FeedbackEventKind.DictationFinalizing => "\uE823",
         FeedbackEventKind.DictationInserted => "\uE73E",
         FeedbackEventKind.DictationCancelled => "\uE711",
+        FeedbackEventKind.Success => "\uE73E",
         FeedbackEventKind.Error => "\uEA39",
         FeedbackEventKind.Preview => "\uE7F4",
         _ => "\uE946",

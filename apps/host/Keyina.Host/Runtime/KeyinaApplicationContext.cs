@@ -66,6 +66,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private DictationOverlayModel? dictationOverlay;
     private FeedbackCoordinator? feedbackCoordinator;
     private SettingsForm? settingsForm;
+    private FirstRunForm? firstRunForm;
     private int drainScheduled;
     private bool hotkeysReady;
     private bool translationHotkeyReady;
@@ -222,7 +223,12 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         InitializeFeedbackRuntime();
         InitializeOptionalRuntime();
         RefreshVisualState();
-        if (options.ShowSettingsOnStart)
+        if (configuration.FirstRunCompleted != true &&
+            options.DisplaySettingsWindows)
+        {
+            OpenFirstRun();
+        }
+        else if (options.ShowSettingsOnStart)
         {
             OpenSettings();
         }
@@ -233,6 +239,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     public SettingsSnapshot CurrentSettingsSnapshot => CreateSettingsSnapshot();
 
     public bool SettingsCreated => settingsForm is not null && !settingsForm.IsDisposed;
+
+    public bool FirstRunCreated => firstRunForm is not null && !firstRunForm.IsDisposed;
 
     public bool NotifyIconVisible => notifyIcon.Visible;
 
@@ -292,7 +300,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
-    public void OpenSettings()
+    public void OpenSettings(string? section = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (SettingsCreated)
@@ -302,12 +310,20 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 settingsForm.WindowState = FormWindowState.Normal;
             }
             settingsForm.Show();
+            if (!string.IsNullOrWhiteSpace(section))
+            {
+                settingsForm.OpenSection(section);
+            }
             settingsForm.Activate();
             return;
         }
 
         settingsForm = new SettingsForm(CreateSettingsSnapshot(), CreateSettingsActions());
         settingsForm.FormClosed += (_, _) => settingsForm = null;
+        if (!string.IsNullOrWhiteSpace(section))
+        {
+            settingsForm.OpenSection(section);
+        }
         if (options.DisplaySettingsWindows)
         {
             settingsForm.Show();
@@ -320,6 +336,46 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             settingsForm!.Close();
         }
+    }
+
+    private void OpenFirstRun()
+    {
+        if (FirstRunCreated)
+        {
+            firstRunForm!.Show();
+            firstRunForm.Activate();
+            return;
+        }
+
+        firstRunForm = new FirstRunForm(
+            section =>
+            {
+                CompleteFirstRun();
+                firstRunForm?.Close();
+                OpenSettings(section);
+            },
+            CompleteFirstRun);
+        firstRunForm.FormClosed += (_, _) =>
+        {
+            if (!disposed && configuration.FirstRunCompleted != true)
+            {
+                CompleteFirstRun();
+            }
+            firstRunForm = null;
+        };
+        firstRunForm.Show();
+    }
+
+    private void CompleteFirstRun()
+    {
+        if (configuration.FirstRunCompleted == true)
+        {
+            return;
+        }
+
+        configuration = configuration with { FirstRunCompleted = true };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
     }
 
     protected override void ExitThreadCore()
@@ -1060,6 +1116,98 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
+    private void ExportPortableSettings(string path)
+    {
+        try
+        {
+            PortableSettingsService.ExportAsync(
+                    path,
+                    configuration,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult();
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã xuất cài đặt"));
+        }
+        catch (Exception)
+        {
+            ReportFailure("settings_export_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể xuất cài đặt"));
+        }
+        RefreshVisualState();
+    }
+
+    private void ImportPortableSettings(string path)
+    {
+        var previous = configuration;
+        try
+        {
+            var candidate = PortableSettingsService.ImportAsync(
+                    path,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult() with
+            {
+                FirstRunCompleted = true,
+            };
+            _ = candidate.ValidateAndCreateSnippets();
+            if (!TryApplyHotkeyPreferences(candidate.Hotkeys, changedCommand: null))
+            {
+                ReportFailure("settings_import_hotkey_conflict");
+                PublishFeedback(FeedbackEvents.Error(
+                    "Không thể nhập vì phím tắt đang bị ứng dụng khác sử dụng"));
+                return;
+            }
+
+            configuration = candidate;
+            ApplyImportedConfigurationToRuntime();
+            configurationStore.SaveAsync(configuration, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã nhập cài đặt"));
+        }
+        catch (Exception)
+        {
+            configuration = previous;
+            try
+            {
+                _ = TryApplyHotkeyPreferences(previous.Hotkeys, changedCommand: null);
+                ApplyImportedConfigurationToRuntime();
+            }
+            catch (Exception)
+            {
+                // Preserve the original failure code; optional features remain fail-open.
+            }
+            ReportFailure("settings_import_failed");
+            PublishFeedback(FeedbackEvents.Error(
+                "File cài đặt không hợp lệ hoặc không thể áp dụng an toàn"));
+        }
+        finally
+        {
+            RefreshVisualState();
+        }
+    }
+
+    private void ApplyImportedConfigurationToRuntime()
+    {
+        state = HostReducer.Reduce(
+            state,
+            new InputModeChanged(configuration.VietnameseEnabled));
+        typingHook?.SetEnabled(configuration.VietnameseEnabled);
+        modifierHook?.Configure(
+            configuration.Hotkeys.ToggleVietnamese,
+            configuration.Hotkeys.PushToTalk);
+        try
+        {
+            feedbackCoordinator?.UpdatePreferences(
+                configuration.Feedback ?? FeedbackPreferences.Default);
+        }
+        catch (Exception)
+        {
+            // Feedback is optional and never blocks importing typing preferences.
+        }
+        UpdateTranslationHotkeyRegistration(
+            configuration.TranslationEnabled && IsDeepLCredentialConfigured());
+    }
+
     private SettingsActions CreateSettingsActions() => new(
         enabled => _ = SetVietnameseEnabledSafelyAsync(enabled),
         SetSpeechEnabled,
@@ -1137,6 +1285,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         SetHotkey = SetHotkey,
         ResetHotkey = ResetHotkey,
         ResetAllHotkeys = ResetAllHotkeys,
+        ExportSettings = ExportPortableSettings,
+        ImportSettings = ImportPortableSettings,
     };
 
     private static void SetTypingInstrumentationEnabled(bool enabled)
@@ -1459,6 +1609,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         lifetime.Cancel();
 
         CloseSettings();
+        firstRunForm?.Close();
+        firstRunForm?.Dispose();
+        firstRunForm = null;
         notifyIcon.Visible = false;
 
         feedbackCoordinator?.Dispose();

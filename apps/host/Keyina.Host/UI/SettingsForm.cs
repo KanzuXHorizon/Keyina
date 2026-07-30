@@ -662,6 +662,12 @@ public sealed class SettingsForm : Form
         navigationButtons.Add(pageKey, button);
     }
 
+    public void OpenSection(string pageKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pageKey);
+        ShowSection(pageKey);
+    }
+
     private void ShowSection(string pageKey)
     {
         if (!pages.TryGetValue(pageKey, out var selectedPage) ||
@@ -1558,6 +1564,64 @@ public sealed class SettingsForm : Form
         latencyLayout.SetColumnSpan(latencyActions, 2);
         stack.Controls.Add(latencyCard);
 
+        var portabilityCard = CreateCard("settingsPortabilityCard", 152);
+        var portabilityLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        portabilityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        portabilityLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+        portabilityLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        portabilityCard.Controls.Add(portabilityLayout);
+        var portabilityTitle = CreateLabel(
+            "settingsPortabilityTitle",
+            "Sao lưu và khôi phục cài đặt",
+            LabelRole.Heading);
+        portabilityTitle.Dock = DockStyle.Fill;
+        portabilityLayout.Controls.Add(portabilityTitle, 0, 0);
+        var portabilityActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 6, 0, 6),
+        };
+        var exportSettings = CreateButton(
+            "exportSettings",
+            "Xuất cài đặt",
+            FluentButtonKind.Primary,
+            132);
+        var importSettings = CreateButton(
+            "importSettings",
+            "Nhập cài đặt",
+            FluentButtonKind.Secondary,
+            132);
+        exportSettings.AccessibleDescription =
+            "Xuất preferences và gõ tắt sang JSON, không bao gồm API key.";
+        importSettings.AccessibleDescription =
+            "Nhập file JSON đã được Keyina kiểm tra đầy đủ trước khi áp dụng.";
+        exportSettings.Margin = new Padding(0, 0, 8, 0);
+        importSettings.Margin = Padding.Empty;
+        exportSettings.Click += (_, _) => ExportSettings();
+        importSettings.Click += (_, _) => ImportSettings();
+        portabilityActions.Controls.Add(exportSettings);
+        portabilityActions.Controls.Add(importSettings);
+        portabilityLayout.Controls.Add(portabilityActions, 0, 1);
+        var portabilityPrivacy = CreateLabel(
+            "settingsPortabilityPrivacy",
+            "API key, transcript, clipboard và nội dung đã gõ không bao giờ được đưa vào file xuất.",
+            LabelRole.Tertiary);
+        portabilityPrivacy.AccessibleDescription =
+            "File sao lưu chỉ chứa cài đặt không nhạy cảm; credential vẫn nằm trong Windows Credential Manager.";
+        portabilityPrivacy.Dock = DockStyle.Fill;
+        portabilityLayout.Controls.Add(portabilityPrivacy, 0, 2);
+        stack.Controls.Add(portabilityCard);
+
         var privacy = CreateCard("diagnosticsPrivacyCard", 116);
         privacy.Controls.Add(CreateIconTextLayout(
             "\uEA18",
@@ -2382,6 +2446,42 @@ public sealed class SettingsForm : Form
                 translationCredentialStatus,
                 "Không mở được trợ giúp",
                 FluentTone.Error);
+        }
+    }
+
+    private void ExportSettings()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Xuất cài đặt Keyina",
+            Filter = "Keyina settings (*.json)|*.json",
+            DefaultExt = "json",
+            AddExtension = true,
+            FileName = $"keyina-settings-{DateTime.Now:yyyy-MM-dd}.json",
+            OverwritePrompt = true,
+            RestoreDirectory = true,
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            actions.ExportSettings(dialog.FileName);
+        }
+    }
+
+    private void ImportSettings()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Nhập cài đặt Keyina",
+            Filter = "Keyina settings (*.json)|*.json",
+            DefaultExt = "json",
+            AddExtension = true,
+            CheckFileExists = true,
+            Multiselect = false,
+            RestoreDirectory = true,
+        };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            actions.ImportSettings(dialog.FileName);
         }
     }
 

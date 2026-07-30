@@ -60,13 +60,18 @@ public sealed record KeyinaConfiguration(
 
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
 
+    public bool? FirstRunCompleted { get; init; }
+
     public static KeyinaConfiguration Default { get; } = new(
         CurrentSchemaVersion,
         VietnameseEnabled: true,
         SpeechEnabled: false,
         KeyinaTheme.System,
         [],
-        FeedbackPreferences.Default);
+        FeedbackPreferences.Default)
+    {
+        FirstRunCompleted = false,
+    };
 
     public IReadOnlyList<SnippetDefinition> ValidateAndCreateSnippets()
     {
@@ -99,6 +104,11 @@ public sealed record KeyinaConfiguration(
             throw new ConfigurationValidationException(
                 "Configuration contains invalid hotkey preferences.",
                 exception);
+        }
+        if (FirstRunCompleted is null)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration first-run state is missing.");
         }
         if (Snippets is null)
         {

@@ -83,6 +83,10 @@ public sealed record SettingsActions(
 
     public Action ResetAllHotkeys { get; init; } = () => { };
 
+    public Action<string> ExportSettings { get; init; } = _ => { };
+
+    public Action<string> ImportSettings { get; init; } = _ => { };
+
     public static SettingsActions NoOp { get; } = new(
         _ => { },
         _ => { },
