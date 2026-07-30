@@ -12,6 +12,7 @@ include(CTest)
 
 add_subdirectory(core)
 if(WIN32)
+  add_subdirectory(platform/windows/input)
   add_subdirectory(platform/windows/hook)
   if(KEYINA_BUILD_TSF)
     add_subdirectory(platform/windows/tsf)
