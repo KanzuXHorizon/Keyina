@@ -88,6 +88,25 @@ function Invoke-CheckedCapturedProcess {
     }
 }
 
+function Remove-DirectoryWithRetry {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch when ($attempt -lt 8) {
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            Start-Sleep -Milliseconds (150 * $attempt)
+        }
+    }
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+}
+
 function Get-DefaultVersion {
     [xml]$props = Get-Content -LiteralPath $propsPath -Raw
     $candidate = $props.SelectSingleNode('/Project/PropertyGroup/KeyinaVersion')
@@ -157,9 +176,7 @@ $portableZip = Join-Path $artifactRoot "Keyina-$Version-$RuntimeIdentifier.zip"
 $checksumsPath = Join-Path $artifactRoot 'SHA256SUMS.txt'
 $manifestPath = Join-Path $artifactRoot 'release-manifest.json'
 
-if (Test-Path -LiteralPath $artifactRoot) {
-    Remove-Item -LiteralPath $artifactRoot -Recurse -Force
-}
+Remove-DirectoryWithRetry $artifactRoot
 New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
 
