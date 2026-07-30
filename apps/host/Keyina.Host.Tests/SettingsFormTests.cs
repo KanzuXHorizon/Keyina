@@ -47,6 +47,36 @@ internal static class SettingsFormTests
         }
     }
 
+    [KeyinaTest("overview status cards fill their grid cells without horizontal overflow")]
+    private static void OverviewStatusCardsUseAvailableWidth()
+    {
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample,
+            SettingsActions.NoOp)
+        {
+            Size = new Size(1090, 750),
+        };
+        form.CreateControl();
+        form.PerformLayout();
+
+        foreach (var name in new[]
+                 {
+                     "overviewTyping",
+                     "overviewSpeech",
+                     "overviewHotkeys",
+                     "overviewFocusedApp",
+                 })
+        {
+            var card = form.Controls.Find(name, true).Single();
+            AssertEx.Equal(DockStyle.Fill, card.Dock,
+                $"{name} did not fill its status-grid cell.");
+        }
+
+        var stack = (FlowLayoutPanel)form.Controls.Find("overviewStack", true).Single();
+        AssertEx.False(stack.HorizontalScroll.Visible,
+            "Overview exposed a horizontal scrollbar at the supported default size.");
+    }
+
     [KeyinaTest("settings form protects speech credentials and exposes familiar controls")]
     private static void SensitiveAndFamiliarControlsAreCorrect()
     {

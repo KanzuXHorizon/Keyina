@@ -751,7 +751,7 @@ public sealed partial class SettingsForm : Form
         shield.Dock = DockStyle.Fill;
         privacy.SetRowSpan(shield, 2);
         privacy.Controls.Add(shield, 0, 0);
-        var localFirst = CreateLabel("localFirst", "Cục bộ trước", LabelRole.Caption);
+        var localFirst = CreateLabel("localFirst", "Ưu tiên xử lý cục bộ", LabelRole.Caption);
         localFirst.Dock = DockStyle.Fill;
         privacy.Controls.Add(localFirst, 1, 0);
         var localDetail = CreateLabel(
@@ -907,13 +907,13 @@ public sealed partial class SettingsForm : Form
             "\uE92E",
             "Phím tắt hệ thống",
             hotkeyStatus,
-            "Hoạt động mà không lấy focus"), 0, 1);
+            "Hoạt động nền, không đổi focus"), 0, 1);
         statusGrid.Controls.Add(CreateStatusCard(
             "overviewFocusedApp",
             "\uE7C5",
             "Ứng dụng đang nhập",
             ipcStatus,
-            "Không dùng clipboard để chèn chữ"), 1, 1);
+            "Chèn trực tiếp vào ô đang nhập"), 1, 1);
         stack.Controls.Add(statusGrid);
 
         var privacyCard = CreateCard("privacyCard", 120);
@@ -2094,6 +2094,7 @@ public sealed partial class SettingsForm : Form
         string detail)
     {
         var card = CreateCard(name, 110);
+        card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 0, 10, 10);
         var layout = new TableLayoutPanel
         {
@@ -2398,7 +2399,7 @@ public sealed partial class SettingsForm : Form
         var available = Math.Max(520, stack.ClientSize.Width - stack.Padding.Horizontal - 4);
         foreach (Control child in stack.Controls)
         {
-            child.Width = available;
+            child.Width = Math.Max(0, available - child.Margin.Horizontal);
         }
     }
 
