@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -12,6 +11,7 @@
 
 #include <keyina/context_guard.h>
 #include <keyina/engine.h>
+#include <keyina/vietnamese_syllable.h>
 
 namespace {
 
@@ -60,9 +60,9 @@ double Percentile(const std::vector<std::uint64_t>& sorted,
   return static_cast<double>(sorted[index]);
 }
 
-Result Measure(std::string_view name, const std::function<std::size_t()>& operation,
-               std::size_t warmup, std::size_t iterations,
-               std::uint64_t& checksum) {
+template <typename Operation>
+Result Measure(std::string_view name, Operation&& operation, std::size_t warmup,
+               std::size_t iterations, std::uint64_t& checksum) {
   for (std::size_t index = 0; index < warmup; ++index) {
     checksum += operation();
   }
@@ -137,11 +137,18 @@ std::string Processor() {
 #endif
 }
 
-void TypePrefix(keyina::Engine& engine, std::u32string_view prefix) {
-  for (const char32_t character : prefix) {
-    static_cast<void>(engine.Process(
-        {keyina::KeyKind::Character, character, false, false, false}));
+std::size_t TypeSequence(keyina::Engine& engine, std::u32string_view sequence) {
+  std::size_t checksum = 0;
+  for (const char32_t character : sequence) {
+    const auto edit = engine.Process(
+        {keyina::KeyKind::Character, character, false, false, false});
+    checksum += edit.insert.size() + edit.erase_codepoints + edit.consumed;
   }
+  return checksum;
+}
+
+void TypePrefix(keyina::Engine& engine, std::u32string_view prefix) {
+  static_cast<void>(TypeSequence(engine, prefix));
 }
 
 }  // namespace
@@ -151,7 +158,7 @@ int main() {
   constexpr std::size_t kIterations = 100'000;
   std::uint64_t checksum = 0;
   std::vector<Result> results;
-  results.reserve(5);
+  results.reserve(12);
 
   keyina::Engine ascii_engine;
   results.push_back(Measure(
@@ -188,6 +195,44 @@ int main() {
       },
       kWarmup, kIterations, checksum));
 
+  keyina::Engine complete_word_engine;
+  results.push_back(Measure(
+      "complete_word_tieengs",
+      [&]() {
+        complete_word_engine.Reset();
+        return TypeSequence(complete_word_engine, U"tieengs");
+      },
+      kWarmup, kIterations, checksum));
+
+  results.push_back(Measure(
+      "complete_word_Vieetj",
+      [&]() {
+        complete_word_engine.Reset();
+        return TypeSequence(complete_word_engine, U"Vieetj");
+      },
+      kWarmup, kIterations, checksum));
+
+  results.push_back(Measure(
+      "delayed_modifier_truowcs",
+      [&]() {
+        complete_word_engine.Reset();
+        return TypeSequence(complete_word_engine, U"truowcs");
+      },
+      kWarmup, kIterations, checksum));
+
+  keyina::Engine backspace_engine;
+  results.push_back(Measure(
+      "backspace_recomposition",
+      [&]() {
+        backspace_engine.Reset();
+        auto value = TypeSequence(backspace_engine, U"tieengs");
+        const auto edit = backspace_engine.Process(
+            {keyina::KeyKind::Backspace, U'\0', false, false, false});
+        return value + edit.insert.size() + edit.erase_codepoints +
+               edit.consumed;
+      },
+      kWarmup, kIterations, checksum));
+
   keyina::Engine url_engine;
   results.push_back(Measure(
       "guard_protected_url",
@@ -196,6 +241,43 @@ int main() {
         TypePrefix(url_engine, U"https://example.co");
         const auto edit = url_engine.Process(
             {keyina::KeyKind::Character, U'm', false, false, false});
+        return edit.insert.size() + edit.erase_codepoints + edit.consumed;
+      },
+      kWarmup, kIterations, checksum));
+
+  keyina::Engine email_engine;
+  results.push_back(Measure(
+      "guard_protected_email",
+      [&]() {
+        email_engine.Reset();
+        TypePrefix(email_engine, U"user@example.co");
+        const auto edit = email_engine.Process(
+            {keyina::KeyKind::Character, U'm', false, false, false});
+        return edit.insert.size() + edit.erase_codepoints + edit.consumed;
+      },
+      kWarmup, kIterations, checksum));
+
+  results.push_back(Measure(
+      "valid_syllable_analysis",
+      [&]() {
+        const auto analysis = keyina::AnalyzeVietnameseSyllable(U"nghiêng");
+        return static_cast<std::size_t>(analysis.status) +
+               static_cast<std::size_t>(analysis.error) + analysis.nucleus.size();
+      },
+      kWarmup, kIterations, checksum));
+
+  keyina::Engine restore_engine({
+      .tone_placement = keyina::TonePlacement::Modern,
+      .application_bypass = false,
+      .restore_invalid_word = true,
+  });
+  results.push_back(Measure(
+      "invalid_boundary_restore",
+      [&]() {
+        restore_engine.Reset();
+        TypePrefix(restore_engine, U"haahhaahhaahh");
+        const auto edit = restore_engine.Process(
+            {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
         return edit.insert.size() + edit.erase_codepoints + edit.consumed;
       },
       kWarmup, kIterations, checksum));

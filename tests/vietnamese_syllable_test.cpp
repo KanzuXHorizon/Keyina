@@ -139,6 +139,60 @@ KEYINA_TEST(rejects_more_than_one_tone_bearing_vowel) {
   KEYINA_EXPECT_TRUE(!keyina::IsValidVietnameseSyllable(U"ệế"));
 }
 
+KEYINA_TEST(analyzer_reports_shared_structural_parts_and_precise_errors) {
+  const auto valid = keyina::AnalyzeVietnameseSyllable(U"nghiêng");
+  KEYINA_EXPECT_EQ(valid.status, keyina::SyllableStatus::Valid);
+  KEYINA_EXPECT_EQ(valid.error, keyina::SyllableError::None);
+  KEYINA_EXPECT_EQ(valid.onset, std::u32string_view{U"ngh"});
+  KEYINA_EXPECT_EQ(valid.nucleus, std::u32string_view{U"iê"});
+  KEYINA_EXPECT_EQ(valid.coda, std::u32string_view{U"ng"});
+  KEYINA_EXPECT_EQ(valid.tone, keyina::Tone::None);
+
+  const auto missing = keyina::AnalyzeVietnameseSyllable(U"tr");
+  KEYINA_EXPECT_EQ(missing.status, keyina::SyllableStatus::Impossible);
+  KEYINA_EXPECT_EQ(missing.error, keyina::SyllableError::MissingNucleus);
+
+  const auto bad_onset = keyina::AnalyzeVietnameseSyllable(U"zrường");
+  KEYINA_EXPECT_EQ(bad_onset.status, keyina::SyllableStatus::Impossible);
+  KEYINA_EXPECT_EQ(bad_onset.error, keyina::SyllableError::InvalidOnset);
+
+  const auto bad_tone = keyina::AnalyzeVietnameseSyllable(U"màt");
+  KEYINA_EXPECT_EQ(bad_tone.status, keyina::SyllableStatus::Impossible);
+  KEYINA_EXPECT_EQ(bad_tone.error, keyina::SyllableError::InvalidTone);
+}
+
+KEYINA_TEST(classifies_foreign_shaped_tokens_as_ambiguous_without_hiding_garbage) {
+  const auto foreign = keyina::AnalyzeVietnameseSyllable(U"café");
+  KEYINA_EXPECT_EQ(foreign.status, keyina::SyllableStatus::Ambiguous);
+  KEYINA_EXPECT_EQ(foreign.error, keyina::SyllableError::InvalidCoda);
+
+  const auto repeated = keyina::AnalyzeVietnameseSyllable(U"hâhhâhhâhh");
+  KEYINA_EXPECT_EQ(repeated.status, keyina::SyllableStatus::Impossible);
+}
+
+KEYINA_TEST(restore_invalid_word_keeps_ambiguous_foreign_shaped_tokens) {
+  keyina::Engine engine({
+      .tone_placement = keyina::TonePlacement::Modern,
+      .application_bypass = false,
+      .restore_invalid_word = true,
+  });
+  const auto rendered = TypeSequence(engine, U"cazees");
+  KEYINA_EXPECT_TRUE(rendered != std::u32string{U"cazees"});
+  const auto rendered_analysis = keyina::AnalyzeVietnameseSyllable(rendered);
+  if (rendered_analysis.status != keyina::SyllableStatus::Ambiguous) {
+    throw std::runtime_error(
+        "foreign-shaped Telex token status=" +
+        std::to_string(static_cast<int>(rendered_analysis.status)) +
+        " error=" + std::to_string(static_cast<int>(rendered_analysis.error)));
+  }
+
+  const auto boundary = engine.Process(
+      {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
+  KEYINA_EXPECT_TRUE(!boundary.consumed);
+  KEYINA_EXPECT_EQ(boundary.erase_codepoints, std::size_t{0});
+  KEYINA_EXPECT_TRUE(boundary.insert.empty());
+}
+
 KEYINA_TEST(validates_broad_dictionary_derived_edge_corpus) {
   constexpr std::array<std::u32string_view, 28> valid = {
       U"ngoằn", U"khuya", U"khoẻ", U"khỏe", U"quẹo", U"giỏi",

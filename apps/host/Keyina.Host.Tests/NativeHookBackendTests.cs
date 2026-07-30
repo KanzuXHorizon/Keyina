@@ -110,7 +110,12 @@ internal static class NativeHookBackendTests
         public List<UnicodeInputInjector.KeyboardInputEvent> Events { get; } = [];
 
         public void Send(
-            IReadOnlyList<UnicodeInputInjector.KeyboardInputEvent> inputs) =>
-            Events.AddRange(inputs);
+            ReadOnlySpan<UnicodeInputInjector.KeyboardInputEvent> inputs)
+        {
+            foreach (var input in inputs)
+            {
+                Events.Add(input);
+            }
+        }
     }
 }

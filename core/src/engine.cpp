@@ -341,7 +341,8 @@ TextEdit Engine::Process(const KeyEvent& event) {
   if (event.kind == KeyKind::CommitBoundary) {
     TextEdit edit;
     if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
-        !IsValidVietnameseSyllable(visible_text_)) {
+        AnalyzeVietnameseSyllable(visible_text_).status ==
+            SyllableStatus::Impossible) {
       std::u32string restored = raw_keys_;
       if (event.character != U'\0') {
         restored.push_back(event.character);

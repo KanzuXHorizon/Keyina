@@ -30,6 +30,10 @@ public interface IVietnameseEngine : IDisposable
 
 public sealed class NativeEngineClient : IVietnameseEngine
 {
+    private const int SingleCharacterCacheLength = 0x2000;
+    private static readonly string?[] SingleCharacterCache =
+        new string[SingleCharacterCacheLength];
+
     private readonly nint library;
     private readonly EngineDestroy destroy;
     private readonly EngineReset reset;
@@ -87,9 +91,10 @@ public sealed class NativeEngineClient : IVietnameseEngine
             }
         }
 
+        var insertLength = checked((int)result.InsertUtf16Units);
         return new HookEdit(
             checked((int)result.EraseCodepoints),
-            new string(buffer[..checked((int)result.InsertUtf16Units)]),
+            CreateInsertText(buffer, insertLength),
             result.Consumed != 0);
     }
 
@@ -130,6 +135,28 @@ public sealed class NativeEngineClient : IVietnameseEngine
             handle = 0;
         }
         NativeLibrary.Free(library);
+    }
+
+    private static string CreateInsertText(Span<char> buffer, int length)
+    {
+        if (length == 0)
+        {
+            return string.Empty;
+        }
+        if (length != 1 || buffer[0] >= SingleCharacterCacheLength)
+        {
+            return new string(buffer[..length]);
+        }
+
+        ref var slot = ref SingleCharacterCache[buffer[0]];
+        var cached = Volatile.Read(ref slot);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var created = new string(buffer[0], 1);
+        return Interlocked.CompareExchange(ref slot, created, null) ?? created;
     }
 
     private T GetDelegate<T>(string name)
