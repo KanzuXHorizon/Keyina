@@ -32,6 +32,13 @@ struct TextEdit {
   friend bool operator==(const TextEdit&, const TextEdit&) = default;
 };
 
+struct TextEditView {
+  std::size_t erase_codepoints{};
+  std::u32string_view insert;
+  bool consumed{false};
+  bool commit_before{false};
+};
+
 enum class TonePlacement {
   Modern,
   Traditional,
@@ -48,6 +55,10 @@ class Engine {
   explicit Engine(EngineConfig config = {});
 
   [[nodiscard]] TextEdit Process(const KeyEvent& event);
+
+  // The insert view remains valid until the next Process, ProcessView, Reset,
+  // assignment, or destruction of this engine instance.
+  [[nodiscard]] TextEditView ProcessView(const KeyEvent& event);
   void Reset() noexcept;
 
   [[nodiscard]] std::u32string_view VisibleText() const noexcept;
@@ -56,13 +67,15 @@ class Engine {
  private:
   void ComposeRaw(std::u32string& destination);
   void BuildVisibleForRaw();
-  [[nodiscard]] TextEdit ReplaceVisible(bool consumed);
+  [[nodiscard]] TextEditView ReplaceVisibleView(bool consumed);
+  void ResetCompositionState() noexcept;
 
   EngineConfig config_;
   std::u32string raw_keys_;
   std::u32string visible_text_;
   std::u32string composition_buffer_;
   std::u32string previous_key_buffer_;
+  std::u32string edit_buffer_;
 };
 
 }  // namespace keyina

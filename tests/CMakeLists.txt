@@ -19,6 +19,7 @@ target_include_directories(keyina_tests PRIVATE
 )
 if(WIN32)
   target_sources(keyina_tests PRIVATE
+    windows/resident_input_controller_test.cpp
     windows/runtime_profile_test.cpp
   )
   target_link_libraries(keyina_tests PRIVATE keyina::windows_input)

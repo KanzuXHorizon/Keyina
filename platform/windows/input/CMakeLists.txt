@@ -1,4 +1,5 @@
 add_library(keyina_windows_input STATIC
+  resident_input_controller.cpp
   runtime_profile.cpp
 )
 add_library(keyina::windows_input ALIAS keyina_windows_input)
