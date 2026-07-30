@@ -3,14 +3,17 @@ using System.Diagnostics;
 using Keyina.Host.Configuration;
 using Keyina.Host.Core;
 using Keyina.Host.Core.Configuration;
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Ipc;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Speech;
 using Keyina.Host.UI;
+using Keyina.Host.UI.Feedback;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Audio;
 using Keyina.Host.Windows.Credentials;
+using Keyina.Host.Windows.Feedback;
 using Keyina.Host.Windows.Hotkeys;
 using Keyina.Host.Windows.Ipc;
 using Keyina.Host.Windows.Startup;
@@ -55,6 +58,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private NamedPipeEnvelopeServer? pipeServer;
     private DictationCoordinator? dictationCoordinator;
     private DictationOverlayModel? dictationOverlay;
+    private FeedbackCoordinator? feedbackCoordinator;
     private SettingsForm? settingsForm;
     private int drainScheduled;
     private bool hotkeysReady;
@@ -63,6 +67,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private bool endToEndTypingPassed;
     private DateTimeOffset? lastTypingTestAt;
     private FluentThemeMode? trayThemeMode;
+    private DictationStatus? lastFeedbackDictationStatus;
     private bool disposed;
 
     public KeyinaApplicationContext(KeyinaRuntimeOptions options)
@@ -176,6 +181,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ApplyTrayTheme();
 
         dispatcher.CreateControl();
+        InitializeFeedbackRuntime();
         InitializeOptionalRuntime();
         RefreshVisualState();
         if (options.ShowSettingsOnStart)
@@ -308,6 +314,36 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
+    private void InitializeFeedbackRuntime()
+    {
+        try
+        {
+            var foregroundProbe = options.ForegroundPresentationProbeFactory?.Invoke()
+                ?? new WindowsForegroundPresentationProbe();
+            var overlay = options.FeedbackOverlayFactory?.Invoke()
+                ?? new NoActivateFeedbackOverlay();
+            var soundPlayer = options.FeedbackSoundPlayerFactory?.Invoke()
+                ?? new WindowsFeedbackSoundPlayer();
+            feedbackCoordinator = new FeedbackCoordinator(
+                configuration.Feedback ?? FeedbackPreferences.Default,
+                foregroundProbe,
+                overlay,
+                soundPlayer);
+        }
+        catch (Exception exception)
+        {
+            feedbackCoordinator = null;
+            if (options.ForegroundPresentationProbeFactory is not null ||
+                options.FeedbackOverlayFactory is not null ||
+                options.FeedbackSoundPlayerFactory is not null)
+            {
+                throw new InvalidOperationException(
+                    "Injected feedback runtime failed to initialize.",
+                    exception);
+            }
+        }
+    }
+
     private void InitializeOptionalRuntime()
     {
         if (options.EnablePipe)
@@ -361,7 +397,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         if (options.EnableSpeech && pipeServer is not null)
         {
             dictationOverlay = new DictationOverlayModel();
-            dictationOverlay.StateChanged += (_, _) => PostSignal(RefreshVisualState);
+            dictationOverlay.StateChanged += (_, _) =>
+                PostSignal(HandleDictationStateChanged);
             dictationCoordinator = new DictationCoordinator(
                 new SpeechmaticsSessionFactory(),
                 new WasapiMicrophoneCapture(),
@@ -461,6 +498,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         configuration = configuration with { VietnameseEnabled = enabled };
         typingHook?.SetEnabled(enabled);
         RefreshVisualState();
+        PublishFeedback(FeedbackEvents.ForVietnamese(enabled));
 
         if (pipeServer?.ActiveTarget is { } target)
         {
@@ -497,6 +535,29 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         RefreshVisualState();
     }
 
+    private void SetFeedbackMode(FeedbackMode mode)
+    {
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        }
+
+        var preferences = new FeedbackPreferences(mode);
+        configuration = configuration with { Feedback = preferences };
+        try
+        {
+            feedbackCoordinator?.UpdatePreferences(preferences);
+        }
+        catch (Exception)
+        {
+            // Feedback configuration remains persistent even if presentation is unavailable.
+        }
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void PreviewFeedback() => PublishFeedback(FeedbackEvents.Preview());
+
     private async Task StartDictationAsync(CancellationToken cancellationToken)
     {
         await speechCommandGate.WaitAsync(cancellationToken).ConfigureAwait(true);
@@ -505,6 +566,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             if (dictationCoordinator is null || !configuration.SpeechEnabled)
             {
                 ReportFailure("speech_disabled");
+                PublishFeedback(FeedbackEvents.Error("Nhập giọng nói đang tắt"));
                 return;
             }
             if (IsDictationActive)
@@ -515,12 +577,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             if (target is null)
             {
                 ReportFailure("speech_no_focused_app");
+                PublishFeedback(FeedbackEvents.Error("Chưa có ứng dụng nhận văn bản"));
                 return;
             }
             var apiKey = credentialVault.Read(CredentialTargets.SpeechmaticsApiKey);
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 ReportFailure("speech_credential_missing");
+                PublishFeedback(FeedbackEvents.Error("Chưa cấu hình khóa Speechmatics"));
                 return;
             }
 
@@ -534,6 +598,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         catch (Exception)
         {
             ReportFailure("speech_start_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể bắt đầu nhập giọng nói"));
         }
         finally
         {
@@ -556,6 +621,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         catch (Exception)
         {
             ReportFailure("speech_stop_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể hoàn tất nhập giọng nói"));
         }
         finally
         {
@@ -577,6 +643,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         catch (Exception)
         {
             ReportFailure("speech_cancel_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể hủy nhập giọng nói"));
         }
         finally
         {
@@ -589,6 +656,40 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         state = HostReducer.Reduce(state, hostEvent);
         RefreshVisualState();
+    }
+
+    private void HandleDictationStateChanged()
+    {
+        RefreshVisualState();
+        if (dictationOverlay is null)
+        {
+            return;
+        }
+
+        var status = dictationOverlay.State.Status;
+        if (lastFeedbackDictationStatus == status)
+        {
+            return;
+        }
+
+        lastFeedbackDictationStatus = status;
+        var feedbackEvent = FeedbackEvents.ForDictation(status);
+        if (feedbackEvent is not null)
+        {
+            PublishFeedback(feedbackEvent);
+        }
+    }
+
+    private void PublishFeedback(FeedbackEvent feedbackEvent)
+    {
+        try
+        {
+            feedbackCoordinator?.Publish(feedbackEvent);
+        }
+        catch (Exception)
+        {
+            // Feedback is best-effort and must not affect the originating command.
+        }
     }
 
     private void ReportFailure(string errorCode)
@@ -640,7 +741,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         RecordTypingTest,
         SetTypingInstrumentationEnabled,
         TypingLatencyProfiler.Snapshot,
-        ClearTypingInstrumentation);
+        ClearTypingInstrumentation,
+        SetFeedbackMode,
+        PreviewFeedback);
 
     private static void SetTypingInstrumentationEnabled(bool enabled)
     {
@@ -727,7 +830,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             typingReady && hotkeysReady
                 ? "Hook bàn phím đang hoạt động"
                 : "Hook bàn phím chưa khả dụng",
-            typingReady)
+            typingReady,
+            configuration.Feedback?.Mode ?? FeedbackMode.Automatic)
         {
             Health = health,
         };
@@ -934,6 +1038,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         CloseSettings();
         notifyIcon.Visible = false;
 
+        feedbackCoordinator?.Dispose();
+        feedbackCoordinator = null;
         typingHook?.Dispose();
         typingHook = null;
         modifierHook?.Dispose();

@@ -55,7 +55,11 @@ internal static class FeedbackOverlayTests
         Application.DoEvents();
         var after = GetForegroundWindow();
 
-        AssertEx.Equal(before, after, "Overlay changed the foreground window.");
+        var overlayStyle = GetWindowLongPtr(overlay.Handle, ExtendedStyleIndex).ToInt64();
+        AssertEx.Equal(
+            before,
+            after,
+            $"Overlay changed the foreground window from 0x{before.ToInt64():X} to 0x{after.ToInt64():X}; overlay=0x{overlay.Handle.ToInt64():X}; style=0x{overlayStyle:X}.");
         overlay.HideFeedback();
         target.Close();
     }

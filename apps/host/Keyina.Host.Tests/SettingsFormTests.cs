@@ -1,4 +1,5 @@
 using System.Reflection;
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.UI;
 using Keyina.Host.Windows.Typing;
 
@@ -64,6 +65,40 @@ internal static class SettingsFormTests
             FindDescendants<CheckBox>(form).All(control =>
                 control.GetType().Name.Contains("FluentToggle", StringComparison.Ordinal)),
             "Settings toggles should use the Fluent owner-drawn control.");
+    }
+
+    [KeyinaTest("hotkeys settings configure and preview non-intrusive feedback")]
+    private static void HotkeysFeedbackControlsAreBound()
+    {
+        var modes = new List<FeedbackMode>();
+        var previews = 0;
+        var actions = SettingsActions.NoOp with
+        {
+            SetFeedbackMode = modes.Add,
+            PreviewFeedback = () => previews++,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+        var selector = (ComboBox)form.Controls.Find("feedbackMode", true).Single();
+        var preview = (Button)form.Controls.Find("previewFeedback", true).Single();
+        var note = (Label)form.Controls.Find("feedbackFullscreenNote", true).Single();
+
+        AssertEx.Equal(0, selector.SelectedIndex);
+        selector.SelectedIndex = 2;
+        AssertEx.Equal(1, modes.Count);
+        AssertEx.Equal(FeedbackMode.AudioOnly, modes[0]);
+        InvokeClick(preview);
+        AssertEx.Equal(1, previews);
+        AssertEx.Equal(1, modes.Count);
+        AssertEx.True(
+            note.Text.Contains("toàn màn hình", StringComparison.OrdinalIgnoreCase),
+            "Automatic fullscreen behavior was not explained.");
+
+        form.ApplySnapshot(SettingsSnapshot.Sample with
+        {
+            FeedbackMode = FeedbackMode.VisualOnly,
+        });
+        AssertEx.Equal(1, selector.SelectedIndex);
+        AssertEx.Equal(1, modes.Count);
     }
 
     [KeyinaTest("typing test reports pass and fail through the runtime action")]

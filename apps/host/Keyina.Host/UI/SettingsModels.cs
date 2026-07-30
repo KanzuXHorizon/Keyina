@@ -1,3 +1,4 @@
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.UI;
@@ -13,7 +14,8 @@ public sealed record SettingsSnapshot(
     string Version,
     string IpcStatus,
     string HotkeyStatus,
-    bool TsfRegistered)
+    bool TsfRegistered,
+    FeedbackMode FeedbackMode = Keyina.Host.Core.Feedback.FeedbackMode.Automatic)
 {
     public KeyinaHealthSnapshot Health { get; init; } = KeyinaHealthSnapshot.Healthy;
 
@@ -29,7 +31,8 @@ public sealed record SettingsSnapshot(
         Version: "0.1.0-dev",
         IpcStatus: "Focused app connected",
         HotkeyStatus: "Registered",
-        TsfRegistered: true);
+        TsfRegistered: true,
+        FeedbackMode: FeedbackMode.Automatic);
 }
 
 public sealed record SettingsActions(
@@ -44,7 +47,9 @@ public sealed record SettingsActions(
     Action<bool> RecordTypingTest,
     Action<bool> SetTypingLatencyEnabled,
     Func<IReadOnlyList<TypingLatencyStageSnapshot>> GetTypingLatencySnapshot,
-    Action ClearTypingLatency)
+    Action ClearTypingLatency,
+    Action<FeedbackMode> SetFeedbackMode,
+    Action PreviewFeedback)
 {
     public static SettingsActions NoOp { get; } = new(
         _ => { },
@@ -58,5 +63,7 @@ public sealed record SettingsActions(
         _ => { },
         _ => { },
         () => Array.Empty<TypingLatencyStageSnapshot>(),
+        () => { },
+        _ => { },
         () => { });
 }

@@ -1,4 +1,5 @@
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Speech;
 
 namespace Keyina.Host.Tests;
 
@@ -26,6 +27,24 @@ internal static class FeedbackPolicyTests
         AssertEx.Equal(
             new FeedbackPresentation(ShowOverlay: false, PlaySound: true),
             presentation);
+    }
+
+    [KeyinaTest("semantic feedback maps input and dictation states without transcript content")]
+    private static void SemanticEventsContainOnlySafeStatusCopy()
+    {
+        var disabled = FeedbackEvents.ForVietnamese(enabled: false);
+        AssertEx.Equal(FeedbackEventKind.VietnameseDisabled, disabled.Kind);
+        AssertEx.Equal(FeedbackSoundCue.Disabled, disabled.SoundCue);
+        AssertEx.Equal("Tiếng Việt đã tắt", disabled.Message);
+
+        var listening = FeedbackEvents.ForDictation(DictationStatus.Listening);
+        AssertEx.NotNull(listening, "Listening state did not create feedback.");
+        AssertEx.Equal(FeedbackEventKind.DictationListening, listening!.Kind);
+        AssertEx.Equal("Đang nghe", listening.Message);
+        AssertEx.Equal(FeedbackSoundCue.None, listening.SoundCue);
+        AssertEx.Equal(Timeout.InfiniteTimeSpan, listening.Duration);
+
+        AssertEx.Equal(null, FeedbackEvents.ForDictation(DictationStatus.Idle));
     }
 
     [KeyinaTest("explicit feedback modes override foreground presentation")]

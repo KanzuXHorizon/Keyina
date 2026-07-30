@@ -329,8 +329,11 @@ bool ApplyTone(std::u32string& visible, Tone tone,
 }  // namespace
 
 Engine::Engine(EngineConfig config) : config_(config) {
-  raw_keys_.reserve(kMaxActiveKeys);
-  visible_text_.reserve(kMaxActiveKeys);
+  constexpr std::size_t kBufferCapacity = kMaxActiveKeys + 1;
+  raw_keys_.reserve(kBufferCapacity);
+  visible_text_.reserve(kBufferCapacity);
+  composition_buffer_.reserve(kBufferCapacity);
+  previous_key_buffer_.reserve(kBufferCapacity);
 }
 
 TextEdit Engine::Process(const KeyEvent& event) {
@@ -343,11 +346,11 @@ TextEdit Engine::Process(const KeyEvent& event) {
     if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
         AnalyzeVietnameseSyllable(visible_text_).status ==
             SyllableStatus::Impossible) {
-      std::u32string restored = raw_keys_;
+      composition_buffer_.assign(raw_keys_);
       if (event.character != U'\0') {
-        restored.push_back(event.character);
+        composition_buffer_.push_back(event.character);
       }
-      edit = Difference(visible_text_, restored, true);
+      edit = Difference(visible_text_, composition_buffer_, true);
     }
     Reset();
     return edit;
@@ -360,41 +363,34 @@ TextEdit Engine::Process(const KeyEvent& event) {
     if (raw_keys_.empty()) {
       return {};
     }
-    const std::u32string before = visible_text_;
     raw_keys_.pop_back();
     if (raw_keys_.empty()) {
-      visible_text_.clear();
+      composition_buffer_.clear();
     } else {
-      const GuardContext context{false, config_.application_bypass};
-      const GuardResult guard = ClassifyToken(raw_keys_, context);
-      visible_text_ = guard.transform ? ComposeRaw() : raw_keys_;
+      BuildVisibleForRaw();
     }
-    return Difference(before, visible_text_, true);
+    return ReplaceVisible(true);
   }
 
   if (raw_keys_.size() >= kMaxActiveKeys) {
     Reset();
     raw_keys_.push_back(event.character);
-    const GuardContext context{false, config_.application_bypass};
-    const GuardResult guard = ClassifyToken(raw_keys_, context);
-    visible_text_ = guard.transform ? ComposeRaw() : raw_keys_;
-    auto edit = Difference({}, visible_text_, true);
+    BuildVisibleForRaw();
+    auto edit = ReplaceVisible(true);
     edit.commit_before = true;
     return edit;
   }
 
-  const std::u32string before = visible_text_;
   raw_keys_.push_back(event.character);
-
-  const GuardContext context{false, config_.application_bypass};
-  const GuardResult guard = ClassifyToken(raw_keys_, context);
-  visible_text_ = guard.transform ? ComposeRaw() : raw_keys_;
-  return Difference(before, visible_text_, true);
+  BuildVisibleForRaw();
+  return ReplaceVisible(true);
 }
 
 void Engine::Reset() noexcept {
   raw_keys_.clear();
   visible_text_.clear();
+  composition_buffer_.clear();
+  previous_key_buffer_.clear();
 }
 
 std::u32string_view Engine::VisibleText() const noexcept {
@@ -403,13 +399,29 @@ std::u32string_view Engine::VisibleText() const noexcept {
 
 std::u32string_view Engine::RawKeys() const noexcept { return raw_keys_; }
 
-std::u32string Engine::ComposeRaw() const {
-  std::u32string visible;
-  visible.reserve(raw_keys_.size());
+void Engine::BuildVisibleForRaw() {
+  const GuardContext context{false, config_.application_bypass};
+  const GuardResult guard = ClassifyToken(raw_keys_, context);
+  if (guard.transform) {
+    ComposeRaw(composition_buffer_);
+  } else {
+    composition_buffer_.assign(raw_keys_);
+  }
+}
+
+TextEdit Engine::ReplaceVisible(bool consumed) {
+  auto edit = Difference(visible_text_, composition_buffer_, consumed);
+  visible_text_.swap(composition_buffer_);
+  composition_buffer_.clear();
+  return edit;
+}
+
+void Engine::ComposeRaw(std::u32string& visible) {
+  visible.clear();
+  previous_key_buffer_.clear();
 
   char32_t previous_key = U'\0';
   bool previous_key_transformed = false;
-  std::u32string visible_before_previous_key;
   std::optional<Tone> pending_tone;
   char32_t pending_tone_key = U'\0';
 
@@ -418,7 +430,7 @@ std::u32string Engine::ComposeRaw() const {
         ToAsciiLower(key) == ToAsciiLower(previous_key) &&
         previous_key_transformed;
     if (repeated_escape) {
-      visible = visible_before_previous_key;
+      visible.assign(previous_key_buffer_);
       visible.push_back(key);
       if (pending_tone_key != U'\0' &&
           ToAsciiLower(key) == ToAsciiLower(pending_tone_key)) {
@@ -427,11 +439,11 @@ std::u32string Engine::ComposeRaw() const {
       }
       previous_key = key;
       previous_key_transformed = false;
-      visible_before_previous_key = visible;
+      previous_key_buffer_.assign(visible);
       continue;
     }
 
-    const std::u32string before_key = visible;
+    previous_key_buffer_.assign(visible);
     bool transformed = false;
     const auto tone = ToneFromKey(key);
     if (tone.has_value()) {
@@ -467,14 +479,12 @@ std::u32string Engine::ComposeRaw() const {
 
     previous_key = key;
     previous_key_transformed = transformed;
-    visible_before_previous_key = before_key;
   }
 
   if (pending_tone.has_value()) {
     static_cast<void>(
         ApplyTone(visible, *pending_tone, config_.tone_placement));
   }
-  return visible;
 }
 
 }  // namespace keyina

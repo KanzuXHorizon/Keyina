@@ -1,4 +1,6 @@
 using Keyina.Host.Configuration;
+using Keyina.Host.UI.Feedback;
+using Keyina.Host.Windows.Feedback;
 using Keyina.Host.Windows.Ipc;
 using Keyina.Host.Windows.Startup;
 
@@ -14,6 +16,12 @@ public sealed record KeyinaRuntimeOptions(
     bool ShowSettingsOnStart,
     bool DisplaySettingsWindows)
 {
+    public Func<IForegroundPresentationProbe>? ForegroundPresentationProbeFactory { get; init; }
+
+    public Func<IFeedbackOverlay>? FeedbackOverlayFactory { get; init; }
+
+    public Func<IFeedbackSoundPlayer>? FeedbackSoundPlayerFactory { get; init; }
+
     public static KeyinaRuntimeOptions CreateProduction(bool showSettingsOnStart) =>
         new(
             ConfigurationPaths.GetProductionPath(),

@@ -1,5 +1,8 @@
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Runtime;
+using Keyina.Host.UI.Feedback;
+using Keyina.Host.Windows.Feedback;
 
 namespace Keyina.Host.Tests;
 
@@ -38,6 +41,62 @@ internal static class KeyinaApplicationContextTests
 
         context.Dispose();
         context.Dispose();
+    }
+
+    [KeyinaTest("resident context publishes shortcut feedback without changing focus state")]
+    private static void ToggleVietnamesePublishesFeedback()
+    {
+        using var directory = new TemporaryDirectory();
+        var overlay = new RecordingOverlay();
+        var sound = new RecordingSoundPlayer();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            Path.Combine(directory.Path, "settings.json"),
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            ForegroundPresentationProbeFactory =
+                static () => new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = () => overlay,
+            FeedbackSoundPlayerFactory = () => sound,
+        };
+
+        using var context = new KeyinaApplicationContext(options);
+        context.DispatchCommandAsync(
+                HotkeyCommand.ToggleVietnamese,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(1, overlay.Events.Count);
+        AssertEx.Equal(FeedbackEventKind.VietnameseDisabled, overlay.Events[0].Kind);
+        AssertEx.Equal(1, sound.Cues.Count);
+        AssertEx.Equal(FeedbackSoundCue.Disabled, sound.Cues[0]);
+        AssertEx.Equal(null, context.CurrentState.ErrorCode);
+    }
+
+    [KeyinaTest("feedback failures never fail the resident host command")]
+    private static void FeedbackFailureIsIsolatedFromRuntimeState()
+    {
+        using var directory = new TemporaryDirectory();
+        var sound = new RecordingSoundPlayer();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            Path.Combine(directory.Path, "settings.json"),
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            ForegroundPresentationProbeFactory =
+                static () => new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = static () => new ThrowingOverlay(),
+            FeedbackSoundPlayerFactory = () => sound,
+        };
+
+        using var context = new KeyinaApplicationContext(options);
+        context.DispatchCommandAsync(
+                HotkeyCommand.ToggleVietnamese,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.False(context.CurrentState.VietnameseEnabled,
+            "Feedback failure prevented the input-mode command.");
+        AssertEx.Equal(null, context.CurrentState.ErrorCode);
+        AssertEx.Equal(1, sound.Cues.Count);
     }
 
     [KeyinaTest("resident context never reports ready without native TSF and focused typing evidence")]
@@ -84,6 +143,48 @@ internal static class KeyinaApplicationContextTests
             AssertEx.True(commands.Contains(expected, StringComparer.Ordinal),
                 $"Tray command {expected} was missing.");
         }
+    }
+
+    private sealed class FixedForegroundProbe(ForegroundPresentationState state)
+        : IForegroundPresentationProbe
+    {
+        public ForegroundPresentationState GetState() => state;
+    }
+
+    private sealed class RecordingOverlay : IFeedbackOverlay
+    {
+        public List<FeedbackEvent> Events { get; } = [];
+
+        public void Present(FeedbackEvent feedbackEvent) => Events.Add(feedbackEvent);
+
+        public void HideFeedback()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ThrowingOverlay : IFeedbackOverlay
+    {
+        public void Present(FeedbackEvent feedbackEvent) =>
+            throw new InvalidOperationException("overlay failed");
+
+        public void HideFeedback()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class RecordingSoundPlayer : IFeedbackSoundPlayer
+    {
+        public List<FeedbackSoundCue> Cues { get; } = [];
+
+        public void Play(FeedbackSoundCue cue) => Cues.Add(cue);
     }
 
     private sealed class TemporaryDirectory : IDisposable

@@ -51,6 +51,8 @@ struct Result {
   double p99_ns;
   double maximum_ns;
   double allocations_per_operation;
+  double allocation_budget;
+  bool budget_pass;
 };
 
 std::string JsonEscape(std::string_view value) {
@@ -90,7 +92,8 @@ double Percentile(const std::vector<std::uint64_t>& sorted,
 
 template <typename Operation>
 Result Measure(std::string_view name, Operation&& operation, std::size_t warmup,
-               std::size_t iterations, std::uint64_t& checksum) {
+               std::size_t iterations, std::uint64_t& checksum,
+               double allocation_budget = 0.0) {
   for (std::size_t index = 0; index < warmup; ++index) {
     checksum += operation();
   }
@@ -125,6 +128,8 @@ Result Measure(std::string_view name, Operation&& operation, std::size_t warmup,
       Percentile(samples, 99, 100),
       static_cast<double>(samples.back()),
       allocations_per_operation,
+      allocation_budget,
+      allocations_per_operation <= allocation_budget,
   };
 }
 
@@ -295,7 +300,7 @@ int main() {
             {keyina::KeyKind::Character, U'm', false, false, false});
         return edit.insert.size() + edit.erase_codepoints + edit.consumed;
       },
-      kWarmup, kIterations, checksum));
+      kWarmup, kIterations, checksum, 1.0));
 
   results.push_back(Measure(
       "valid_syllable_analysis",
@@ -320,7 +325,7 @@ int main() {
             {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
         return edit.insert.size() + edit.erase_codepoints + edit.consumed;
       },
-      kWarmup, kIterations, checksum));
+      kWarmup, kIterations, checksum, 1.0));
 
   const std::u32string token(64, U'a');
   results.push_back(Measure(
@@ -352,11 +357,17 @@ int main() {
               << ", \"p99_ns\": " << result.p99_ns
               << ", \"max_ns\": " << result.maximum_ns
               << ", \"allocations_per_operation\": "
-              << result.allocations_per_operation << "}";
+              << result.allocations_per_operation
+              << ", \"allocation_budget\": " << result.allocation_budget
+              << ", \"budget_pass\": "
+              << (result.budget_pass ? "true" : "false") << "}";
     std::cout << (index + 1 == results.size() ? "\n" : ",\n");
   }
   std::cout << "  ],\n"
             << "  \"checksum\": " << checksum << "\n"
             << "}\n";
-  return 0;
+  return std::all_of(results.begin(), results.end(),
+                     [](const Result& result) { return result.budget_pass; })
+             ? 0
+             : 1;
 }

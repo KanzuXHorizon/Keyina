@@ -54,11 +54,15 @@ class Engine {
   [[nodiscard]] std::u32string_view RawKeys() const noexcept;
 
  private:
-  [[nodiscard]] std::u32string ComposeRaw() const;
+  void ComposeRaw(std::u32string& destination);
+  void BuildVisibleForRaw();
+  [[nodiscard]] TextEdit ReplaceVisible(bool consumed);
 
   EngineConfig config_;
   std::u32string raw_keys_;
   std::u32string visible_text_;
+  std::u32string composition_buffer_;
+  std::u32string previous_key_buffer_;
 };
 
 }  // namespace keyina

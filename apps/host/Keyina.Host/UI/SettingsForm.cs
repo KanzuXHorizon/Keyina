@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Keyina.Host.Core.Feedback;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Typing;
 using Microsoft.Win32;
@@ -44,6 +45,8 @@ public sealed class SettingsForm : Form
     private readonly FluentToggle startupToggle;
     private readonly FluentToggle typingLatencyToggle;
     private readonly ListView typingLatencyTable;
+    private readonly ComboBox feedbackMode;
+    private readonly FluentButton previewFeedback;
     private readonly TextBox speechApiKey;
     private readonly FluentButton saveSpeechKey;
     private readonly FluentButton removeSpeechKey;
@@ -94,6 +97,12 @@ public sealed class SettingsForm : Form
             "typingLatencyToggle",
             "Đo độ trễ từng công đoạn");
         typingLatencyTable = CreateTypingLatencyTable();
+        feedbackMode = CreateFeedbackModeSelector();
+        previewFeedback = CreateButton(
+            "previewFeedback",
+            "Thử phản hồi",
+            FluentButtonKind.Secondary,
+            128);
 
         speechApiKey = CreateTextBox(
             "speechApiKey",
@@ -254,6 +263,14 @@ public sealed class SettingsForm : Form
                 actions.SetTypingLatencyEnabled(typingLatencyToggle.Checked);
             }
         };
+        feedbackMode.SelectedIndexChanged += (_, _) =>
+        {
+            if (!applyingSnapshot && feedbackMode.SelectedIndex >= 0)
+            {
+                actions.SetFeedbackMode(FeedbackModeFromIndex(feedbackMode.SelectedIndex));
+            }
+        };
+        previewFeedback.Click += (_, _) => actions.PreviewFeedback();
         speechApiKey.TextChanged += (_, _) => saveSpeechKey.Enabled =
             !string.IsNullOrWhiteSpace(speechApiKey.Text);
         saveSpeechKey.Click += (_, _) => SaveSpeechCredential();
@@ -282,6 +299,7 @@ public sealed class SettingsForm : Form
             speechToggle.Checked = snapshot.SpeechEnabled;
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
+            feedbackMode.SelectedIndex = FeedbackModeToIndex(snapshot.FeedbackMode);
 
             var readinessText = snapshot.Listening
                 ? "Đang nghe"
@@ -892,6 +910,60 @@ public sealed class SettingsForm : Form
             "\uE711",
             "Escape",
             "Hủy phiên đọc hiện tại"));
+
+        var feedbackCard = CreateCard("hotkeyFeedbackCard", 184);
+        var feedbackLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 4,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        feedbackLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        feedbackLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        feedbackLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        feedbackLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        feedbackLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        feedbackLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        feedbackCard.Controls.Add(feedbackLayout);
+
+        var feedbackTitle = CreateLabel(
+            "feedbackTitle",
+            "Phản hồi khi dùng phím tắt",
+            LabelRole.Heading);
+        feedbackTitle.Dock = DockStyle.Fill;
+        feedbackLayout.Controls.Add(feedbackTitle, 0, 0);
+        previewFeedback.Height = 34;
+        previewFeedback.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        feedbackLayout.Controls.Add(previewFeedback, 1, 0);
+
+        var feedbackDescription = CreateLabel(
+            "feedbackDescription",
+            "Xác nhận lệnh bằng lớp phủ không chiếm focus và âm thanh ngắn.",
+            LabelRole.Secondary);
+        feedbackDescription.Dock = DockStyle.Fill;
+        feedbackLayout.Controls.Add(feedbackDescription, 0, 1);
+        feedbackLayout.SetColumnSpan(feedbackDescription, 2);
+
+        var feedbackModeLabel = CreateLabel(
+            "feedbackModeLabel",
+            "Cách phản hồi",
+            LabelRole.Caption);
+        feedbackModeLabel.Dock = DockStyle.Fill;
+        feedbackModeLabel.TextAlign = ContentAlignment.MiddleLeft;
+        feedbackLayout.Controls.Add(feedbackModeLabel, 0, 2);
+        feedbackMode.Anchor = AnchorStyles.Right;
+        feedbackLayout.Controls.Add(feedbackMode, 1, 2);
+
+        var feedbackNote = CreateLabel(
+            "feedbackFullscreenNote",
+            "Ở game hoặc ứng dụng toàn màn hình, chế độ Tự động chỉ phát âm thanh.",
+            LabelRole.Tertiary);
+        feedbackNote.Dock = DockStyle.Fill;
+        feedbackLayout.Controls.Add(feedbackNote, 0, 3);
+        feedbackLayout.SetColumnSpan(feedbackNote, 2);
+        stack.Controls.Add(feedbackCard);
 
         var registration = CreateCard("hotkeyRegistrationCard", 112);
         var registrationLayout = new TableLayoutPanel
@@ -1697,6 +1769,51 @@ public sealed class SettingsForm : Form
         Margin = Padding.Empty,
     };
 
+    private ComboBox CreateFeedbackModeSelector()
+    {
+        var selector = new ComboBox
+        {
+            Name = "feedbackMode",
+            AccessibleName = "Cách phản hồi khi dùng phím tắt",
+            AccessibleDescription =
+                "Chọn tự động, chỉ hình ảnh, chỉ âm thanh hoặc tắt phản hồi.",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font(Font.FontFamily, 9.5F, FontStyle.Regular),
+            Width = 220,
+            Height = 36,
+            IntegralHeight = false,
+            DropDownHeight = 148,
+            Margin = Padding.Empty,
+        };
+        selector.Items.AddRange(
+        [
+            "Tự động — khuyến nghị",
+            "Chỉ hình ảnh",
+            "Chỉ âm thanh",
+            "Tắt",
+        ]);
+        return selector;
+    }
+
+    private static int FeedbackModeToIndex(FeedbackMode mode) => mode switch
+    {
+        FeedbackMode.Automatic => 0,
+        FeedbackMode.VisualOnly => 1,
+        FeedbackMode.AudioOnly => 2,
+        FeedbackMode.Off => 3,
+        _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+    };
+
+    private static FeedbackMode FeedbackModeFromIndex(int index) => index switch
+    {
+        0 => FeedbackMode.Automatic,
+        1 => FeedbackMode.VisualOnly,
+        2 => FeedbackMode.AudioOnly,
+        3 => FeedbackMode.Off,
+        _ => throw new ArgumentOutOfRangeException(nameof(index)),
+    };
+
     private Panel CreateInputFrame(TextBox textBox, Control? trailing = null)
     {
         var frame = new Panel
@@ -1888,6 +2005,10 @@ public sealed class SettingsForm : Form
             case TextBox textBox:
                 textBox.BackColor = palette.SurfaceSecondary;
                 textBox.ForeColor = palette.TextPrimary;
+                break;
+            case ComboBox comboBox:
+                comboBox.BackColor = palette.SurfaceSecondary;
+                comboBox.ForeColor = palette.TextPrimary;
                 break;
             case ListView listView:
                 listView.BackColor = palette.SurfaceSecondary;

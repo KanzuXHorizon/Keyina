@@ -15,9 +15,9 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
     private const int ExtendedLayered = 0x00080000;
     private const int ExtendedNoActivate = 0x08000000;
     private const int ClassDropShadow = 0x00020000;
-    private const int ShowNoActivate = 4;
     private const uint SetWindowNoActivate = 0x0010;
     private const uint SetWindowShow = 0x0040;
+    private const uint LayeredWindowAlpha = 0x00000002;
     private static readonly IntPtr TopMostWindow = new(-1);
     private static readonly TimeSpan EntranceDuration = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(160);
@@ -41,7 +41,6 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        TopMost = true;
         ControlBox = false;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -53,7 +52,6 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
             GraphicsUnit.Point);
         Size = new Size(280, 58);
         BackColor = palette.Surface;
-        Opacity = 0;
         animationTimer.Tick += AnimationTimerTick;
     }
 
@@ -101,8 +99,8 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
         presentedTimestamp = Stopwatch.GetTimestamp();
 
         var animate = ShouldAnimate();
-        Opacity = animate ? 0.01 : 1;
         _ = Handle;
+        SetAlpha(animate ? 0.01 : 1);
         _ = SetWindowPos(
             Handle,
             TopMostWindow,
@@ -111,7 +109,6 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
             bounds.Width,
             bounds.Height,
             SetWindowNoActivate | SetWindowShow);
-        _ = ShowWindow(Handle, ShowNoActivate);
         Invalidate();
 
         animationTimer.Stop();
@@ -122,9 +119,9 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
     {
         animationTimer.Stop();
         currentEvent = null;
-        Opacity = 0;
         if (IsHandleCreated)
         {
+            SetAlpha(0);
             _ = ShowWindow(Handle, command: 0);
         }
     }
@@ -233,7 +230,7 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
         var elapsed = Stopwatch.GetElapsedTime(presentedTimestamp);
         if (!ShouldAnimate())
         {
-            Opacity = 1;
+            SetAlpha(1);
             if (currentEvent.Duration != Timeout.InfiniteTimeSpan &&
                 elapsed >= currentEvent.Duration)
             {
@@ -244,14 +241,14 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
 
         if (elapsed < EntranceDuration)
         {
-            Opacity = EaseOut((double)elapsed.Ticks / EntranceDuration.Ticks);
+            SetAlpha(EaseOut((double)elapsed.Ticks / EntranceDuration.Ticks));
             return;
         }
 
         if (currentEvent.Duration == Timeout.InfiniteTimeSpan ||
             elapsed <= currentEvent.Duration)
         {
-            Opacity = 1;
+            SetAlpha(1);
             return;
         }
 
@@ -262,10 +259,10 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
             return;
         }
 
-        Opacity = Math.Clamp(
+        SetAlpha(Math.Clamp(
             1d - ((double)exitElapsed.Ticks / ExitDuration.Ticks),
             0.01,
-            1d);
+            1d));
     }
 
     private void UpdateOverlaySize(string message)
@@ -335,6 +332,14 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
         palette.Mode != FluentThemeMode.HighContrast &&
         SystemInformation.IsMenuAnimationEnabled;
 
+    private void SetAlpha(double opacity)
+    {
+        var alpha = checked((byte)Math.Round(
+            Math.Clamp(opacity, 0d, 1d) * byte.MaxValue,
+            MidpointRounding.AwayFromZero));
+        _ = SetLayeredWindowAttributes(Handle, 0, alpha, LayeredWindowAlpha);
+    }
+
     private int Scale(int logicalPixels) =>
         Math.Max(1, (int)Math.Round(logicalPixels * DeviceDpi / 96F));
 
@@ -350,6 +355,14 @@ public sealed class NoActivateFeedbackOverlay : Form, IFeedbackOverlay
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetLayeredWindowAttributes(
+        IntPtr window,
+        uint colorKey,
+        byte alpha,
+        uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
