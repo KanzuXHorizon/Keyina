@@ -129,7 +129,7 @@ internal static class ConfigurationStoreTests
             .GetAwaiter().GetResult();
 
         AssertEx.False(loaded.TranslationEnabled, "Translation must remain opt-in.");
-        AssertEx.Equal("EN-US", loaded.TranslationTargetLanguage);
+        AssertEx.Equal("VI", loaded.TranslationTargetLanguage);
     }
 
     [KeyinaTest("schema one existing configuration skips first-run onboarding")]

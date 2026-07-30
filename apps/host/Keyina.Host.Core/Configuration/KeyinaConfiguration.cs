@@ -59,7 +59,7 @@ public sealed record KeyinaConfiguration(
 
     public bool TranslationPreviewEnabled { get; init; }
 
-    public string TranslationTargetLanguage { get; init; } = "EN-US";
+    public string TranslationTargetLanguage { get; init; } = "VI";
 
     public TranslationProviderPreferences TranslationProviders { get; init; } =
         TranslationProviderPreferences.Default;

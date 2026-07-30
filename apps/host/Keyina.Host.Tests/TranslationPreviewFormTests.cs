@@ -6,7 +6,7 @@ namespace Keyina.Host.Tests;
 
 internal static class TranslationPreviewFormTests
 {
-    [KeyinaTest("translation preview form exposes original translated and explicit actions")]
+    [KeyinaTest("translation overlay exposes translated text without replacement controls")]
     private static void PreviewStructureIsComplete()
     {
         var replaced = 0;
@@ -19,15 +19,15 @@ internal static class TranslationPreviewFormTests
             text => copied = text,
             () => cancelled++);
 
-        AssertEx.Equal("Xem trước bản dịch", form.Text);
+        AssertEx.Equal("Bản dịch", form.Text);
         AssertEx.Equal(AutoScaleMode.Dpi, form.AutoScaleMode);
-        AssertEx.True(form.ShowInTaskbar, "Interactive preview should be discoverable in the taskbar.");
+        AssertEx.False(form.ShowInTaskbar, "Translation overlay should not create a taskbar item.");
+        AssertEx.True(form.TopMost, "Translation overlay should remain visible above the selected app.");
         AssertEx.True(
-            form.AccessibleDescription?.Contains("focus", StringComparison.OrdinalIgnoreCase) == true,
-            "Preview accessibility copy did not explain focus restoration.");
-        AssertEx.Equal(
-            "Xin chào",
-            ((TextBox)form.Controls.Find("translationPreviewOriginal", true).Single()).Text);
+            form.AccessibleDescription?.Contains("không thay đổi", StringComparison.OrdinalIgnoreCase) == true,
+            "Overlay accessibility copy did not explain that original text remains unchanged.");
+        AssertEx.Equal(0, form.Controls.Find("translationPreviewOriginal", true).Length);
+        AssertEx.Equal(0, form.Controls.Find("replaceTranslationPreview", true).Length);
         AssertEx.Equal(
             "Hello",
             ((TextBox)form.Controls.Find("translationPreviewTranslated", true).Single()).Text);
@@ -38,34 +38,23 @@ internal static class TranslationPreviewFormTests
         AssertEx.Equal(0, cancelled);
     }
 
-    [KeyinaTest("translation preview replace and cancel actions fire once")]
+    [KeyinaTest("translation overlay cancel action fires once without replacing")]
     private static void PreviewActionsAreOneShot()
     {
-        foreach (var actionName in new[]
-                 {
-                     "replaceTranslationPreview",
-                     "cancelTranslationPreview",
-                 })
-        {
-            var replaced = 0;
-            var cancelled = 0;
-            using var form = new TranslationPreviewForm(
-                CreatePreview(),
-                _ => replaced++,
-                _ => { },
-                () => cancelled++);
-            var button = (Button)form.Controls.Find(actionName, true).Single();
+        var replaced = 0;
+        var cancelled = 0;
+        using var form = new TranslationPreviewForm(
+            CreatePreview(),
+            _ => replaced++,
+            _ => { },
+            () => cancelled++);
+        var button = (Button)form.Controls.Find("cancelTranslationPreview", true).Single();
 
-            InvokeClick(button);
-            InvokeClick(button);
+        InvokeClick(button);
+        InvokeClick(button);
 
-            AssertEx.Equal(
-                actionName == "replaceTranslationPreview" ? 1 : 0,
-                replaced);
-            AssertEx.Equal(
-                actionName == "cancelTranslationPreview" ? 1 : 0,
-                cancelled);
-        }
+        AssertEx.Equal(0, replaced);
+        AssertEx.Equal(1, cancelled);
     }
 
     private static TranslationPreview CreatePreview() => new(

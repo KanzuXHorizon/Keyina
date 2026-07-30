@@ -39,6 +39,7 @@ public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
     private const int ClipboardRetryAttempts = 6;
     private const int CopyPollAttempts = 20;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(15);
+    private static readonly TimeSpan HotkeyReleaseDelay = TimeSpan.FromMilliseconds(60);
 
     private readonly IClipboardSelectionPlatform platform;
 
@@ -68,6 +69,17 @@ public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
             .ConfigureAwait(true);
         try
         {
+            // WM_HOTKEY can be dispatched while Ctrl/Alt are still physically held.
+            // Let the shortcut keys return to the up state before injecting Ctrl+C;
+            // otherwise some applications receive Ctrl+Alt+C and never copy.
+            await platform.DelayAsync(HotkeyReleaseDelay, cancellationToken)
+                .ConfigureAwait(true);
+
+            if (platform.GetForegroundWindow() != foregroundWindow)
+            {
+                return null;
+            }
+
             var sequenceBeforeCopy = platform.GetClipboardSequenceNumber();
             platform.SendCopyShortcut();
 

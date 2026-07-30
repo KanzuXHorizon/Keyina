@@ -74,6 +74,18 @@ internal static class SpeechmaticsProtocolTests
         AssertEx.Equal(0.8, final.EndTimeSeconds);
     }
 
+    [KeyinaTest("Speechmatics parser accepts empty partial transcripts while recognition is warming up")]
+    private static void EmptyPartialTranscriptIsAccepted()
+    {
+        var partial = SpeechmaticsProtocol.ParseServerMessage(
+            "{\"message\":\"AddPartialTranscript\",\"metadata\":{\"transcript\":\"\",\"start_time\":0.0,\"end_time\":0.62}}"u8);
+
+        AssertEx.Equal(SpeechEventKind.PartialTranscript, partial.Kind);
+        AssertEx.Equal(string.Empty, partial.Text);
+        AssertEx.Equal(0.0, partial.StartTimeSeconds);
+        AssertEx.Equal(0.62, partial.EndTimeSeconds);
+    }
+
     [KeyinaTest("Speechmatics parser handles session acknowledgement audio acknowledgement and end")]
     private static void LifecycleMessagesAreParsed()
     {

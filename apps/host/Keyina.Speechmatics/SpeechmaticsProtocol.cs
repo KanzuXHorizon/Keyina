@@ -109,7 +109,9 @@ public static class SpeechmaticsProtocol
         return new SpeechEvent
         {
             Kind = kind,
-            Text = RequiredString(metadata, "transcript"),
+            Text = kind == SpeechEventKind.PartialTranscript
+                ? RequiredStringAllowEmpty(metadata, "transcript")
+                : RequiredString(metadata, "transcript"),
             StartTimeSeconds = RequiredDouble(metadata, "start_time"),
             EndTimeSeconds = RequiredDouble(metadata, "end_time"),
         };
@@ -146,6 +148,20 @@ public static class SpeechmaticsProtocol
         }
 
         return value;
+    }
+
+    private static string RequiredStringAllowEmpty(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.String)
+        {
+            throw new SpeechmaticsProtocolException(
+                $"Speechmatics message is missing string property '{propertyName}'.");
+        }
+
+        return property.GetString() ?? string.Empty;
     }
 
     private static string? OptionalString(JsonElement element, string propertyName)

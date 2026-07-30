@@ -687,7 +687,7 @@ internal static class KeyinaApplicationContextTests
         AssertEx.Equal(FeedbackSoundCue.Disabled, sound.Cues[0]);
     }
 
-    [KeyinaTest("resident context defers replacement while translation preview is enabled")]
+    [KeyinaTest("resident context shows translation overlay without replacing selected text")]
     private static void TranslationPreviewDefersReplacement()
     {
         using var directory = new TemporaryDirectory();
@@ -725,17 +725,14 @@ internal static class KeyinaApplicationContextTests
             ?? throw new InvalidOperationException("Translation preview field was not found.");
         var form = (TranslationPreviewForm?)formField.GetValue(context)
             ?? throw new InvalidOperationException("Translation preview form was not created.");
-        InvokeClick((Button)form.Controls.Find(
-            "replaceTranslationPreview",
-            true).Single());
-
-        AssertEx.Equal(1, accessor.PreviewReplaceCount);
-        AssertEx.Equal("Hello", accessor.LastReplacement);
-        context.DispatchCommandAsync(
-                HotkeyCommand.UndoTranslation,
-                CancellationToken.None)
-            .GetAwaiter().GetResult();
-        AssertEx.Equal(1, accessor.RestoreCount);
+        AssertEx.Equal(0, form.Controls.Find("replaceTranslationPreview", true).Length);
+        AssertEx.Equal(
+            "Hello",
+            ((TextBox)form.Controls.Find(
+                "translationPreviewTranslated",
+                true).Single()).Text);
+        AssertEx.Equal(0, accessor.PreviewReplaceCount);
+        AssertEx.Equal(0, accessor.RestoreCount);
     }
 
     [KeyinaTest("resident context restores the last translation once")]

@@ -23,18 +23,19 @@ public sealed class TranslationPreviewForm : Form
         this.copy = copy ?? throw new ArgumentNullException(nameof(copy));
         this.cancel = cancel ?? throw new ArgumentNullException(nameof(cancel));
 
-        Text = "Xem trước bản dịch";
-        AccessibleName = "Xem trước bản dịch Keyina";
+        Text = "Bản dịch";
+        AccessibleName = "Overlay bản dịch Keyina";
         AccessibleDescription =
-            "So sánh văn bản gốc và bản dịch. Nút Thay thế sẽ phục hồi focus về ứng dụng ban đầu trước khi chèn.";
+            "Hiển thị bản dịch mà không thay đổi văn bản đang chọn. Có thể sao chép hoặc đóng overlay.";
         AutoScaleMode = AutoScaleMode.Dpi;
-        StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 520);
-        Size = new Size(920, 620);
-        FormBorderStyle = FormBorderStyle.Sizable;
-        MaximizeBox = true;
-        MinimizeBox = true;
-        ShowInTaskbar = true;
+        StartPosition = FormStartPosition.Manual;
+        MinimumSize = new Size(420, 260);
+        Size = new Size(560, 360);
+        FormBorderStyle = FormBorderStyle.FixedSingle;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowInTaskbar = false;
+        TopMost = true;
         KeyPreview = true;
         Font = new Font("Segoe UI Variable Text", 9.5F, FontStyle.Regular);
 
@@ -46,8 +47,8 @@ public sealed class TranslationPreviewForm : Form
             Padding = new Padding(26, 22, 26, 20),
             Margin = Padding.Empty,
         };
-        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));
-        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
         Controls.Add(shell);
@@ -55,7 +56,7 @@ public sealed class TranslationPreviewForm : Form
         var title = new Label
         {
             Name = "translationPreviewTitle",
-            Text = "Kiểm tra trước khi thay thế",
+            Text = "Bản dịch",
             Dock = DockStyle.Fill,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
@@ -79,27 +80,21 @@ public sealed class TranslationPreviewForm : Form
         var comparison = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 1,
             RowCount = 2,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
         };
-        comparison.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-        comparison.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        comparison.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         comparison.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
         comparison.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         shell.Controls.Add(comparison, 0, 2);
 
-        comparison.Controls.Add(CreateHeading("translationPreviewOriginalTitle", "Văn bản gốc"), 0, 0);
-        comparison.Controls.Add(CreateHeading("translationPreviewTranslatedTitle", "Bản dịch"), 1, 0);
-        comparison.Controls.Add(CreatePreviewTextBox(
-            "translationPreviewOriginal",
-            "Văn bản gốc",
-            preview.OriginalText), 0, 1);
+        comparison.Controls.Add(CreateHeading("translationPreviewTranslatedTitle", "Nội dung đã dịch"), 0, 0);
         comparison.Controls.Add(CreatePreviewTextBox(
             "translationPreviewTranslated",
-            "Bản dịch đề xuất",
-            preview.TranslatedText), 1, 1);
+            "Bản dịch",
+            preview.TranslatedText), 0, 1);
 
         var actions = new FlowLayoutPanel
         {
@@ -109,18 +104,10 @@ public sealed class TranslationPreviewForm : Form
             Padding = new Padding(0, 9, 0, 0),
             Margin = Padding.Empty,
         };
-        var replaceButton = CreateButton(
-            "replaceTranslationPreview",
-            "Thay thế",
-            FluentButtonKind.Primary,
-            118);
-        replaceButton.AccessibleDescription =
-            "Khôi phục focus về ứng dụng ban đầu và thay phần văn bản đã chọn.";
-        replaceButton.Click += (_, _) => CompleteOnce(() => replace(preview));
         var copyButton = CreateButton(
             "copyTranslationPreview",
             "Sao chép",
-            FluentButtonKind.Secondary,
+            FluentButtonKind.Primary,
             112);
         copyButton.AccessibleDescription = "Sao chép bản dịch nhưng không thay văn bản gốc.";
         copyButton.Margin = new Padding(0, 0, 8, 0);
@@ -133,12 +120,11 @@ public sealed class TranslationPreviewForm : Form
         cancelButton.AccessibleDescription = "Đóng bản xem trước mà không chèn nội dung.";
         cancelButton.Margin = new Padding(0, 0, 8, 0);
         cancelButton.Click += (_, _) => CompleteOnce(cancel);
-        actions.Controls.Add(replaceButton);
         actions.Controls.Add(copyButton);
         actions.Controls.Add(cancelButton);
         shell.Controls.Add(actions, 0, 3);
 
-        AcceptButton = replaceButton;
+        AcceptButton = copyButton;
         CancelButton = cancelButton;
         FormClosing += (_, _) =>
         {
@@ -149,6 +135,15 @@ public sealed class TranslationPreviewForm : Form
             }
         };
         ApplyPaletteRecursive(this);
+        Shown += (_, _) => PositionNearWorkingArea();
+    }
+
+    private void PositionNearWorkingArea()
+    {
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Location = new Point(
+            Math.Max(area.Left, area.Right - Width - 20),
+            Math.Max(area.Top, area.Bottom - Height - 20));
     }
 
     protected override void OnHandleCreated(EventArgs e)

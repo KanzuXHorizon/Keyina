@@ -35,7 +35,7 @@ public sealed record SettingsSnapshot(
 
     public bool TranslationHotkeyRegistered { get; init; }
 
-    public string TranslationTargetLanguage { get; init; } = "EN-US";
+    public string TranslationTargetLanguage { get; init; } = "VI";
 
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
 
@@ -62,7 +62,7 @@ public sealed record SettingsSnapshot(
         LibreTranslateCredentialConfigured = false,
         TranslationProviders = TranslationProviderPreferences.Default,
         TranslationHotkeyRegistered = true,
-        TranslationTargetLanguage = "EN-US",
+        TranslationTargetLanguage = "VI",
         Hotkeys = HotkeyPreferences.Default,
         Applications = ApplicationPreferences.Default,
     };

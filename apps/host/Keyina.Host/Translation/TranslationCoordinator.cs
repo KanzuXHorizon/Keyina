@@ -101,7 +101,7 @@ public sealed class TranslationCoordinator : IDisposable
         bool preview = false)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
+        ArgumentNullException.ThrowIfNull(apiKey);
 
         var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         lock (sync)
