@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Translation;
@@ -25,6 +26,7 @@ public sealed class SettingsForm : Form
             ["speech"] = ("Nhập bằng giọng nói", "Đọc tiếng Việt vào ứng dụng đang được chọn."),
             ["translation"] = ("Dịch nhanh", "Dịch phần văn bản đang chọn mà không làm mất focus."),
             ["hotkeys"] = ("Phím tắt", "Các thao tác nhanh hoạt động trên toàn hệ thống."),
+            ["applications"] = ("Ứng dụng", "Tùy chỉnh hành vi Keyina theo tên file thực thi."),
             ["snippets"] = ("Gõ tắt", "Mở rộng cụm từ và lệnh cục bộ, có kiểm soát."),
             ["diagnostics"] = ("Chẩn đoán", "Kiểm tra trạng thái mà không thu thập nội dung đã nhập."),
         };
@@ -69,9 +71,15 @@ public sealed class SettingsForm : Form
     private readonly FluentButton setupTsfButton;
     private readonly FlowLayoutPanel snippetsList;
     private readonly TextBox snippetsSearch;
+    private readonly TextBox disableVietnameseApplications;
+    private readonly TextBox disableSpeechApplications;
+    private readonly TextBox disableTranslationApplications;
+    private readonly TextBox suppressVisualFeedbackApplications;
+    private readonly Label applicationRulesStatus;
     private FluentThemePalette palette = FluentTheme.Current;
     private SettingsSnapshot currentSnapshot;
     private bool applyingSnapshot;
+    private bool applicationRulesDirty;
     private bool resourcesReleased;
 
     public SettingsForm(SettingsSnapshot snapshot, SettingsActions actions)
@@ -190,6 +198,22 @@ public sealed class SettingsForm : Form
             "snippetsSearch",
             "Tìm theo từ kích hoạt hoặc nội dung",
             "Tìm gõ tắt");
+        disableVietnameseApplications = CreateApplicationListTextBox(
+            "disableVietnameseApplications",
+            "Ứng dụng không dùng bộ gõ tiếng Việt");
+        disableSpeechApplications = CreateApplicationListTextBox(
+            "disableSpeechApplications",
+            "Ứng dụng không dùng nhập giọng nói");
+        disableTranslationApplications = CreateApplicationListTextBox(
+            "disableTranslationApplications",
+            "Ứng dụng không dùng dịch nhanh");
+        suppressVisualFeedbackApplications = CreateApplicationListTextBox(
+            "suppressVisualFeedbackApplications",
+            "Ứng dụng chỉ dùng phản hồi âm thanh");
+        applicationRulesStatus = CreateLabel(
+            "applicationRulesStatus",
+            "Mỗi dòng là một tên file .exe, ví dụ game.exe.",
+            LabelRole.Tertiary);
 
         shell = new TableLayoutPanel
         {
@@ -280,6 +304,7 @@ public sealed class SettingsForm : Form
         pages.Add("speech", CreateSpeechPage());
         pages.Add("translation", CreateTranslationPage());
         pages.Add("hotkeys", CreateHotkeysPage());
+        pages.Add("applications", CreateApplicationsPage());
         pages.Add("snippets", CreateSnippetsPage());
         pages.Add("diagnostics", CreateDiagnosticsPage());
         foreach (var page in pages.Values)
@@ -358,6 +383,18 @@ public sealed class SettingsForm : Form
         saveDeepLKey.Click += (_, _) => SaveDeepLCredential();
         removeDeepLKey.Click += (_, _) => actions.DeleteDeepLApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
+        foreach (var textBox in GetApplicationRuleTextBoxes())
+        {
+            textBox.TextChanged += (_, _) =>
+            {
+                if (!applyingSnapshot)
+                {
+                    applicationRulesDirty = true;
+                    applicationRulesStatus.Text = "Có thay đổi chưa lưu.";
+                    applicationRulesStatus.ForeColor = palette.Warning;
+                }
+            };
+        }
         setupTsfButton.Click += SetupTsfButtonClick;
 
         SystemEvents.UserPreferenceChanged += SystemEventsUserPreferenceChanged;
@@ -384,6 +421,10 @@ public sealed class SettingsForm : Form
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
             feedbackMode.SelectedIndex = FeedbackModeToIndex(snapshot.FeedbackMode);
+            if (!applicationRulesDirty)
+            {
+                UpdateApplicationRulesDisplay(snapshot.Applications);
+            }
 
             var readinessText = snapshot.Listening
                 ? "Đang nghe"
@@ -589,6 +630,7 @@ public sealed class SettingsForm : Form
         AddNavigation(navigation, "navSpeech", "Nhập bằng giọng nói", "\uE720", "speech");
         AddNavigation(navigation, "navTranslation", "Dịch nhanh", "\uE8C1", "translation");
         AddNavigation(navigation, "navHotkeys", "Phím tắt", "\uE92E", "hotkeys");
+        AddNavigation(navigation, "navApplications", "Ứng dụng", "\uE7C5", "applications");
         AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
         AddNavigation(navigation, "navDiagnostics", "Chẩn đoán", "\uE9D9", "diagnostics");
         navigation.SizeChanged += (_, _) =>
@@ -1333,6 +1375,132 @@ public sealed class SettingsForm : Form
         registrationLayout.SetColumnSpan(registrationText, 2);
         stack.Controls.Add(registration);
         return page;
+    }
+
+    private Panel CreateApplicationsPage()
+    {
+        var page = CreatePage("applicationsPage");
+        var stack = CreateVerticalStack("applicationsStack");
+        page.Controls.Add(stack);
+
+        stack.Controls.Add(CreateApplicationRuleCard(
+            "applicationTypingRule",
+            "\uE765",
+            "Tắt bộ gõ tiếng Việt",
+            "Dùng cho game, terminal đặc biệt hoặc ứng dụng tự xử lý bàn phím.",
+            disableVietnameseApplications));
+        stack.Controls.Add(CreateApplicationRuleCard(
+            "applicationSpeechRule",
+            "\uE720",
+            "Tắt nhập giọng nói",
+            "Ngăn gửi âm thanh hoặc chèn transcript trong các ứng dụng đã chọn.",
+            disableSpeechApplications));
+        stack.Controls.Add(CreateApplicationRuleCard(
+            "applicationTranslationRule",
+            "\uE8C1",
+            "Tắt dịch nhanh",
+            "Ngăn văn bản được chọn gửi đến provider dịch trong các ứng dụng nhạy cảm.",
+            disableTranslationApplications));
+        stack.Controls.Add(CreateApplicationRuleCard(
+            "applicationFeedbackRule",
+            "\uE7F4",
+            "Chỉ phát âm thanh phản hồi",
+            "Ẩn overlay trong game hoặc ứng dụng toàn màn hình nhưng vẫn giữ âm báo ngắn.",
+            suppressVisualFeedbackApplications));
+
+        var saveCard = CreateCard("applicationRulesSaveCard", 104);
+        var saveLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        saveLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        saveLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        saveLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        saveLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        saveCard.Controls.Add(saveLayout);
+        var saveTitle = CreateLabel(
+            "applicationRulesTitle",
+            "Áp dụng quy tắc ứng dụng",
+            LabelRole.Heading);
+        saveTitle.Dock = DockStyle.Fill;
+        saveLayout.Controls.Add(saveTitle, 0, 0);
+        var saveButton = CreateButton(
+            "saveApplicationPreferences",
+            "Lưu quy tắc",
+            FluentButtonKind.Primary,
+            128);
+        saveButton.AccessibleDescription =
+            "Kiểm tra toàn bộ tên file .exe rồi lưu atomically.";
+        saveButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        saveButton.Click += (_, _) => SaveApplicationPreferences();
+        saveLayout.SetRowSpan(saveButton, 2);
+        saveLayout.Controls.Add(saveButton, 1, 0);
+        applicationRulesStatus.Dock = DockStyle.Fill;
+        saveLayout.Controls.Add(applicationRulesStatus, 0, 1);
+        stack.Controls.Add(saveCard);
+        return page;
+    }
+
+    private FluentCard CreateApplicationRuleCard(
+        string name,
+        string glyph,
+        string title,
+        string description,
+        TextBox textBox)
+    {
+        var card = CreateCard(name, 160);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 3,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 154F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        card.Controls.Add(layout);
+
+        var icon = CreateIconLabel(name + "Icon", glyph, 14F);
+        icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
+        layout.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(name + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(titleLabel, 1, 0);
+        var descriptionLabel = CreateLabel(
+            name + "Description",
+            description,
+            LabelRole.Secondary);
+        descriptionLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(descriptionLabel, 1, 1);
+        layout.SetColumnSpan(descriptionLabel, 2);
+
+        var addCurrent = CreateButton(
+            name + "AddCurrent",
+            "Thêm app hiện tại",
+            FluentButtonKind.Secondary,
+            144);
+        addCurrent.AccessibleDescription =
+            $"Thêm tên file của ứng dụng đang focus vào danh sách {title}.";
+        addCurrent.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        addCurrent.Click += (_, _) => AddForegroundApplication(textBox);
+        layout.Controls.Add(addCurrent, 2, 0);
+
+        var input = CreateInputFrame(textBox);
+        input.Dock = DockStyle.Fill;
+        input.Margin = new Padding(0, 4, 0, 0);
+        layout.Controls.Add(input, 1, 2);
+        layout.SetColumnSpan(input, 2);
+        return card;
     }
 
     private Panel CreateSnippetsPage()
@@ -2210,6 +2378,25 @@ public sealed class SettingsForm : Form
         Margin = Padding.Empty,
     };
 
+    private TextBox CreateApplicationListTextBox(
+        string name,
+        string accessibleName)
+    {
+        var textBox = CreateTextBox(
+            name,
+            "Mỗi dòng một tên file .exe",
+            accessibleName);
+        textBox.Multiline = true;
+        textBox.AcceptsReturn = true;
+        textBox.AcceptsTab = false;
+        textBox.ScrollBars = ScrollBars.Vertical;
+        textBox.WordWrap = false;
+        textBox.MaxLength = 16_384;
+        textBox.AccessibleDescription =
+            "Nhập tên file thực thi, không nhập đường dẫn hoặc wildcard.";
+        return textBox;
+    }
+
     private ComboBox CreateFeedbackModeSelector()
     {
         var selector = new ComboBox
@@ -2358,6 +2545,109 @@ public sealed class SettingsForm : Form
                 runButton.Enabled = true;
             }
         }
+    }
+
+    private TextBox[] GetApplicationRuleTextBoxes() =>
+    [
+        disableVietnameseApplications,
+        disableSpeechApplications,
+        disableTranslationApplications,
+        suppressVisualFeedbackApplications,
+    ];
+
+    private void UpdateApplicationRulesDisplay(ApplicationPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        var normalized = preferences.Normalize();
+        disableVietnameseApplications.Lines = normalized.DisableVietnamese;
+        disableSpeechApplications.Lines = normalized.DisableSpeech;
+        disableTranslationApplications.Lines = normalized.DisableTranslation;
+        suppressVisualFeedbackApplications.Lines = normalized.SuppressVisualFeedback;
+        applicationRulesStatus.Text = "Mỗi dòng là một tên file .exe, ví dụ game.exe.";
+        applicationRulesStatus.ForeColor = palette.TextTertiary;
+    }
+
+    private void SaveApplicationPreferences()
+    {
+        try
+        {
+            var preferences = new ApplicationPreferences(
+                ParseApplicationRules(disableVietnameseApplications),
+                ParseApplicationRules(disableSpeechApplications),
+                ParseApplicationRules(disableTranslationApplications),
+                ParseApplicationRules(suppressVisualFeedbackApplications))
+                .Normalize();
+            applicationRulesDirty = false;
+            UpdateApplicationRulesDisplay(preferences);
+            actions.SetApplicationPreferences(preferences);
+            applicationRulesStatus.Text = "Đã kiểm tra và lưu quy tắc ứng dụng.";
+            applicationRulesStatus.ForeColor = palette.Success;
+        }
+        catch (ArgumentException exception)
+        {
+            applicationRulesDirty = true;
+            applicationRulesStatus.Text = LocalizeApplicationRuleError(exception.Message);
+            applicationRulesStatus.ForeColor = palette.Error;
+        }
+    }
+
+    private void AddForegroundApplication(TextBox target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        var executableName = actions.GetForegroundApplicationName();
+        if (string.IsNullOrWhiteSpace(executableName))
+        {
+            applicationRulesStatus.Text =
+                "Không xác định được ứng dụng trước khi mở Cài đặt. Hãy nhập tên file .exe thủ công.";
+            applicationRulesStatus.ForeColor = palette.Warning;
+            return;
+        }
+
+        try
+        {
+            var normalized = ApplicationPreferences.NormalizeExecutableName(executableName);
+            var existing = ParseApplicationRules(target);
+            if (existing.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                applicationRulesStatus.Text = $"{normalized} đã có trong danh sách.";
+                applicationRulesStatus.ForeColor = palette.Warning;
+                return;
+            }
+            target.Lines = existing.Append(normalized).ToArray();
+            applicationRulesDirty = true;
+            applicationRulesStatus.Text = $"Đã thêm {normalized}; nhấn Lưu quy tắc để áp dụng.";
+            applicationRulesStatus.ForeColor = palette.Warning;
+        }
+        catch (ArgumentException)
+        {
+            applicationRulesStatus.Text =
+                "Ứng dụng hiện tại không cung cấp tên file .exe hợp lệ.";
+            applicationRulesStatus.ForeColor = palette.Error;
+        }
+    }
+
+    private static string[] ParseApplicationRules(TextBox textBox) =>
+        textBox.Lines
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .ToArray();
+
+    private static string LocalizeApplicationRuleError(string message)
+    {
+        if (message.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Danh sách có tên ứng dụng bị trùng.";
+        }
+        if (message.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("wildcard", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Chỉ nhập tên file .exe, không nhập đường dẫn hoặc wildcard.";
+        }
+        if (message.Contains(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Mỗi dòng phải là một tên file Windows kết thúc bằng .exe.";
+        }
+        return "Quy tắc ứng dụng không hợp lệ. Hãy kiểm tra từng dòng.";
     }
 
     private void EditHotkey(HotkeyCommand command)

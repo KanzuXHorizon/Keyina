@@ -1,3 +1,4 @@
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Windows.Typing;
@@ -30,6 +31,8 @@ public sealed record SettingsSnapshot(
 
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
 
+    public ApplicationPreferences Applications { get; init; } = ApplicationPreferences.Default;
+
     public KeyinaReadiness Readiness => ReadinessMapper.Map(Health);
     public static SettingsSnapshot Sample { get; } = new(
         VietnameseEnabled: true,
@@ -50,6 +53,7 @@ public sealed record SettingsSnapshot(
         TranslationHotkeyRegistered = true,
         TranslationTargetLanguage = "EN-US",
         Hotkeys = HotkeyPreferences.Default,
+        Applications = ApplicationPreferences.Default,
     };
 }
 
@@ -86,6 +90,10 @@ public sealed record SettingsActions(
     public Action<string> ExportSettings { get; init; } = _ => { };
 
     public Action<string> ImportSettings { get; init; } = _ => { };
+
+    public Action<ApplicationPreferences> SetApplicationPreferences { get; init; } = _ => { };
+
+    public Func<string?> GetForegroundApplicationName { get; init; } = () => null;
 
     public static SettingsActions NoOp { get; } = new(
         _ => { },

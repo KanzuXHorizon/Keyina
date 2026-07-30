@@ -86,6 +86,32 @@ internal static class VietnameseKeyboardHookTests
             "Disabled typing performed foreground Win32 work for an ordinary key.");
     }
 
+    [KeyinaTest("resident hook bypasses excluded applications without swallowing input")]
+    private static void ExcludedApplicationBypassesTyping()
+    {
+        var native = new FakeHookNativeApi { ForegroundProcessId = 742 };
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        var observedProcessIds = new List<int>();
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native,
+            processId =>
+            {
+                observedProcessIds.Add(processId);
+                return processId == 742;
+            });
+        hook.Start(enabledInitially: true);
+
+        var handled = native.SendLetter('A', 'a');
+
+        AssertEx.False(handled, "Excluded application input was swallowed.");
+        AssertEx.Equal(string.Empty, injector.Text);
+        AssertEx.True(observedProcessIds.Contains(742),
+            "Typing exclusion did not receive the foreground process id.");
+    }
+
     [KeyinaTest("Keyina injected events bypass physical hotkey observers")]
     private static void InjectedEventsBypassPhysicalObservers()
     {

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Keyina.Host.Configuration;
 using Keyina.Host.Core;
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
@@ -13,6 +14,7 @@ using Keyina.Host.Translation;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Feedback;
 using Keyina.Host.UI.Fluent;
+using Keyina.Host.Windows.Applications;
 using Keyina.Host.Windows.Audio;
 using Keyina.Host.Windows.Credentials;
 using Keyina.Host.Windows.Feedback;
@@ -34,6 +36,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly AtomicConfigurationStore configurationStore;
     private readonly WindowsStartupRegistration startupRegistration;
     private readonly ICredentialVault credentialVault;
+    private readonly IApplicationExclusionService applicationExclusions;
     private readonly TsfSetupService tsfSetupService = new();
     private readonly HttpClient? translationHttpClient;
     private readonly TranslationCoordinator translationCoordinator;
@@ -74,12 +77,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private bool pipeReady;
     private bool endToEndTypingPassed;
     private DateTimeOffset? lastTypingTestAt;
+    private string? lastExternalApplicationName;
     private FluentThemeMode? trayThemeMode;
     private DictationStatus? lastFeedbackDictationStatus;
     private bool disposed;
 
     public KeyinaApplicationContext(KeyinaRuntimeOptions options)
-        : this(options, null, null, null)
+        : this(options, null, null, null, null)
     {
     }
 
@@ -87,11 +91,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         KeyinaRuntimeOptions options,
         ICredentialVault? credentialVault,
         ITranslationProvider? translationProvider,
-        ISelectedTextAccessor? selectedTextAccessor)
+        ISelectedTextAccessor? selectedTextAccessor,
+        IApplicationExclusionService? applicationExclusions = null)
     {
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         options.Validate();
         this.credentialVault = credentialVault ?? new WindowsCredentialVault();
+        this.applicationExclusions = applicationExclusions ??
+            new ApplicationExclusionService();
         if (translationProvider is null)
         {
             translationHttpClient = new HttpClient();
@@ -103,6 +110,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
         configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
         configuration = LoadConfiguration();
+        this.applicationExclusions.Update(configuration.Applications);
         state = HostState.Initial with
         {
             VietnameseEnabled = configuration.VietnameseEnabled,
@@ -303,6 +311,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     public void OpenSettings(string? section = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
+        RememberForegroundApplication();
         if (SettingsCreated)
         {
             if (settingsForm!.WindowState == FormWindowState.Minimized)
@@ -338,8 +347,30 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
+    private void RememberForegroundApplication()
+    {
+        try
+        {
+            var executableName = applicationExclusions.GetForegroundExecutableName();
+            var ownExecutableName = Path.GetFileName(Environment.ProcessPath);
+            if (!string.IsNullOrWhiteSpace(executableName) &&
+                !string.Equals(
+                    executableName,
+                    ownExecutableName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                lastExternalApplicationName = executableName;
+            }
+        }
+        catch (Exception)
+        {
+            // Current-application assistance is optional.
+        }
+    }
+
     private void OpenFirstRun()
     {
+        RememberForegroundApplication();
         if (FirstRunCreated)
         {
             firstRunForm!.Show();
@@ -482,7 +513,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                             out _);
                 });
 
-                typingHook = new VietnameseKeyboardHook();
+                typingHook = new VietnameseKeyboardHook(
+                    shouldBypassApplication: processId =>
+                        this.applicationExclusions.IsDisabled(
+                            ApplicationFeature.VietnameseTyping,
+                            processId));
                 modifierHook = new ModifierKeyboardHook(
                     new SharedTypingKeyboardHookNativeApi(typingHook));
                 modifierHook.Configure(
@@ -846,6 +881,34 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         return true;
     }
 
+    private void SetApplicationPreferences(ApplicationPreferences preferences)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(preferences);
+            var normalized = preferences.Normalize();
+            applicationExclusions.Update(normalized);
+            configuration = configuration with { Applications = normalized };
+            typingHook?.Reset();
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã cập nhật quy tắc ứng dụng"));
+        }
+        catch (ArgumentException)
+        {
+            ReportFailure("application_preferences_invalid");
+            PublishFeedback(FeedbackEvents.Error(
+                "Tên ứng dụng không hợp lệ; chỉ nhập tên file .exe"));
+        }
+        catch (Exception)
+        {
+            ReportFailure("application_preferences_update_failed");
+            PublishFeedback(FeedbackEvents.Error(
+                "Không thể cập nhật quy tắc ứng dụng"));
+        }
+        RefreshVisualState();
+    }
+
     private void SetStartupEnabled(bool enabled)
     {
         try
@@ -896,6 +959,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             }
             if (IsDictationActive)
             {
+                return;
+            }
+            if (applicationExclusions.IsForegroundDisabled(ApplicationFeature.Speech))
+            {
+                ReportFailure("speech_application_excluded");
+                PublishFeedback(FeedbackEvents.Error(
+                    "Nhập giọng nói đã tắt cho ứng dụng này"));
                 return;
             }
             var target = pipeServer?.ActiveTarget;
@@ -983,6 +1053,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             ReportFailure("translation_disabled");
             PublishFeedback(FeedbackEvents.Error("Dịch nhanh đang tắt"));
+            return;
+        }
+        if (applicationExclusions.IsForegroundDisabled(ApplicationFeature.Translation))
+        {
+            ReportFailure("translation_application_excluded");
+            PublishFeedback(FeedbackEvents.Error(
+                "Dịch nhanh đã tắt cho ứng dụng này"));
             return;
         }
 
@@ -1094,7 +1171,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         try
         {
-            feedbackCoordinator?.Publish(feedbackEvent);
+            feedbackCoordinator?.Publish(
+                feedbackEvent,
+                suppressVisual: applicationExclusions.IsForegroundDisabled(
+                    ApplicationFeature.VisualFeedback));
         }
         catch (Exception)
         {
@@ -1192,6 +1272,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             state,
             new InputModeChanged(configuration.VietnameseEnabled));
         typingHook?.SetEnabled(configuration.VietnameseEnabled);
+        applicationExclusions.Update(configuration.Applications);
         modifierHook?.Configure(
             configuration.Hotkeys.ToggleVietnamese,
             configuration.Hotkeys.PushToTalk);
@@ -1287,6 +1368,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ResetAllHotkeys = ResetAllHotkeys,
         ExportSettings = ExportPortableSettings,
         ImportSettings = ImportPortableSettings,
+        SetApplicationPreferences = SetApplicationPreferences,
+        GetForegroundApplicationName = () =>
+            lastExternalApplicationName ??
+            applicationExclusions.GetForegroundExecutableName(),
     };
 
     private static void SetTypingInstrumentationEnabled(bool enabled)
@@ -1385,6 +1470,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationHotkeyRegistered = translationHotkeyReady,
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
             Hotkeys = configuration.Hotkeys,
+            Applications = configuration.Applications,
         };
     }
 

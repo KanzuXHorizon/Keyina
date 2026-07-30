@@ -48,7 +48,9 @@ public sealed class FeedbackCoordinator : IDisposable
         }
     }
 
-    public void Publish(FeedbackEvent feedbackEvent)
+    public void Publish(
+        FeedbackEvent feedbackEvent,
+        bool suppressVisual = false)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         ArgumentNullException.ThrowIfNull(feedbackEvent);
@@ -81,6 +83,11 @@ public sealed class FeedbackCoordinator : IDisposable
         catch (Exception)
         {
             return;
+        }
+
+        if (suppressVisual)
+        {
+            presentation = presentation with { ShowOverlay = false };
         }
 
         if (presentation.ShowOverlay)

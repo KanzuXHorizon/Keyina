@@ -1,4 +1,5 @@
 using System.Reflection;
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.UI;
@@ -37,6 +38,7 @@ internal static class SettingsFormTests
                      "navSpeech",
                      "navTranslation",
                      "navHotkeys",
+                     "navApplications",
                      "navSnippets",
                      "navDiagnostics",
                  })
@@ -224,6 +226,56 @@ internal static class SettingsFormTests
         AssertEx.Equal(2, results.Count);
         AssertEx.True(results[0], "Successful focused typing was not recorded.");
         AssertEx.False(results[1], "Failed focused typing was not recorded.");
+    }
+
+    [KeyinaTest("applications settings edit bounded executable-name rules")]
+    private static void ApplicationRulesAreEditable()
+    {
+        var saved = new List<ApplicationPreferences>();
+        var actions = SettingsActions.NoOp with
+        {
+            SetApplicationPreferences = saved.Add,
+            GetForegroundApplicationName = () => "Code.EXE",
+        };
+        var snapshot = SettingsSnapshot.Sample with
+        {
+            Applications = new ApplicationPreferences(
+                DisableVietnamese: ["game.exe"],
+                DisableSpeech: [],
+                DisableTranslation: ["vault.exe"],
+                SuppressVisualFeedback: []),
+        };
+        using var form = new SettingsForm(snapshot, actions);
+
+        foreach (var name in new[]
+                 {
+                     "disableVietnameseApplications",
+                     "disableSpeechApplications",
+                     "disableTranslationApplications",
+                     "suppressVisualFeedbackApplications",
+                     "applicationSpeechRuleAddCurrent",
+                     "saveApplicationPreferences",
+                 })
+        {
+            AssertEx.Equal(1, form.Controls.Find(name, true).Length);
+        }
+        AssertEx.Equal(
+            "game.exe",
+            ((TextBox)form.Controls.Find(
+                "disableVietnameseApplications",
+                true).Single()).Text);
+        InvokeClick((Button)form.Controls.Find(
+            "applicationSpeechRuleAddCurrent",
+            true).Single());
+        InvokeClick((Button)form.Controls.Find(
+            "saveApplicationPreferences",
+            true).Single());
+
+        AssertEx.Equal(1, saved.Count);
+        AssertEx.True(saved[0].DisableSpeech.SequenceEqual(["code.exe"]),
+            "Foreground executable was not normalized into the speech exclusion list.");
+        AssertEx.True(saved[0].DisableTranslation.SequenceEqual(["vault.exe"]),
+            "Existing translation exclusion was not preserved.");
     }
 
     [KeyinaTest("diagnostics exposes safe settings import and export controls")]
@@ -439,6 +491,7 @@ internal static class SettingsFormTests
                 "speech.png",
                 "translation.png",
                 "hotkeys.png",
+                "applications.png",
                 "snippets.png",
                 "diagnostics.png",
             };

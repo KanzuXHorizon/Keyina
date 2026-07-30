@@ -39,6 +39,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private readonly IVietnameseEngine engine;
     private readonly IUnicodeInputInjector injector;
     private readonly IVietnameseKeyboardHookNativeApi nativeApi;
+    private readonly Func<int, bool>? shouldBypassApplication;
     private KeyStateSet suppressedKeys;
     private Action<VietnameseKeyboardEvent>? physicalEventObserver;
     private IDisposable? installation;
@@ -52,11 +53,13 @@ public sealed class VietnameseKeyboardHook : IDisposable
     public VietnameseKeyboardHook(
         IVietnameseEngine? engine = null,
         IUnicodeInputInjector? injector = null,
-        IVietnameseKeyboardHookNativeApi? nativeApi = null)
+        IVietnameseKeyboardHookNativeApi? nativeApi = null,
+        Func<int, bool>? shouldBypassApplication = null)
     {
         this.engine = engine ?? new NativeEngineClient();
         this.injector = injector ?? new UnicodeInputInjector();
         this.nativeApi = nativeApi ?? new WindowsVietnameseKeyboardHookNativeApi();
+        this.shouldBypassApplication = shouldBypassApplication;
     }
 
     public bool IsRunning => installation is not null;
@@ -244,6 +247,15 @@ public sealed class VietnameseKeyboardHook : IDisposable
                     ResetEngineState();
                     return false;
                 }
+                if (ShouldBypassApplication(currentContext.ForegroundProcessId))
+                {
+                    TypingTraceBuffer.Record(
+                        "application-bypass",
+                        keyIndex,
+                        currentContext.ForegroundProcessId);
+                    ResetEngineState();
+                    return false;
+                }
 
                 if (keyboardEvent.VirtualKey == 0x08)
                 {
@@ -379,6 +391,23 @@ public sealed class VietnameseKeyboardHook : IDisposable
                     callbackStartedAt);
             }
             processedPhysicalEventCount++;
+        }
+    }
+
+    private bool ShouldBypassApplication(int processId)
+    {
+        var callback = shouldBypassApplication;
+        if (callback is null)
+        {
+            return false;
+        }
+        try
+        {
+            return callback(processId);
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 

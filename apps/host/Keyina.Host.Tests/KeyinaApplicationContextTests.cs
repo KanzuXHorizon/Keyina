@@ -1,5 +1,6 @@
 using System.Reflection;
 using Keyina.Host.Configuration;
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
@@ -8,6 +9,7 @@ using Keyina.Host.Runtime;
 using Keyina.Host.Translation;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Feedback;
+using Keyina.Host.Windows.Applications;
 using Keyina.Host.Windows.Credentials;
 using Keyina.Host.Windows.Feedback;
 
@@ -366,6 +368,43 @@ internal static class KeyinaApplicationContextTests
             context.CurrentState.ErrorCode);
     }
 
+    [KeyinaTest("settings current-application helper preserves the app focused before opening")]
+    private static void SettingsUsesPreviousForegroundApplication()
+    {
+        using var directory = new TemporaryDirectory();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            Path.Combine(directory.Path, "settings.json"),
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        var exclusions = new FakeApplicationExclusionService
+        {
+            ForegroundExecutableName = "code.exe",
+        };
+        using var context = new KeyinaApplicationContext(
+            options,
+            credentialVault: null,
+            translationProvider: null,
+            selectedTextAccessor: null,
+            applicationExclusions: exclusions);
+
+        context.OpenSettings("applications");
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        var form = (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Settings form was not created.");
+        InvokeClick((Button)form.Controls.Find(
+            "applicationSpeechRuleAddCurrent",
+            true).Single());
+
+        AssertEx.Equal(
+            "code.exe",
+            ((TextBox)form.Controls.Find(
+                "disableSpeechApplications",
+                true).Single()).Text);
+        context.CloseSettings();
+    }
+
     [KeyinaTest("resident context never reports ready without native TSF and focused typing evidence")]
     private static void RuntimeReadinessIsTruthful()
     {
@@ -490,6 +529,80 @@ internal static class KeyinaApplicationContextTests
                 TimeSpan.FromSeconds(2)),
             "Disabled translation state was not persisted after credential removal.");
         context.CloseSettings();
+    }
+
+    [KeyinaTest("resident context blocks translation in excluded foreground applications")]
+    private static void TranslationExclusionStopsBeforeProviderAccess()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        var exclusions = new FakeApplicationExclusionService(
+            ApplicationFeature.Translation);
+        var provider = new FakeTranslationProvider();
+        var accessor = new FakeSelectionAccessor();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault("test-key:fx"),
+            provider,
+            accessor,
+            exclusions);
+        context.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(0, provider.CallCount);
+        AssertEx.Equal(0, accessor.ReplaceCount);
+        AssertEx.Equal(
+            "translation_application_excluded",
+            context.CurrentState.ErrorCode);
+    }
+
+    [KeyinaTest("resident context suppresses visual feedback per application but keeps audio")]
+    private static void VisualFeedbackExclusionKeepsAudio()
+    {
+        using var directory = new TemporaryDirectory();
+        var overlay = new RecordingOverlay();
+        var sound = new RecordingSoundPlayer();
+        var exclusions = new FakeApplicationExclusionService(
+            ApplicationFeature.VisualFeedback);
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            Path.Combine(directory.Path, "settings.json"),
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            ForegroundPresentationProbeFactory =
+                static () => new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = () => overlay,
+            FeedbackSoundPlayerFactory = () => sound,
+        };
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            credentialVault: null,
+            translationProvider: null,
+            selectedTextAccessor: null,
+            applicationExclusions: exclusions);
+        context.DispatchCommandAsync(
+                HotkeyCommand.ToggleVietnamese,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(0, overlay.Events.Count);
+        AssertEx.Equal(1, sound.Cues.Count);
+        AssertEx.Equal(FeedbackSoundCue.Disabled, sound.Cues[0]);
     }
 
     [KeyinaTest("resident context translates the selected text with configured DeepL credentials")]
@@ -699,6 +812,30 @@ internal static class KeyinaApplicationContextTests
             LastReplacement = translatedText;
             return true;
         }
+    }
+
+    private sealed class FakeApplicationExclusionService(
+        params ApplicationFeature[] disabledFeatures)
+        : IApplicationExclusionService
+    {
+        private readonly HashSet<ApplicationFeature> disabled =
+            disabledFeatures.ToHashSet();
+
+        public ApplicationPreferences LastPreferences { get; private set; } =
+            ApplicationPreferences.Default;
+
+        public string? ForegroundExecutableName { get; set; } = "sample.exe";
+
+        public void Update(ApplicationPreferences preferences) =>
+            LastPreferences = preferences;
+
+        public bool IsDisabled(ApplicationFeature feature, int processId) =>
+            disabled.Contains(feature);
+
+        public bool IsForegroundDisabled(ApplicationFeature feature) =>
+            disabled.Contains(feature);
+
+        public string? GetForegroundExecutableName() => ForegroundExecutableName;
     }
 
     private sealed class TemporaryDirectory : IDisposable

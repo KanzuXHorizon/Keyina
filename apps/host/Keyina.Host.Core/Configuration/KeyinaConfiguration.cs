@@ -1,3 +1,4 @@
+using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Snippets;
@@ -62,6 +63,8 @@ public sealed record KeyinaConfiguration(
 
     public bool? FirstRunCompleted { get; init; }
 
+    public ApplicationPreferences Applications { get; init; } = ApplicationPreferences.Default;
+
     public static KeyinaConfiguration Default { get; } = new(
         CurrentSchemaVersion,
         VietnameseEnabled: true,
@@ -109,6 +112,18 @@ public sealed record KeyinaConfiguration(
         {
             throw new ConfigurationValidationException(
                 "Configuration first-run state is missing.");
+        }
+        try
+        {
+            (Applications ?? throw new ArgumentException(
+                "Application preferences must not be null.",
+                nameof(Applications))).Validate();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration contains invalid application preferences.",
+                exception);
         }
         if (Snippets is null)
         {
