@@ -57,7 +57,7 @@ The foreground-context case calls the real Win32 focus and password-style probe 
 
 ## Resident input runtime
 
-The keyboard hook runs on a dedicated background thread with its own message loop, a bounded 256 KiB stack, explicit startup/shutdown handshakes, and fail-open exception handling. A regression test blocks the owner UI thread for 300 ms and verifies that the hook still processes input independently.
+The keyboard hook runs on a dedicated background thread with its own message loop, a bounded 256 KiB stack, explicit startup/shutdown handshakes, and fail-open exception handling. Modifier chords and push-to-talk release detection subscribe to that same resident hook instead of installing a second `WH_KEYBOARD_LL` hook. Observer failures are isolated from Vietnamese composition. A regression test blocks the owner UI thread for 300 ms and verifies that the hook still processes input independently.
 
 Pointer clicks and wheel input are observed asynchronously through a message-only Raw Input window on a separate thread with a bounded 128 KiB stack. Ordinary pointer movement does not reset the Vietnamese engine. The observer reads the current packet and drains queued packets with `GetRawInputBuffer`, coalescing a burst into one atomic reset request. Native-width alignment and packet-boundary checks prevent pointer truncation or overflow on x64.
 
@@ -67,10 +67,10 @@ The resident resource self-test initializes the real native engine, keyboard hoo
 
 | Metric | Median |
 |---|---:|
-| Hook backend startup | 12.89 ms |
+| Hook backend startup | 14.99 ms |
 | Idle CPU over 5 seconds | 0 ms measured CPU / 0.000% |
-| Working-set increase | 1,466,368 B |
-| Private-memory increase | 372,736 B |
+| Working-set increase | 1,691,648 B |
+| Private-memory increase | 876,544 B |
 | Resident thread increase | 2 |
 | Handle increase | 11 |
 | Physical keyboard events during measurement | 0 |
@@ -120,7 +120,7 @@ A universal single-pass technical-token classifier was also benchmarked and reje
 Fresh gates after the changes:
 
 - Release solution build: 0 warnings, 0 errors.
-- Host tests, including real desktop hook integration: 191/191 passed.
+- Host tests, including real desktop hook integration and shared modifier observation: 193/193 passed.
 - Dedicated-hook regression: input remains responsive while the owner UI thread is blocked.
 - Secure-input regression: password state is refreshed even when the focused HWND does not change.
 - Partial-startup regression: a pointer-observer startup failure releases the already-installed keyboard hook.

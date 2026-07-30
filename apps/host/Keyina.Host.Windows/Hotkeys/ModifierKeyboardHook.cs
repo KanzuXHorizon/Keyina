@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Windows.Hotkeys;
 
@@ -12,6 +13,22 @@ public readonly record struct RawKeyboardEvent(
 public interface IKeyboardHookNativeApi
 {
     IDisposable Install(Func<RawKeyboardEvent, bool> callback);
+}
+
+public sealed class SharedTypingKeyboardHookNativeApi(
+    VietnameseKeyboardHook typingHook) : IKeyboardHookNativeApi
+{
+    public IDisposable Install(Func<RawKeyboardEvent, bool> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return typingHook.SubscribePhysicalEvents(keyboardEvent =>
+        {
+            _ = callback(new RawKeyboardEvent(
+                (VirtualKey)keyboardEvent.VirtualKey,
+                keyboardEvent.IsKeyDown,
+                keyboardEvent.IsInjected));
+        });
+    }
 }
 
 public sealed class ModifierKeyboardHook : IDisposable

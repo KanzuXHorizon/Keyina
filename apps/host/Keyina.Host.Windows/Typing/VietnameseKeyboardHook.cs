@@ -35,6 +35,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
     private readonly IUnicodeInputInjector injector;
     private readonly IVietnameseKeyboardHookNativeApi nativeApi;
     private readonly bool[] suppressedKeys = new bool[256];
+    private Action<VietnameseKeyboardEvent>? physicalEventObserver;
     private IDisposable? installation;
     private IDisposable? pointerInstallation;
     private long processedPhysicalEventCount;
@@ -57,6 +58,22 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     public long ProcessedPhysicalEventCount =>
         Interlocked.Read(ref processedPhysicalEventCount);
+
+    public IDisposable SubscribePhysicalEvents(
+        Action<VietnameseKeyboardEvent> observer)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(observer);
+        if (Interlocked.CompareExchange(
+                ref physicalEventObserver,
+                observer,
+                comparand: null) is not null)
+        {
+            throw new InvalidOperationException(
+                "The resident typing hook already has a physical-event observer.");
+        }
+        return new PhysicalEventSubscription(this, observer);
+    }
 
     public void Start(bool enabledInitially)
     {
@@ -109,6 +126,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             Interlocked.Exchange(ref installation, null),
             ref failures);
         DisposeResource(engine, ref failures);
+        Interlocked.Exchange(ref physicalEventObserver, null);
         Array.Clear(suppressedKeys);
         if (failures is not null)
         {
@@ -120,6 +138,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     private bool ProcessRawEvent(VietnameseKeyboardEvent keyboardEvent)
     {
+        NotifyPhysicalEvent(keyboardEvent);
         if (keyboardEvent.ExtraInfo == UnicodeInputInjector.InjectionMarker)
         {
             return false;
@@ -341,6 +360,30 @@ public sealed class VietnameseKeyboardHook : IDisposable
         }
     }
 
+    private void NotifyPhysicalEvent(VietnameseKeyboardEvent keyboardEvent)
+    {
+        var observer = Volatile.Read(ref physicalEventObserver);
+        if (observer is null)
+        {
+            return;
+        }
+        try
+        {
+            observer(keyboardEvent);
+        }
+        catch (Exception)
+        {
+            // Modifier observation is optional and must never break typing.
+        }
+    }
+
+    private void UnsubscribePhysicalEvents(
+        Action<VietnameseKeyboardEvent> observer) =>
+        _ = Interlocked.CompareExchange(
+            ref physicalEventObserver,
+            null,
+            observer);
+
     private static void DisposeResource(
         IDisposable? resource,
         ref List<Exception>? failures)
@@ -357,6 +400,17 @@ public sealed class VietnameseKeyboardHook : IDisposable
         {
             (failures ??= []).Add(exception);
         }
+    }
+
+    private sealed class PhysicalEventSubscription(
+        VietnameseKeyboardHook owner,
+        Action<VietnameseKeyboardEvent> observer) : IDisposable
+    {
+        private VietnameseKeyboardHook? owner = owner;
+
+        public void Dispose() =>
+            Interlocked.Exchange(ref owner, null)?
+                .UnsubscribePhysicalEvents(observer);
     }
 
     private void RequestReset() =>

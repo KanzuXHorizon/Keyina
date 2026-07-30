@@ -48,6 +48,25 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("tiếng Việt", injector.Text);
     }
 
+    [KeyinaTest("resident hook isolates physical-event observer failures from Vietnamese typing")]
+    private static void PhysicalObserverFailuresAreIsolated()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        using var subscription = hook.SubscribePhysicalEvents(
+            static _ => throw new InvalidOperationException("observer failure"));
+        hook.Start(enabledInitially: true);
+
+        Type(native, "as");
+
+        AssertEx.Equal("á", injector.Text);
+    }
+
     [KeyinaTest("resident hook ignores injected edits and resets on asynchronous pointer interaction")]
     private static void HookAvoidsLoopsAndResetsOnPointerInteraction()
     {

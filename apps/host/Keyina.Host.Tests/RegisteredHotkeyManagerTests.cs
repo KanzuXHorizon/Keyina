@@ -1,5 +1,6 @@
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Windows.Hotkeys;
+using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Tests;
 
@@ -173,6 +174,30 @@ internal static class RegisteredHotkeyManagerTests
         ]));
     }
 
+    [KeyinaTest("modifier keyboard hook shares the resident typing hook without a second native hook")]
+    private static void ModifierHookSharesResidentTypingHook()
+    {
+        var typingNative = new FakeVietnameseKeyboardHookNativeApi();
+        using var typingHook = new VietnameseKeyboardHook(nativeApi: typingNative);
+        using var modifierHook = new ModifierKeyboardHook(
+            new SharedTypingKeyboardHookNativeApi(typingHook));
+        var commands = new List<HotkeyCommand>();
+        modifierHook.CommandReceived += (_, command) => commands.Add(command);
+
+        modifierHook.Start();
+        typingHook.Start(enabledInitially: false);
+        AssertEx.Equal(1, typingNative.InstallCount);
+
+        _ = typingNative.Callback!(CreateTypingEvent(VirtualKey.LeftControl, true));
+        _ = typingNative.Callback(CreateTypingEvent(VirtualKey.LeftShift, true));
+        _ = typingNative.Callback(CreateTypingEvent(VirtualKey.LeftShift, false));
+        _ = typingNative.Callback(CreateTypingEvent(VirtualKey.LeftControl, false));
+
+        AssertEx.True(
+            commands.SequenceEqual([HotkeyCommand.ToggleVietnamese]),
+            "The shared modifier processor did not emit exactly one toggle.");
+    }
+
     [KeyinaTest("modifier keyboard hook emits one push-to-talk release without swallowing input")]
     private static void ModifierHookEmitsPushToTalkRelease()
     {
@@ -251,6 +276,19 @@ internal static class RegisteredHotkeyManagerTests
         AssertEx.Equal(1, native.UninstallCount);
     }
 
+    private static VietnameseKeyboardEvent CreateTypingEvent(
+        VirtualKey key,
+        bool isKeyDown) => new(
+        VirtualKey: (int)key,
+        IsKeyDown: isKeyDown,
+        IsInjected: false,
+        ExtraInfo: 0,
+        Shift: false,
+        Control: false,
+        Alt: false,
+        Windows: false,
+        Character: default);
+
     private static RegisteredHotkeyBinding[] CreateRegisteredBindings() =>
         DefaultHotkeys.Create()
             .Select((binding, index) => new RegisteredHotkeyBinding(
@@ -300,6 +338,26 @@ internal static class RegisteredHotkeyManagerTests
             errorCode = 0;
             return true;
         }
+    }
+
+    private sealed class FakeVietnameseKeyboardHookNativeApi :
+        IVietnameseKeyboardHookNativeApi
+    {
+        public Func<VietnameseKeyboardEvent, bool>? Callback { get; private set; }
+        public int InstallCount { get; private set; }
+
+        public IDisposable Install(Func<VietnameseKeyboardEvent, bool> keyboardCallback)
+        {
+            Callback = keyboardCallback;
+            InstallCount++;
+            return new ActionDisposable(() => Callback = null);
+        }
+
+        public IDisposable InstallPointerReset(Action pointerResetCallback) =>
+            new ActionDisposable(static () => { });
+
+        public VietnameseTypingContext GetTypingContext() =>
+            new(ForegroundProcessId: 1, FocusWindow: 1, ShouldBypassTyping: false);
     }
 
     private sealed class FakeKeyboardHookNativeApi : IKeyboardHookNativeApi
