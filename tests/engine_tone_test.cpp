@@ -90,12 +90,58 @@ KEYINA_TEST(preserves_and_relocates_tone_when_vowel_shape_changes) {
 }
 
 KEYINA_TEST(modern_and_traditional_policies_place_open_diphthong_tones_differently) {
-  keyina::Engine modern({keyina::TonePlacement::Modern, false});
-  keyina::Engine traditional({keyina::TonePlacement::Traditional, false});
+  constexpr std::array<ToneCase, 3> modern_cases = {{
+      {U"hoaf", U"hoà"},
+      {U"khoer", U"khoẻ"},
+      {U"thuyr", U"thuỷ"},
+  }};
+  constexpr std::array<ToneCase, 3> traditional_cases = {{
+      {U"hoaf", U"hòa"},
+      {U"khoer", U"khỏe"},
+      {U"thuyr", U"thủy"},
+  }};
 
-  KEYINA_EXPECT_EQ(TypeSequence(modern, U"hoaf"), std::u32string{U"hoà"});
-  KEYINA_EXPECT_EQ(TypeSequence(traditional, U"hoaf"),
-                   std::u32string{U"hòa"});
+  for (const auto& test : modern_cases) {
+    keyina::Engine engine({keyina::TonePlacement::Modern, false});
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+  for (const auto& test : traditional_cases) {
+    keyina::Engine engine({keyina::TonePlacement::Traditional, false});
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(consonantal_glides_are_not_treated_as_open_uy_clusters) {
+  for (const auto placement : {keyina::TonePlacement::Modern,
+                               keyina::TonePlacement::Traditional}) {
+    keyina::Engine quy({placement, false});
+    keyina::Engine gia({placement, false});
+    KEYINA_EXPECT_EQ(TypeSequence(quy, U"quyf"), std::u32string{U"quỳ"});
+    KEYINA_EXPECT_EQ(TypeSequence(gia, U"giaf"), std::u32string{U"già"});
+  }
+}
+
+KEYINA_TEST(z_removes_existing_tone_but_preserves_vowel_shape) {
+  constexpr std::array<ToneCase, 5> cases = {{
+      {U"asz", U"a"},
+      {U"aasz", U"â"},
+      {U"owjsz", U"ơ"},
+      {U"owjz", U"ơ"},
+      {U"aszs", U"á"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine;
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(z_without_an_existing_tone_remains_literal) {
+  keyina::Engine engine;
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"az"), std::u32string{U"az"});
 }
 
 KEYINA_TEST(repeated_tone_key_escapes_to_literal_telex) {

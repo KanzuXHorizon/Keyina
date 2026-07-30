@@ -48,6 +48,13 @@ bool ApplyShape(VietnameseLetter& letter, VowelShape shape) noexcept {
 bool HasVowelAfter(std::u32string_view visible, std::size_t index) noexcept;
 std::optional<Tone> ToneFromKey(char32_t key) noexcept;
 
+bool IsIrrecoverablyInvalid(SyllableError error) noexcept {
+  return error == SyllableError::TooLong ||
+         error == SyllableError::InvalidOnset ||
+         error == SyllableError::InvalidCoda ||
+         error == SyllableError::InvalidOrthography;
+}
+
 bool ReplaceLetter(std::u32string& visible, std::size_t index,
                    VietnameseLetter letter) {
   const auto composed = ComposeVietnamese(letter);
@@ -58,7 +65,18 @@ bool ReplaceLetter(std::u32string& visible, std::size_t index,
   return true;
 }
 
-bool ApplyWModifier(std::u32string& visible) {
+bool AppendVietnameseLetter(std::u32string& visible, char32_t base,
+                            VowelShape shape, bool uppercase) {
+  const auto composed =
+      ComposeVietnamese({base, shape, Tone::None, uppercase});
+  if (!composed.has_value()) {
+    return false;
+  }
+  visible.push_back(*composed);
+  return true;
+}
+
+bool ApplyWModifier(std::u32string& visible, bool uppercase) {
   std::optional<std::size_t> last_vowel;
   std::optional<std::size_t> previous_vowel;
   for (std::size_t offset = visible.size(); offset > 0; --offset) {
@@ -75,7 +93,7 @@ bool ApplyWModifier(std::u32string& visible) {
     }
   }
   if (!last_vowel.has_value()) {
-    return false;
+    return AppendVietnameseLetter(visible, U'u', VowelShape::Horn, uppercase);
   }
 
   if (previous_vowel.has_value()) {
@@ -142,7 +160,7 @@ bool ApplyWModifier(std::u32string& visible) {
     return ApplyShape(*letter, shape) &&
            ReplaceLetter(visible, index, *letter);
   }
-  return false;
+  return AppendVietnameseLetter(visible, U'u', VowelShape::Horn, uppercase);
 }
 
 bool ApplyRepeatedVowelModifier(std::u32string& visible,
@@ -217,10 +235,40 @@ bool ApplyDModifier(std::u32string& visible) {
   return false;
 }
 
-bool ApplyLetterModifier(std::u32string& visible, char32_t key) {
+bool ApplyQuickTelexLetter(std::u32string& visible, char32_t key) {
+  if (key == U'[' || key == U'{') {
+    return AppendVietnameseLetter(visible, U'u', VowelShape::Horn,
+                                  key == U'{');
+  }
+  if (key == U']' || key == U'}') {
+    return AppendVietnameseLetter(visible, U'o', VowelShape::Horn,
+                                  key == U'}');
+  }
+  return false;
+}
+
+bool ClearTone(std::u32string& visible) {
+  for (std::size_t offset = visible.size(); offset > 0; --offset) {
+    const std::size_t index = offset - 1;
+    auto letter = DecomposeVietnamese(visible[index]);
+    if (!letter.has_value() || letter->tone == Tone::None) {
+      continue;
+    }
+    letter->tone = Tone::None;
+    return ReplaceLetter(visible, index, *letter);
+  }
+  return false;
+}
+
+bool ApplyLetterModifier(std::u32string& visible, char32_t key,
+                         bool quick_telex_letters) {
+  if (quick_telex_letters && ApplyQuickTelexLetter(visible, key)) {
+    return true;
+  }
+
   const char32_t modifier = ToAsciiLower(key);
   if (modifier == U'w') {
-    return ApplyWModifier(visible);
+    return ApplyWModifier(visible, key >= U'A' && key <= U'Z');
   }
   if (modifier == U'a' || modifier == U'e' || modifier == U'o') {
     return ApplyRepeatedVowelModifier(visible, modifier);
@@ -353,8 +401,9 @@ std::size_t SelectToneTarget(std::u32string_view visible,
   const auto second_letter = DecomposeVietnamese(visible[second]);
   const bool modern_open_cluster =
       first_letter.has_value() && second_letter.has_value() &&
-      first_letter->base == U'o' &&
-      (second_letter->base == U'a' || second_letter->base == U'e');
+      ((first_letter->base == U'o' &&
+        (second_letter->base == U'a' || second_letter->base == U'e')) ||
+       (first_letter->base == U'u' && second_letter->base == U'y'));
   if (placement == TonePlacement::Modern && modern_open_cluster) {
     return second;
   }
@@ -396,6 +445,7 @@ Engine::Engine(EngineConfig config) : config_(config) {
   composition_buffer_.reserve(kBufferCapacity);
   previous_key_buffer_.reserve(kBufferCapacity);
   edit_buffer_.reserve(kBufferCapacity);
+  literal_text_buffer_.reserve(kBufferCapacity);
 }
 
 TextEdit Engine::Process(const KeyEvent& event) {
@@ -463,6 +513,7 @@ void Engine::ResetCompositionState() noexcept {
   visible_text_.clear();
   composition_buffer_.clear();
   previous_key_buffer_.clear();
+  literal_text_buffer_.clear();
 }
 
 std::u32string_view Engine::VisibleText() const noexcept {
@@ -476,15 +527,17 @@ void Engine::BuildVisibleForRaw() {
   const GuardResult guard = ClassifyToken(raw_keys_, context);
   if (guard.transform) {
     ComposeRaw(composition_buffer_);
-    if (config_.restore_invalid_word && composition_buffer_ != raw_keys_) {
+    if (config_.restore_invalid_word &&
+        composition_buffer_ != literal_text_buffer_) {
       const auto analysis = AnalyzeVietnameseSyllable(composition_buffer_);
-      const bool irreversible_invalid_prefix =
-          analysis.error == SyllableError::InvalidOnset ||
-          analysis.error == SyllableError::InvalidOrthography;
-      if ((HasSuspiciousToneBeforeNewVowel(raw_keys_) &&
-           analysis.status != SyllableStatus::Valid) ||
-          irreversible_invalid_prefix) {
-        composition_buffer_.assign(raw_keys_);
+      const bool impossible_structure =
+          analysis.status == SyllableStatus::Impossible &&
+          IsIrrecoverablyInvalid(analysis.error);
+      const bool suspicious_tone_order =
+          analysis.status != SyllableStatus::Valid &&
+          HasSuspiciousToneBeforeNewVowel(raw_keys_);
+      if (impossible_structure || suspicious_tone_order) {
+        composition_buffer_.assign(literal_text_buffer_);
       }
     }
   } else {
@@ -503,6 +556,7 @@ TextEditView Engine::ReplaceVisibleView(bool consumed) {
 void Engine::ComposeRaw(std::u32string& visible) {
   visible.clear();
   previous_key_buffer_.clear();
+  literal_text_buffer_.clear();
 
   char32_t previous_key = U'\0';
   bool previous_key_transformed = false;
@@ -527,21 +581,33 @@ void Engine::ComposeRaw(std::u32string& visible) {
       continue;
     }
 
+    literal_text_buffer_.push_back(key);
     previous_key_buffer_.assign(visible);
     bool transformed = false;
-    const auto tone = ToneFromKey(key);
-    if (tone.has_value()) {
-      std::array<std::size_t, 64> indices{};
-      if (CollectNucleus(visible, indices) != 0) {
-        pending_tone = *tone;
-        pending_tone_key = key;
+    const char32_t lower = ToAsciiLower(key);
+    if (lower == U'z') {
+      if (pending_tone.has_value()) {
+        pending_tone.reset();
+        pending_tone_key = U'\0';
         transformed = true;
+      } else {
+        transformed = ClearTone(visible);
       }
     } else {
-      transformed = ApplyLetterModifier(visible, key);
+      const auto tone = ToneFromKey(key);
+      if (tone.has_value()) {
+        std::array<std::size_t, 64> indices{};
+        if (CollectNucleus(visible, indices) != 0) {
+          pending_tone = *tone;
+          pending_tone_key = key;
+          transformed = true;
+        }
+      } else {
+        transformed =
+            ApplyLetterModifier(visible, key, config_.quick_telex_letters);
+      }
     }
     if (!transformed) {
-      const char32_t lower = ToAsciiLower(key);
       if (lower == U'o' && !visible.empty()) {
         const auto previous = DecomposeVietnamese(visible.back());
         if (previous.has_value() && previous->base == U'u' &&

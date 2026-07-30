@@ -63,6 +63,30 @@ KEYINA_TEST(preserves_uppercase_when_modifying_letters) {
   }
 }
 
+KEYINA_TEST(standalone_w_uses_unikey_short_letter_semantics) {
+  keyina::Engine lowercase;
+  keyina::Engine uppercase;
+  keyina::Engine repeated;
+
+  KEYINA_EXPECT_EQ(Type(lowercase, U"w"), std::u32string{U"ư"});
+  KEYINA_EXPECT_EQ(Type(uppercase, U"W"), std::u32string{U"Ư"});
+  KEYINA_EXPECT_EQ(Type(repeated, U"ww"), std::u32string{U"w"});
+}
+
+KEYINA_TEST(quick_telex_letters_are_opt_in_and_reversible) {
+  keyina::Engine disabled;
+  keyina::Engine enabled({
+      .quick_telex_letters = true,
+  });
+  keyina::Engine repeated({
+      .quick_telex_letters = true,
+  });
+
+  KEYINA_EXPECT_EQ(Type(disabled, U"[]"), std::u32string{U"[]"});
+  KEYINA_EXPECT_EQ(Type(enabled, U"[]"), std::u32string{U"ươ"});
+  KEYINA_EXPECT_EQ(Type(repeated, U"[["), std::u32string{U"["});
+}
+
 KEYINA_TEST(repeated_letter_modifier_escapes_to_literal_telex) {
   constexpr std::array<LetterCase, 7> cases = {{
       {U"aaa", U"aa"},

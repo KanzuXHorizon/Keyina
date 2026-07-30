@@ -51,7 +51,7 @@ KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
       {U"gox", U"gõ"},
       {U"dodoj", U"độ"},
       {U"dudojcw", U"được"},
-      {U"tuyf", U"tùy"},
+      {U"tuyf", U"tuỳ"},
   }};
 
   for (const auto& test : cases) {
@@ -105,6 +105,51 @@ KEYINA_TEST(valid_flexible_telex_survives_word_boundaries) {
 KEYINA_TEST(repeated_tone_key_escapes_back_to_literal_telex) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(TypeSequence(engine, U"uxx"), std::u32string{U"ux"});
+}
+
+KEYINA_TEST(restores_structurally_impossible_latin_tokens_without_word_lists) {
+  constexpr std::array<TelexCase, 6> cases = {{
+      {U"fix", U"fix"},
+      {U"fixed", U"fixed"},
+      {U"hard", U"hard"},
+      {U"hardcode", U"hardcode"},
+      {U"fax", U"fax"},
+      {U"card", U"card"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(repeated_telex_escape_stays_collapsed_during_latin_restore) {
+  constexpr std::array<TelexCase, 5> cases = {{
+      {U"harrd", U"hard"},
+      {U"harrdcode", U"hardcode"},
+      {U"guitarr", U"guitar"},
+      {U"guitarrist", U"guitarist"},
+      {U"WWindowws", U"Windows"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(invalid_checked_tone_can_still_be_replaced_before_commit) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"catfs"),
+                   std::u32string{U"cát"});
 }
 
 KEYINA_TEST(keeps_latin_tokens_literal_while_they_are_still_being_typed) {

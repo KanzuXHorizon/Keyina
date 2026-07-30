@@ -77,9 +77,11 @@ internal static class VietnameseKeyboardHookTests
             native);
         hook.Start(enabledInitially: true);
 
-        Type(native, "user research tele ");
+        Type(native, "user research tele fix hardcode harrdcode guitarrist ");
 
-        AssertEx.Equal("user research tele ", injector.Text);
+        AssertEx.Equal(
+            "user research tele fix hardcode hardcode guitarist ",
+            injector.Text);
     }
 
     [KeyinaTest("resident hook isolates physical-event observer failures from Vietnamese typing")]

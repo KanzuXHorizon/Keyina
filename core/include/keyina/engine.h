@@ -48,6 +48,7 @@ struct EngineConfig {
   TonePlacement tone_placement{TonePlacement::Modern};
   bool application_bypass{false};
   bool restore_invalid_word{false};
+  bool quick_telex_letters{false};
 };
 
 class Engine {
@@ -76,6 +77,7 @@ class Engine {
   std::u32string composition_buffer_;
   std::u32string previous_key_buffer_;
   std::u32string edit_buffer_;
+  std::u32string literal_text_buffer_;
 };
 
 }  // namespace keyina
