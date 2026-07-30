@@ -84,6 +84,7 @@ public sealed class AtomicConfigurationStore
             configuration = configuration with
             {
                 Feedback = configuration.Feedback ?? FeedbackPreferences.Default,
+                Hotkeys = configuration.Hotkeys ?? Keyina.Host.Core.Hotkeys.HotkeyPreferences.Default,
             };
             _ = configuration.ValidateAndCreateSnippets();
             return configuration;

@@ -1,4 +1,5 @@
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Snippets;
 using Keyina.Host.Core.Translation;
 
@@ -57,6 +58,8 @@ public sealed record KeyinaConfiguration(
 
     public string TranslationTargetLanguage { get; init; } = "EN-US";
 
+    public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
+
     public static KeyinaConfiguration Default { get; } = new(
         CurrentSchemaVersion,
         VietnameseEnabled: true,
@@ -84,6 +87,18 @@ public sealed record KeyinaConfiguration(
         {
             throw new ConfigurationValidationException(
                 "Configuration translation target language is invalid.");
+        }
+        try
+        {
+            (Hotkeys ?? throw new ArgumentException(
+                "Hotkey preferences must not be null.",
+                nameof(Hotkeys))).Validate();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration contains invalid hotkey preferences.",
+                exception);
         }
         if (Snippets is null)
         {

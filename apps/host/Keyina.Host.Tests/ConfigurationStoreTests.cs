@@ -2,6 +2,7 @@ using System.Text;
 using Keyina.Host.Configuration;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Hotkeys;
 
 namespace Keyina.Host.Tests;
 
@@ -20,6 +21,15 @@ internal static class ConfigurationStoreTests
             Theme = KeyinaTheme.Dark,
             TranslationEnabled = true,
             TranslationTargetLanguage = "JA",
+            Hotkeys = HotkeyPreferences.Default with
+            {
+                TranslateSelection = HotkeyPreferences.Default.TranslateSelection with
+                {
+                    Chord = new HotkeyChord(
+                        HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                        VirtualKey.K),
+                },
+            },
             Snippets =
             [
                 new SnippetConfiguration(
@@ -44,6 +54,7 @@ internal static class ConfigurationStoreTests
         AssertEx.Equal(configuration.Theme, loaded.Theme);
         AssertEx.Equal(configuration.TranslationEnabled, loaded.TranslationEnabled);
         AssertEx.Equal(configuration.TranslationTargetLanguage, loaded.TranslationTargetLanguage);
+        AssertEx.Equal(configuration.Hotkeys, loaded.Hotkeys);
         AssertEx.Equal(configuration.Feedback, loaded.Feedback);
         AssertEx.Equal(configuration.Snippets.Length, loaded.Snippets.Length);
         AssertEx.Equal(configuration.Snippets[0].Trigger, loaded.Snippets[0].Trigger);
@@ -119,6 +130,22 @@ internal static class ConfigurationStoreTests
 
         AssertEx.False(loaded.TranslationEnabled, "Translation must remain opt-in.");
         AssertEx.Equal("EN-US", loaded.TranslationTargetLanguage);
+    }
+
+    [KeyinaTest("schema one configuration without hotkeys uses safe familiar defaults")]
+    private static void LegacySchemaOneUsesHotkeyDefaults()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        File.WriteAllText(
+            path,
+            "{\"schema_version\":1,\"vietnamese_enabled\":true,\"speech_enabled\":false,\"theme\":\"system\",\"snippets\":[]}");
+
+        var loaded = store.LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(HotkeyPreferences.Default, loaded.Hotkeys);
     }
 
     [KeyinaTest("configuration rejects invalid feedback mode")]
