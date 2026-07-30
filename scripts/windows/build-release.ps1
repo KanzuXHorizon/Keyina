@@ -98,7 +98,10 @@ function Remove-DirectoryWithRetry {
         try {
             Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
             return
-        } catch when ($attempt -lt 8) {
+        } catch {
+            if ($attempt -ge 8) {
+                throw
+            }
             [GC]::Collect()
             [GC]::WaitForPendingFinalizers()
             Start-Sleep -Milliseconds (150 * $attempt)
