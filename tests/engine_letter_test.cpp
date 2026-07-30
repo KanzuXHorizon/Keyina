@@ -63,6 +63,59 @@ KEYINA_TEST(preserves_uppercase_when_modifying_letters) {
   }
 }
 
+KEYINA_TEST(repeated_letter_modifier_escapes_to_literal_telex) {
+  constexpr std::array<LetterCase, 7> cases = {{
+      {U"aaa", U"aa"},
+      {U"aww", U"aw"},
+      {U"eee", U"ee"},
+      {U"ooo", U"oo"},
+      {U"oww", U"ow"},
+      {U"uww", U"uw"},
+      {U"ddd", U"dd"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine;
+    KEYINA_EXPECT_EQ(Type(engine, test.raw), std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(applies_delayed_w_modifier_across_the_vowel_nucleus) {
+  constexpr std::array<LetterCase, 13> cases = {{
+      {U"nuwax", U"nữa"},
+      {U"nuawx", U"nữa"},
+      {U"nuwxa", U"nữa"},
+      {U"truocws", U"trước"},
+      {U"truowcs", U"trước"},
+      {U"truwocs", U"trước"},
+      {U"truowsc", U"trước"},
+      {U"truocsw", U"trước"},
+      {U"dduocwj", U"được"},
+      {U"dduowcj", U"được"},
+      {U"dduwocj", U"được"},
+      {U"dduowjc", U"được"},
+      {U"vieetj", U"việt"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine;
+    const auto actual = Type(engine, test.raw);
+    if (actual != test.expected) {
+      std::string raw;
+      raw.reserve(test.raw.size());
+      for (const char32_t value : test.raw) {
+        raw.push_back(static_cast<char>(value));
+      }
+      throw std::runtime_error("failed delayed modifier case: " + raw);
+    }
+  }
+}
+
+KEYINA_TEST(delayed_d_modifier_does_not_corrupt_latin_words) {
+  keyina::Engine engine;
+  KEYINA_EXPECT_EQ(Type(engine, U"david"), std::u32string{U"david"});
+}
+
 KEYINA_TEST(leaves_non_modifier_characters_literal) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(Type(engine, U"xin chao"), std::u32string{U"xin chao"});

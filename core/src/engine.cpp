@@ -7,6 +7,7 @@
 
 #include <keyina/context_guard.h>
 #include <keyina/vietnamese.h>
+#include <keyina/vietnamese_syllable.h>
 
 namespace keyina {
 namespace {
@@ -41,6 +42,8 @@ bool ApplyShape(VietnameseLetter& letter, VowelShape shape) noexcept {
   return true;
 }
 
+bool HasVowelAfter(std::u32string_view visible, std::size_t index) noexcept;
+
 bool ReplaceLetter(std::u32string& visible, std::size_t index,
                    VietnameseLetter letter) {
   const auto composed = ComposeVietnamese(letter);
@@ -52,60 +55,110 @@ bool ReplaceLetter(std::u32string& visible, std::size_t index,
 }
 
 bool ApplyWModifier(std::u32string& visible) {
-  if (visible.size() >= 2) {
-    auto left = DecomposeVietnamese(visible[visible.size() - 2]);
-    auto right = DecomposeVietnamese(visible.back());
-    if (left.has_value() && right.has_value() && left->base == U'u' &&
-        right->base == U'o' && left->shape == VowelShape::Plain &&
-        right->shape == VowelShape::Plain) {
-      const Tone left_tone = left->tone;
-      const Tone right_tone = right->tone;
+  std::optional<std::size_t> last_vowel;
+  std::optional<std::size_t> previous_vowel;
+  for (std::size_t offset = visible.size(); offset > 0; --offset) {
+    const std::size_t index = offset - 1;
+    const auto letter = DecomposeVietnamese(visible[index]);
+    if (!letter.has_value() || letter->base == U'đ') {
+      continue;
+    }
+    if (!last_vowel.has_value()) {
+      last_vowel = index;
+    } else {
+      previous_vowel = index;
+      break;
+    }
+  }
+  if (!last_vowel.has_value()) {
+    return false;
+  }
+
+  if (previous_vowel.has_value()) {
+    auto left = DecomposeVietnamese(visible[*previous_vowel]);
+    auto right = DecomposeVietnamese(visible[*last_vowel]);
+    const bool consonantal_u =
+        left.has_value() && left->base == U'u' && *previous_vowel > 0 &&
+        ToAsciiLower(visible[*previous_vowel - 1]) == U'q';
+    if (left.has_value() && right.has_value() && !consonantal_u &&
+        left->base == U'u' && left->shape == VowelShape::Plain &&
+        right->shape == VowelShape::Plain &&
+        (right->base == U'o' || right->base == U'a')) {
+      const Tone carried_tone =
+          right->tone != Tone::None ? right->tone : left->tone;
       left->tone = Tone::None;
       right->tone = Tone::None;
-      if (ApplyShape(*left, VowelShape::Horn) &&
-          ApplyShape(*right, VowelShape::Horn)) {
-        right->tone = right_tone != Tone::None ? right_tone : left_tone;
-        if (ReplaceLetter(visible, visible.size() - 2, *left) &&
-            ReplaceLetter(visible, visible.size() - 1, *right)) {
-          return true;
+
+      if (right->base == U'o') {
+        if (ApplyShape(*left, VowelShape::Horn) &&
+            ApplyShape(*right, VowelShape::Horn)) {
+          right->tone = carried_tone;
+          return ReplaceLetter(visible, *previous_vowel, *left) &&
+                 ReplaceLetter(visible, *last_vowel, *right);
         }
+      } else if (ApplyShape(*left, VowelShape::Horn)) {
+        left->tone = carried_tone;
+        return ReplaceLetter(visible, *previous_vowel, *left) &&
+               ReplaceLetter(visible, *last_vowel, *right);
       }
     }
   }
 
-  if (visible.empty()) {
-    return false;
-  }
-  auto letter = DecomposeVietnamese(visible.back());
-  if (!letter.has_value() || letter->shape != VowelShape::Plain) {
-    return false;
-  }
+  for (std::size_t offset = visible.size(); offset > 0; --offset) {
+    const std::size_t index = offset - 1;
+    auto letter = DecomposeVietnamese(visible[index]);
+    if (!letter.has_value() || letter->shape != VowelShape::Plain) {
+      continue;
+    }
 
-  VowelShape shape = VowelShape::Plain;
-  if (letter->base == U'a') {
-    shape = VowelShape::Breve;
-  } else if (letter->base == U'o' || letter->base == U'u') {
-    shape = VowelShape::Horn;
-  } else {
-    return false;
-  }
+    const bool consonantal_u =
+        letter->base == U'u' && index > 0 &&
+        ToAsciiLower(visible[index - 1]) == U'q' &&
+        HasVowelAfter(visible, index);
+    if (consonantal_u) {
+      continue;
+    }
 
-  return ApplyShape(*letter, shape) &&
-         ReplaceLetter(visible, visible.size() - 1, *letter);
+    VowelShape shape = VowelShape::Plain;
+    if (letter->base == U'a') {
+      shape = VowelShape::Breve;
+    } else if (letter->base == U'o' || letter->base == U'u') {
+      shape = VowelShape::Horn;
+    } else {
+      continue;
+    }
+
+    return ApplyShape(*letter, shape) &&
+           ReplaceLetter(visible, index, *letter);
+  }
+  return false;
 }
 
 bool ApplyRepeatedVowelModifier(std::u32string& visible,
                                 char32_t modifier) {
-  if (visible.empty()) {
-    return false;
+  for (std::size_t offset = visible.size(); offset > 0; --offset) {
+    const std::size_t index = offset - 1;
+    auto letter = DecomposeVietnamese(visible[index]);
+    if (!letter.has_value() || letter->base == U'đ') {
+      continue;
+    }
+    if (letter->base != modifier || letter->shape != VowelShape::Plain) {
+      continue;
+    }
+    return ApplyShape(*letter, VowelShape::Circumflex) &&
+           ReplaceLetter(visible, index, *letter);
   }
-  auto letter = DecomposeVietnamese(visible.back());
-  if (!letter.has_value() || letter->base != modifier ||
-      letter->shape != VowelShape::Plain) {
-    return false;
+  return false;
+}
+
+bool HasAdjacentVowels(std::u32string_view visible) noexcept {
+  for (std::size_t index = 1; index < visible.size(); ++index) {
+    if (IsVietnameseVowel(visible[index - 1]) &&
+        IsVietnameseVowel(visible[index])) {
+      return true;
+    }
   }
-  return ApplyShape(*letter, VowelShape::Circumflex) &&
-         ReplaceLetter(visible, visible.size() - 1, *letter);
+  return false;
 }
 
 bool ApplyDModifier(std::u32string& visible) {
@@ -118,6 +171,20 @@ bool ApplyDModifier(std::u32string& visible) {
   }
   if (visible.back() == U'D') {
     visible.back() = U'Đ';
+    return true;
+  }
+
+  // Accept delayed Telex order such as "duocd" before later w/j keys.
+  // Require an adjacent vowel cluster so ordinary Latin names such as
+  // "david" remain literal instead of being over-eagerly transformed.
+  if (visible.size() >= 4 && HasAdjacentVowels(visible) &&
+      visible.front() == U'd') {
+    visible.front() = U'đ';
+    return true;
+  }
+  if (visible.size() >= 4 && HasAdjacentVowels(visible) &&
+      visible.front() == U'D') {
+    visible.front() = U'Đ';
     return true;
   }
   return false;
@@ -272,8 +339,17 @@ TextEdit Engine::Process(const KeyEvent& event) {
     return {};
   }
   if (event.kind == KeyKind::CommitBoundary) {
+    TextEdit edit;
+    if (config_.restore_invalid_word && visible_text_ != raw_keys_ &&
+        !IsValidVietnameseSyllable(visible_text_)) {
+      std::u32string restored = raw_keys_;
+      if (event.character != U'\0') {
+        restored.push_back(event.character);
+      }
+      edit = Difference(visible_text_, restored, true);
+    }
     Reset();
-    return {};
+    return edit;
   }
   if (event.control || event.alt) {
     Reset();
@@ -329,14 +405,73 @@ std::u32string_view Engine::RawKeys() const noexcept { return raw_keys_; }
 std::u32string Engine::ComposeRaw() const {
   std::u32string visible;
   visible.reserve(raw_keys_.size());
+
+  char32_t previous_key = U'\0';
+  bool previous_key_transformed = false;
+  std::u32string visible_before_previous_key;
+  std::optional<Tone> pending_tone;
+  char32_t pending_tone_key = U'\0';
+
   for (const char32_t key : raw_keys_) {
-    const auto tone = ToneFromKey(key);
-    if (tone.has_value() && ApplyTone(visible, *tone, config_.tone_placement)) {
+    const bool repeated_escape =
+        ToAsciiLower(key) == ToAsciiLower(previous_key) &&
+        previous_key_transformed;
+    if (repeated_escape) {
+      visible = visible_before_previous_key;
+      visible.push_back(key);
+      if (pending_tone_key != U'\0' &&
+          ToAsciiLower(key) == ToAsciiLower(pending_tone_key)) {
+        pending_tone.reset();
+        pending_tone_key = U'\0';
+      }
+      previous_key = key;
+      previous_key_transformed = false;
+      visible_before_previous_key = visible;
       continue;
     }
-    if (!ApplyLetterModifier(visible, key)) {
-      visible.push_back(key);
+
+    const std::u32string before_key = visible;
+    bool transformed = false;
+    const auto tone = ToneFromKey(key);
+    if (tone.has_value()) {
+      std::array<std::size_t, 64> indices{};
+      if (CollectNucleus(visible, indices) != 0) {
+        pending_tone = *tone;
+        pending_tone_key = key;
+        transformed = true;
+      }
+    } else {
+      transformed = ApplyLetterModifier(visible, key);
     }
+    if (!transformed) {
+      const char32_t lower = ToAsciiLower(key);
+      if (lower == U'o' && !visible.empty()) {
+        const auto previous = DecomposeVietnamese(visible.back());
+        if (previous.has_value() && previous->base == U'u' &&
+            previous->shape == VowelShape::Horn) {
+          const VietnameseLetter completed{
+              U'o', VowelShape::Horn, Tone::None,
+              key >= U'A' && key <= U'Z'};
+          const auto composed = ComposeVietnamese(completed);
+          if (composed.has_value()) {
+            visible.push_back(*composed);
+            transformed = true;
+          }
+        }
+      }
+      if (!transformed) {
+        visible.push_back(key);
+      }
+    }
+
+    previous_key = key;
+    previous_key_transformed = transformed;
+    visible_before_previous_key = before_key;
+  }
+
+  if (pending_tone.has_value()) {
+    static_cast<void>(
+        ApplyTone(visible, *pending_tone, config_.tone_placement));
   }
   return visible;
 }

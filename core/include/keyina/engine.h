@@ -40,6 +40,7 @@ enum class TonePlacement {
 struct EngineConfig {
   TonePlacement tone_placement{TonePlacement::Modern};
   bool application_bypass{false};
+  bool restore_invalid_word{false};
 };
 
 class Engine {

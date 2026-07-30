@@ -1,11 +1,13 @@
 add_executable(keyina_tests
   context_guard_test.cpp
+  engine_flexible_telex_test.cpp
   engine_history_test.cpp
   engine_letter_test.cpp
   engine_tone_test.cpp
   golden_vectors_test.cpp
   invariant_test.cpp
   test_main.cpp
+  vietnamese_syllable_test.cpp
   vietnamese_test.cpp
 )
 
