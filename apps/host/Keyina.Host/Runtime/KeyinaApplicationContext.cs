@@ -39,8 +39,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly WindowsStartupRegistration startupRegistration;
     private readonly ICredentialVault credentialVault;
     private readonly IApplicationExclusionService applicationExclusions;
+    private readonly Keyina.Host.Windows.Networking.SafeEndpointValidator translationEndpointValidator = new();
     private readonly TsfSetupService tsfSetupService = new();
     private readonly HttpClient? translationHttpClient;
+    private readonly HttpClient? libreTranslationHttpClient;
     private readonly TranslationCoordinator translationCoordinator;
     private readonly ConcurrentQueue<Action> pendingSignals = new();
     private readonly CancellationTokenSource lifetime = new();
@@ -103,18 +105,27 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         this.credentialVault = credentialVault ?? new WindowsCredentialVault();
         this.applicationExclusions = applicationExclusions ??
             new ApplicationExclusionService();
+        configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
+        configuration = LoadConfiguration();
+        this.applicationExclusions.Update(configuration.Applications);
         if (translationProvider is null)
         {
-            translationHttpClient = new HttpClient();
-            translationProvider = new DeepLTranslationProvider(translationHttpClient);
+            translationHttpClient = CreateTranslationHttpClient();
+            libreTranslationHttpClient = CreateTranslationHttpClient();
+            var deepLProvider = new DeepLTranslationProvider(translationHttpClient);
+            var libreProvider = new LibreTranslateProvider(
+                libreTranslationHttpClient,
+                translationEndpointValidator,
+                () => configuration.TranslationProviders);
+            translationProvider = new FallbackTranslationProvider(
+                deepLProvider,
+                libreProvider,
+                () => configuration.TranslationProviders.LibreTranslateEnabled,
+                ReadLibreTranslateApiKeySafely);
         }
         translationCoordinator = new TranslationCoordinator(
             selectedTextAccessor ?? new ClipboardSelectionAccessor(),
             translationProvider);
-
-        configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
-        configuration = LoadConfiguration();
-        this.applicationExclusions.Update(configuration.Applications);
         state = HostState.Initial with
         {
             VietnameseEnabled = configuration.VietnameseEnabled,
@@ -447,6 +458,30 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         DictationStatus.Listening or
         DictationStatus.Finalizing;
 
+    private static HttpClient CreateTranslationHttpClient() => new(
+        new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            AutomaticDecompression =
+                System.Net.DecompressionMethods.GZip |
+                System.Net.DecompressionMethods.Deflate,
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+        },
+        disposeHandler: true);
+
+    private string? ReadLibreTranslateApiKeySafely()
+    {
+        try
+        {
+            return credentialVault.Read(CredentialTargets.LibreTranslateApiKey);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private KeyinaConfiguration LoadConfiguration()
     {
         try
@@ -525,7 +560,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     hotkeyManager.Register(
                         CreateRequiredRegisteredBindings(configuration.Hotkeys));
                     translationHotkeyReady = configuration.TranslationEnabled &&
-                        IsDeepLCredentialConfigured() &&
+                        IsTranslationProviderConfigured() &&
                         hotkeyManager.TryRegister(
                             CreateTranslationRegisteredBinding(configuration.Hotkeys),
                             out _);
@@ -699,10 +734,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         configuration = configuration with { TranslationEnabled = enabled };
         UpdateTranslationHotkeyRegistration(
-            enabled && IsDeepLCredentialConfigured());
+            enabled && IsTranslationProviderConfigured());
         _ = SaveConfigurationSafelyAsync();
         RefreshVisualState();
     }
+
+    private bool IsTranslationProviderConfigured() =>
+        IsDeepLCredentialConfigured() ||
+        configuration.TranslationProviders.LibreTranslateEnabled;
 
     private bool IsDeepLCredentialConfigured()
     {
@@ -763,6 +802,50 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             CloseTranslationPreview();
         }
         _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetTranslationProviders(TranslationProviderPreferences preferences)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(preferences);
+            var normalized = preferences.Normalize();
+            if (normalized.LibreTranslateEnabled)
+            {
+                _ = translationEndpointValidator.ValidateTranslateEndpointAsync(
+                        normalized.LibreTranslateEndpoint,
+                        normalized.AllowLocalEndpoint,
+                        CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
+
+            configuration = configuration with
+            {
+                TranslationProviders = normalized,
+            };
+            UpdateTranslationHotkeyRegistration(
+                configuration.TranslationEnabled &&
+                IsTranslationProviderConfigured());
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success(
+                normalized.LibreTranslateEnabled
+                    ? "Đã bật fallback LibreTranslate"
+                    : "Đã tắt fallback LibreTranslate"));
+        }
+        catch (ArgumentException)
+        {
+            ReportFailure("translation_provider_endpoint_invalid");
+            PublishFeedback(FeedbackEvents.Error(
+                "Endpoint LibreTranslate không an toàn hoặc không thể phân giải"));
+        }
+        catch (Exception)
+        {
+            ReportFailure("translation_provider_update_failed");
+            PublishFeedback(FeedbackEvents.Error(
+                "Không thể cập nhật provider dịch"));
+        }
         RefreshVisualState();
     }
 
@@ -876,7 +959,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
 
         var translationEnabled = configuration.TranslationEnabled &&
-            IsDeepLCredentialConfigured();
+            IsTranslationProviderConfigured();
         var translationChanged =
             candidate.TranslateSelection.Chord !=
             configuration.Hotkeys.TranslateSelection.Chord;
@@ -1104,14 +1187,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
         catch (Exception)
         {
-            ReportFailure("translation_credential_read_failed");
-            PublishFeedback(FeedbackEvents.Error("Không thể đọc khóa DeepL"));
-            return;
+            apiKey = null;
         }
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (string.IsNullOrWhiteSpace(apiKey) &&
+            !configuration.TranslationProviders.LibreTranslateEnabled)
         {
-            ReportFailure("translation_credential_missing");
-            PublishFeedback(FeedbackEvents.Error("Chưa cấu hình khóa DeepL"));
+            ReportFailure("translation_provider_missing");
+            PublishFeedback(FeedbackEvents.Error(
+                "Hãy cấu hình khóa DeepL hoặc endpoint LibreTranslate"));
             return;
         }
 
@@ -1119,7 +1202,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             configuration.TranslationTargetLanguage);
         PublishFeedback(FeedbackEvents.TranslationStarted(targetDisplayName));
         var outcome = await translationCoordinator.TranslateSelectionAsync(
-                apiKey,
+                apiKey ?? string.Empty,
                 configuration.TranslationTargetLanguage,
                 cancellationToken,
                 preview: configuration.TranslationPreviewEnabled)
@@ -1434,7 +1517,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             // Feedback is optional and never blocks importing typing preferences.
         }
         UpdateTranslationHotkeyRegistration(
-            configuration.TranslationEnabled && IsDeepLCredentialConfigured());
+            configuration.TranslationEnabled && IsTranslationProviderConfigured());
     }
 
     private SettingsActions CreateSettingsActions() => new(
@@ -1479,6 +1562,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         SetTranslationEnabled = SetTranslationEnabled,
         SetTranslationTargetLanguage = SetTranslationTargetLanguage,
         SetTranslationPreviewEnabled = SetTranslationPreviewEnabled,
+        SetTranslationProviders = SetTranslationProviders,
         SaveDeepLApiKey = secret =>
         {
             try
@@ -1501,14 +1585,46 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             try
             {
                 _ = credentialVault.Delete(CredentialTargets.DeepLApiKey);
-                configuration = configuration with { TranslationEnabled = false };
-                UpdateTranslationHotkeyRegistration(enabled: false);
+                if (!configuration.TranslationProviders.LibreTranslateEnabled)
+                {
+                    configuration = configuration with { TranslationEnabled = false };
+                    UpdateTranslationHotkeyRegistration(enabled: false);
+                }
                 _ = SaveConfigurationSafelyAsync();
                 RecoverHost();
             }
             catch (Exception)
             {
                 ReportFailure("translation_credential_delete_failed");
+            }
+            RefreshVisualState();
+        },
+        SaveLibreTranslateApiKey = secret =>
+        {
+            try
+            {
+                credentialVault.Write(
+                    CredentialTargets.LibreTranslateApiKey,
+                    secret);
+                RecoverHost();
+            }
+            catch (Exception)
+            {
+                ReportFailure("libretranslate_credential_write_failed");
+            }
+            RefreshVisualState();
+        },
+        DeleteLibreTranslateApiKey = () =>
+        {
+            try
+            {
+                _ = credentialVault.Delete(
+                    CredentialTargets.LibreTranslateApiKey);
+                RecoverHost();
+            }
+            catch (Exception)
+            {
+                ReportFailure("libretranslate_credential_delete_failed");
             }
             RefreshVisualState();
         },
@@ -1565,6 +1681,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         bool credentialConfigured;
         bool translationCredentialConfigured;
+        bool libreTranslateCredentialConfigured;
         try
         {
             credentialConfigured = !string.IsNullOrWhiteSpace(
@@ -1575,6 +1692,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             credentialConfigured = false;
         }
         translationCredentialConfigured = IsDeepLCredentialConfigured();
+        libreTranslateCredentialConfigured = !string.IsNullOrWhiteSpace(
+            ReadLibreTranslateApiKeySafely());
 
         var ipcConnected = pipeReady && pipeServer?.ActiveTarget is not null;
         var health = new KeyinaHealthSnapshot(
@@ -1617,6 +1736,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationEnabled = configuration.TranslationEnabled,
             TranslationCredentialConfigured = translationCredentialConfigured,
             TranslationPreviewEnabled = configuration.TranslationPreviewEnabled,
+            LibreTranslateCredentialConfigured = libreTranslateCredentialConfigured,
+            TranslationProviders = configuration.TranslationProviders,
             TranslationHotkeyRegistered = translationHotkeyReady,
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
             Hotkeys = configuration.Hotkeys,
@@ -1891,6 +2012,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
         translationCoordinator.Dispose();
         translationHttpClient?.Dispose();
+        libreTranslationHttpClient?.Dispose();
         notifyIcon.Dispose();
         trayMenu.Dispose();
         activeIcon.Dispose();

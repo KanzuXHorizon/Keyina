@@ -1,6 +1,7 @@
 using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Translation;
 using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.UI;
@@ -26,6 +27,11 @@ public sealed record SettingsSnapshot(
     public bool TranslationCredentialConfigured { get; init; }
 
     public bool TranslationPreviewEnabled { get; init; }
+
+    public bool LibreTranslateCredentialConfigured { get; init; }
+
+    public TranslationProviderPreferences TranslationProviders { get; init; } =
+        TranslationProviderPreferences.Default;
 
     public bool TranslationHotkeyRegistered { get; init; }
 
@@ -53,6 +59,8 @@ public sealed record SettingsSnapshot(
         TranslationEnabled = true,
         TranslationCredentialConfigured = true,
         TranslationPreviewEnabled = false,
+        LibreTranslateCredentialConfigured = false,
+        TranslationProviders = TranslationProviderPreferences.Default,
         TranslationHotkeyRegistered = true,
         TranslationTargetLanguage = "EN-US",
         Hotkeys = HotkeyPreferences.Default,
@@ -82,9 +90,15 @@ public sealed record SettingsActions(
 
     public Action<bool> SetTranslationPreviewEnabled { get; init; } = _ => { };
 
+    public Action<TranslationProviderPreferences> SetTranslationProviders { get; init; } = _ => { };
+
     public Action<string> SaveDeepLApiKey { get; init; } = _ => { };
 
     public Action DeleteDeepLApiKey { get; init; } = () => { };
+
+    public Action<string> SaveLibreTranslateApiKey { get; init; } = _ => { };
+
+    public Action DeleteLibreTranslateApiKey { get; init; } = () => { };
 
     public Action<HotkeyCommand, HotkeyChord> SetHotkey { get; init; } = (_, _) => { };
 

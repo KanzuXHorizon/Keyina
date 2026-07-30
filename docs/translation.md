@@ -2,27 +2,29 @@
 
 Keyina can translate the text currently selected in another Windows application and replace that selection without activating a Keyina window.
 
-## Provider
+## Providers
 
-The first supported provider is DeepL API Free.
+Keyina uses a provider-neutral translation router.
 
-- Free quota: up to 500,000 translated characters per month.
-- Vietnamese and automatic source-language detection are supported.
-- Free API keys normally end in `:fx` and use `https://api-free.deepl.com`.
-- Keyina also accepts a DeepL API Pro key and selects the Pro endpoint automatically.
+- **DeepL API** remains the primary provider. API Free keys normally end in `:fx`; Keyina selects the Free or Pro endpoint automatically.
+- **LibreTranslate** is an optional user-configured fallback and can also run as the only provider. Keyina never selects a public mirror automatically.
+- LibreTranslate credentials are optional because self-hosted servers may not require an API key.
+- Fallback occurs only when DeepL is unavailable, rate-limited, or out of quota. Authentication, unsupported-language, malformed-response, and protected-token failures are not hidden by fallback.
 
-Translation is disabled by default. Keyina does not ship a shared provider key; each user must configure their own credential.
+Translation is disabled by default. Keyina does not ship shared provider credentials or a default LibreTranslate endpoint.
 
 ## Configure
 
-1. Create a DeepL API Free account and obtain an authentication key.
-2. Open **Cài đặt Keyina → Dịch nhanh**.
-3. Use **Cách lấy khóa** to open DeepL's official authentication guide when needed.
-4. Paste the key into **Khóa DeepL API Free** and select **Lưu khóa**. Leading and trailing whitespace from clipboard paste is removed before storage.
-5. Choose the target language.
-6. Enable **Bật dịch nhanh văn bản đang chọn**.
+1. Open **Cài đặt Keyina → Dịch nhanh**.
+2. Configure at least one provider:
+   - For DeepL, paste an API key into **Khóa DeepL API Free** and select **Lưu khóa**.
+   - For LibreTranslate, enable the fallback, enter the exact server endpoint, and optionally store its API key.
+3. Choose the target language.
+4. Enable **Bật dịch nhanh văn bản đang chọn**.
 
-The key is masked while entered and stored under `Keyina/DeepL/ApiKey` in Windows Credential Manager. It is never written to `settings.json`. Removing the key also disables translation and releases its optional shortcut.
+DeepL and LibreTranslate keys are masked and stored separately under `Keyina/DeepL/ApiKey` and `Keyina/LibreTranslate/ApiKey` in Windows Credential Manager. They are never written to `settings.json` or portable exports.
+
+Public LibreTranslate endpoints must use HTTPS. HTTP is accepted only after the user explicitly enables local mode and DNS resolves exclusively to loopback or private addresses. Redirects are disabled, and mixed public/private DNS responses are rejected.
 
 ## Use
 
@@ -43,7 +45,7 @@ Preview mode is opt-in. It opens an interactive comparison window instead of rep
 
 Translation progress uses Keyina's existing no-focus feedback system. Windowed applications receive a compact overlay and sound according to the selected feedback mode; fullscreen-like applications suppress the overlay automatically and use audio only. Feedback contains only status and target-language names, never selected or translated content.
 
-The translation shortcut is registered only while translation is enabled and a DeepL credential exists, so an incomplete or unused feature does not reserve `Ctrl + Alt + T`. The tray translation command also remains disabled until both requirements are met. If another application already owns that chord, Keyina keeps the Vietnamese input hook and its other shortcuts running, shows the conflict in settings, and leaves translation available from the tray menu.
+The translation shortcut is registered only while translation is enabled and at least one provider is usable: either a DeepL credential exists or LibreTranslate is enabled with a validated endpoint. An incomplete or unused feature therefore does not reserve `Ctrl + Alt + T`. If another application already owns that chord, Keyina keeps the Vietnamese input hook and its other shortcuts running, shows the conflict in settings, and leaves translation available from the tray menu.
 
 ## Safety limits
 
@@ -61,11 +63,13 @@ The translation shortcut is registered only while translation is enabled and a D
 
 Ordinary Vietnamese typing remains offline and does not use this feature.
 
-When translation is enabled, the selected text is sent to DeepL. DeepL API Free must not be used for personal data, confidential information, secrets, or other sensitive content. Disable translation when working with such material.
+When translation is enabled, the selected text is sent to the provider selected by the router. Do not use cloud endpoints for personal data, confidential information, secrets, or other sensitive content. A self-hosted LibreTranslate instance can reduce third-party exposure but remains the user's responsibility to secure, update, and operate.
 
-See DeepL's current API documentation and terms before enabling the feature:
+See the providers' current documentation and terms before enabling the feature:
 
 - https://developers.deepl.com/docs/resources/usage-limits
 - https://developers.deepl.com/docs/getting-started/auth
 - https://developers.deepl.com/docs/api-reference/translate
 - https://www.deepl.com/en/pro-data-security
+- https://docs.libretranslate.com/guides/api_usage/
+- https://docs.libretranslate.com/guides/manage_api_keys/

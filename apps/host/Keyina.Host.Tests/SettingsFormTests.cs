@@ -407,7 +407,7 @@ internal static class SettingsFormTests
             "Chưa cấu hình",
             ((Label)form.Controls.Find("speechCredentialStatus", true).Single()).Text);
         AssertEx.Equal(
-            "Cần khóa API",
+            "Cần provider",
             ((Label)form.Controls.Find("translationHotkeyStatus", true).Single()).Text);
     }
 

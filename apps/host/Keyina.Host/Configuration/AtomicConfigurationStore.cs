@@ -29,6 +29,8 @@ public sealed class ConfigurationException : Exception
 public sealed class AtomicConfigurationStore
 {
     private const int MaximumConfigurationBytes = 1024 * 1024;
+    private const int LoadRetryAttempts = 6;
+    private static readonly TimeSpan LoadRetryDelay = TimeSpan.FromMilliseconds(20);
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     private readonly string path;
@@ -54,56 +56,73 @@ public sealed class AtomicConfigurationStore
     public async Task<KeyinaConfiguration> LoadAsync(
         CancellationToken cancellationToken)
     {
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await LoadOnceAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException) when (attempt + 1 < LoadRetryAttempts)
+            {
+                await Task.Delay(LoadRetryDelay, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (ConfigurationException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is JsonException or IOException or UnauthorizedAccessException or
+                ConfigurationValidationException)
+            {
+                throw new ConfigurationException(
+                    "Configuration could not be loaded safely.",
+                    exception);
+            }
+        }
+    }
+
+    private async Task<KeyinaConfiguration> LoadOnceAsync(
+        CancellationToken cancellationToken)
+    {
         if (!File.Exists(path))
         {
             return KeyinaConfiguration.Default;
         }
 
-        try
-        {
-            var information = new FileInfo(path);
-            if (information.Length > MaximumConfigurationBytes)
-            {
-                throw new ConfigurationException(
-                    $"Configuration exceeds {MaximumConfigurationBytes} bytes.");
-            }
-
-            await using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 16 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            var configuration = await JsonSerializer.DeserializeAsync<KeyinaConfiguration>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken)
-                .ConfigureAwait(false)
-                ?? throw new ConfigurationException("Configuration JSON was empty.");
-            configuration = configuration with
-            {
-                Feedback = configuration.Feedback ?? FeedbackPreferences.Default,
-                Hotkeys = configuration.Hotkeys ?? Keyina.Host.Core.Hotkeys.HotkeyPreferences.Default,
-                FirstRunCompleted = configuration.FirstRunCompleted ?? true,
-                Applications = (configuration.Applications ??
-                    Keyina.Host.Core.Applications.ApplicationPreferences.Default).Normalize(),
-            };
-            _ = configuration.ValidateAndCreateSnippets();
-            return configuration;
-        }
-        catch (ConfigurationException)
-        {
-            throw;
-        }
-        catch (Exception exception) when (
-            exception is JsonException or IOException or UnauthorizedAccessException or
-            ConfigurationValidationException)
+        var information = new FileInfo(path);
+        if (information.Length > MaximumConfigurationBytes)
         {
             throw new ConfigurationException(
-                "Configuration could not be loaded safely.",
-                exception);
+                $"Configuration exceeds {MaximumConfigurationBytes} bytes.");
         }
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var configuration = await JsonSerializer.DeserializeAsync<KeyinaConfiguration>(
+                stream,
+                JsonOptions,
+                cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new ConfigurationException("Configuration JSON was empty.");
+        configuration = configuration with
+        {
+            Feedback = configuration.Feedback ?? FeedbackPreferences.Default,
+            Hotkeys = configuration.Hotkeys ?? Keyina.Host.Core.Hotkeys.HotkeyPreferences.Default,
+            FirstRunCompleted = configuration.FirstRunCompleted ?? true,
+            Applications = (configuration.Applications ??
+                Keyina.Host.Core.Applications.ApplicationPreferences.Default).Normalize(),
+            TranslationProviders = (configuration.TranslationProviders ??
+                Keyina.Host.Core.Translation.TranslationProviderPreferences.Default).Normalize(),
+        };
+        _ = configuration.ValidateAndCreateSnippets();
+        return configuration;
     }
 
     public async Task SaveAsync(

@@ -180,6 +180,37 @@ internal static class ConfigurationStoreTests
             store.SaveAsync(invalid, CancellationToken.None).GetAwaiter().GetResult());
     }
 
+    [KeyinaTest("configuration load retries a transient atomic replacement lock")]
+    private static void LoadRetriesTransientLock()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        store.SaveAsync(KeyinaConfiguration.Default, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        var lockStream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(60).ConfigureAwait(false);
+            lockStream.Dispose();
+        });
+
+        var loaded = store.LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        release.GetAwaiter().GetResult();
+
+        AssertEx.Equal(KeyinaConfiguration.Default.SchemaVersion, loaded.SchemaVersion);
+        AssertEx.Equal(KeyinaConfiguration.Default.VietnameseEnabled, loaded.VietnameseEnabled);
+        AssertEx.Equal(KeyinaConfiguration.Default.Hotkeys, loaded.Hotkeys);
+        AssertEx.Equal(KeyinaConfiguration.Default.TranslationProviders, loaded.TranslationProviders);
+        AssertEx.Equal(KeyinaConfiguration.Default.FirstRunCompleted, loaded.FirstRunCompleted);
+    }
+
     [KeyinaTest("configuration store returns defaults when file is missing and ignores orphaned temp files")]
     private static void MissingFileUsesDefaults()
     {

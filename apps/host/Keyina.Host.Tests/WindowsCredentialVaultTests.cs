@@ -47,10 +47,12 @@ internal static class WindowsCredentialVaultTests
     {
         AssertEx.Equal("Keyina/Speechmatics/ApiKey", CredentialTargets.SpeechmaticsApiKey);
         AssertEx.Equal("Keyina/DeepL/ApiKey", CredentialTargets.DeepLApiKey);
+        AssertEx.Equal("Keyina/LibreTranslate/ApiKey", CredentialTargets.LibreTranslateApiKey);
         foreach (var target in new[]
                  {
                      CredentialTargets.SpeechmaticsApiKey,
                      CredentialTargets.DeepLApiKey,
+                     CredentialTargets.LibreTranslateApiKey,
                  })
         {
             AssertEx.True(

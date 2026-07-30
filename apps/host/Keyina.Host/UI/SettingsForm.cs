@@ -13,7 +13,7 @@ using Microsoft.Win32;
 
 namespace Keyina.Host.UI;
 
-public sealed class SettingsForm : Form
+public sealed partial class SettingsForm : Form
 {
     private const string DeepLAuthenticationHelpUrl =
         "https://developers.deepl.com/docs/getting-started/auth";
@@ -48,6 +48,7 @@ public sealed class SettingsForm : Form
     private readonly FluentStatusBadge speechStatus;
     private readonly FluentStatusBadge speechCredentialStatus;
     private readonly FluentStatusBadge translationCredentialStatus;
+    private readonly FluentStatusBadge libreTranslateCredentialStatus;
     private readonly FluentStatusBadge translationHotkeyStatus;
     private readonly FluentStatusBadge ipcStatus;
     private readonly FluentStatusBadge hotkeyStatus;
@@ -56,6 +57,8 @@ public sealed class SettingsForm : Form
     private readonly FluentToggle speechToggle;
     private readonly FluentToggle translationToggle;
     private readonly FluentToggle translationPreviewToggle;
+    private readonly FluentToggle libreTranslateToggle;
+    private readonly FluentToggle allowLocalTranslationEndpointToggle;
     private readonly FluentToggle startupToggle;
     private readonly FluentToggle typingLatencyToggle;
     private readonly ListView typingLatencyTable;
@@ -68,6 +71,10 @@ public sealed class SettingsForm : Form
     private readonly TextBox deepLApiKey;
     private readonly FluentButton saveDeepLKey;
     private readonly FluentButton removeDeepLKey;
+    private readonly TextBox libreTranslateEndpoint;
+    private readonly TextBox libreTranslateApiKey;
+    private readonly FluentButton saveLibreTranslateKey;
+    private readonly FluentButton removeLibreTranslateKey;
     private readonly Label diagnosticsResult;
     private readonly FluentButton setupTsfButton;
     private readonly FlowLayoutPanel snippetsList;
@@ -111,6 +118,9 @@ public sealed class SettingsForm : Form
         speechStatus = CreateBadge("speechStatus", 104);
         speechCredentialStatus = CreateBadge("speechCredentialStatus", 118);
         translationCredentialStatus = CreateBadge("translationCredentialStatus", 118);
+        libreTranslateCredentialStatus = CreateBadge(
+            "libreTranslateCredentialStatus",
+            118);
         translationHotkeyStatus = CreateBadge("translationHotkeyStatus", 126);
         ipcStatus = CreateBadge("ipcStatus", 150);
         hotkeyStatus = CreateBadge("hotkeyStatus", 120);
@@ -122,6 +132,12 @@ public sealed class SettingsForm : Form
         translationPreviewToggle = CreateToggle(
             "translationPreviewToggle",
             "Xem trước bản dịch trước khi thay thế");
+        libreTranslateToggle = CreateToggle(
+            "libreTranslateToggle",
+            "Dùng LibreTranslate khi DeepL không khả dụng");
+        allowLocalTranslationEndpointToggle = CreateToggle(
+            "allowLocalTranslationEndpointToggle",
+            "Cho phép endpoint local hoặc mạng riêng");
         startupToggle = CreateToggle("startupToggle", "Khởi động Keyina cùng Windows");
         typingLatencyToggle = CreateToggle(
             "typingLatencyToggle",
@@ -180,6 +196,31 @@ public sealed class SettingsForm : Form
         saveDeepLKey.Enabled = false;
         removeDeepLKey = CreateButton(
             "removeDeepLKey",
+            "Xóa khóa",
+            FluentButtonKind.Secondary,
+            108);
+        libreTranslateEndpoint = CreateTextBox(
+            "libreTranslateEndpoint",
+            "https://translate.example",
+            "Endpoint LibreTranslate");
+        libreTranslateEndpoint.MaxLength =
+            TranslationProviderPreferences.MaximumEndpointLength;
+        libreTranslateEndpoint.AccessibleDescription =
+            "Nhập URL server LibreTranslate do bạn tin cậy; Keyina không tự chọn public mirror.";
+        libreTranslateApiKey = CreateTextBox(
+            "libreTranslateApiKey",
+            "Khóa API tùy chọn",
+            "Khóa API LibreTranslate");
+        libreTranslateApiKey.UseSystemPasswordChar = true;
+        libreTranslateApiKey.MaxLength = 256;
+        saveLibreTranslateKey = CreateButton(
+            "saveLibreTranslateKey",
+            "Lưu khóa",
+            FluentButtonKind.Primary,
+            112);
+        saveLibreTranslateKey.Enabled = false;
+        removeLibreTranslateKey = CreateButton(
+            "removeLibreTranslateKey",
             "Xóa khóa",
             FluentButtonKind.Secondary,
             108);
@@ -393,6 +434,25 @@ public sealed class SettingsForm : Form
         };
         saveDeepLKey.Click += (_, _) => SaveDeepLCredential();
         removeDeepLKey.Click += (_, _) => actions.DeleteDeepLApiKey();
+        libreTranslateToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                SaveTranslationProviderPreferences();
+            }
+        };
+        allowLocalTranslationEndpointToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                SaveTranslationProviderPreferences();
+            }
+        };
+        libreTranslateEndpoint.Leave += (_, _) => SaveTranslationProviderPreferences();
+        libreTranslateApiKey.TextChanged += (_, _) => saveLibreTranslateKey.Enabled =
+            !string.IsNullOrWhiteSpace(libreTranslateApiKey.Text);
+        saveLibreTranslateKey.Click += (_, _) => SaveLibreTranslateCredential();
+        removeLibreTranslateKey.Click += (_, _) => actions.DeleteLibreTranslateApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
         foreach (var textBox in GetApplicationRuleTextBoxes())
         {
@@ -429,6 +489,10 @@ public sealed class SettingsForm : Form
             speechToggle.Checked = snapshot.SpeechEnabled;
             translationToggle.Checked = snapshot.TranslationEnabled;
             translationPreviewToggle.Checked = snapshot.TranslationPreviewEnabled;
+            libreTranslateToggle.Checked = snapshot.TranslationProviders.LibreTranslateEnabled;
+            allowLocalTranslationEndpointToggle.Checked =
+                snapshot.TranslationProviders.AllowLocalEndpoint;
+            libreTranslateEndpoint.Text = snapshot.TranslationProviders.LibreTranslateEndpoint;
             translationTargetLanguage.SelectedValue = snapshot.TranslationTargetLanguage;
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
@@ -487,15 +551,26 @@ public sealed class SettingsForm : Form
                 snapshot.TranslationCredentialConfigured ? "Đã cấu hình" : "Chưa cấu hình",
                 snapshot.TranslationCredentialConfigured ? FluentTone.Success : FluentTone.Warning);
             SetBadge(
+                libreTranslateCredentialStatus,
+                snapshot.LibreTranslateCredentialConfigured
+                    ? "Đã cấu hình"
+                    : "Không bắt buộc",
+                snapshot.LibreTranslateCredentialConfigured
+                    ? FluentTone.Success
+                    : FluentTone.Neutral);
+            var translationProviderAvailable =
+                snapshot.TranslationCredentialConfigured ||
+                snapshot.TranslationProviders.LibreTranslateEnabled;
+            SetBadge(
                 translationHotkeyStatus,
-                !snapshot.TranslationCredentialConfigured
-                    ? "Cần khóa API"
+                !translationProviderAvailable
+                    ? "Cần provider"
                     : !snapshot.TranslationEnabled
                         ? "Chưa bật"
                         : snapshot.TranslationHotkeyRegistered
                             ? "Đã đăng ký"
                             : "Đang xung đột",
-                !snapshot.TranslationCredentialConfigured
+                !translationProviderAvailable
                     ? FluentTone.Warning
                     : !snapshot.TranslationEnabled
                         ? FluentTone.Neutral
@@ -521,6 +596,10 @@ public sealed class SettingsForm : Form
             removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
             removeDeepLKey.Enabled = snapshot.TranslationCredentialConfigured;
             saveDeepLKey.Text = snapshot.TranslationCredentialConfigured
+                ? "Cập nhật khóa"
+                : "Lưu khóa";
+            removeLibreTranslateKey.Enabled = snapshot.LibreTranslateCredentialConfigured;
+            saveLibreTranslateKey.Text = snapshot.LibreTranslateCredentialConfigured
                 ? "Cập nhật khóa"
                 : "Lưu khóa";
             setupTsfButton.Text = snapshot.Readiness switch
@@ -1194,6 +1273,7 @@ public sealed class SettingsForm : Form
         credentialLayout.Controls.Add(privacyWarning, 0, 4);
         credentialLayout.SetColumnSpan(privacyWarning, 3);
         stack.Controls.Add(credentialCard);
+        stack.Controls.Add(CreateLibreTranslateCard());
 
         var shortcutCard = CreateCard("translationShortcutCard", 112);
         var shortcutLayout = new TableLayoutPanel

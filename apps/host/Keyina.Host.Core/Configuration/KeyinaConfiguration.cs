@@ -61,6 +61,9 @@ public sealed record KeyinaConfiguration(
 
     public string TranslationTargetLanguage { get; init; } = "EN-US";
 
+    public TranslationProviderPreferences TranslationProviders { get; init; } =
+        TranslationProviderPreferences.Default;
+
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
 
     public bool? FirstRunCompleted { get; init; }
@@ -97,6 +100,18 @@ public sealed record KeyinaConfiguration(
         {
             throw new ConfigurationValidationException(
                 "Configuration translation target language is invalid.");
+        }
+        try
+        {
+            (TranslationProviders ?? throw new ArgumentException(
+                "Translation provider preferences must not be null.",
+                nameof(TranslationProviders))).Validate();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration contains invalid translation provider preferences.",
+                exception);
         }
         try
         {
