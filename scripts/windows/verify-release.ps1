@@ -100,8 +100,12 @@ foreach ($line in Get-Content -LiteralPath $checksumsPath) {
 
 $publishDir = Join-Path $artifactRoot ([string]$manifest.runtime_identifier)
 $publishedHost = Join-Path $publishDir 'Keyina.Host.exe'
+$publishedResident = Join-Path $publishDir 'KeyinaInput.exe'
 if (-not (Test-Path -LiteralPath $publishedHost -PathType Leaf)) {
     throw "Published host not found: $publishedHost"
+}
+if (-not (Test-Path -LiteralPath $publishedResident -PathType Leaf)) {
+    throw "Published native resident not found: $publishedResident"
 }
 
 $versionResult = Invoke-CheckedCapturedProcess $publishedHost '--version' $publishDir
@@ -111,6 +115,15 @@ if ($reportedVersion -ne [string]$manifest.version) {
 }
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
     $null = Invoke-CheckedCapturedProcess $publishedHost $selfTest $publishDir
+}
+foreach ($selfTest in @(
+    '--self-test',
+    '--resource-self-test',
+    '--typing-self-test',
+    '--tray-resource-self-test',
+    '--profile-reload-self-test'
+)) {
+    $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
 }
 
 if ([bool]$manifest.signed) {

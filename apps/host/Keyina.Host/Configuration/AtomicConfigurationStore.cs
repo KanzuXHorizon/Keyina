@@ -7,10 +7,17 @@ namespace Keyina.Host.Configuration;
 
 public static class ConfigurationPaths
 {
-    public static string GetProductionPath() => Path.Combine(
+    private static string GetProductionDirectory() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Keyina",
+        "Keyina");
+
+    public static string GetProductionPath() => Path.Combine(
+        GetProductionDirectory(),
         "settings.json");
+
+    public static string GetRuntimeInputProfilePath() => Path.Combine(
+        GetProductionDirectory(),
+        "runtime-input.bin");
 }
 
 public sealed class ConfigurationException : Exception

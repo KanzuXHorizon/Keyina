@@ -10,7 +10,8 @@
 
 #define MyAppName "Keyina"
 #define MyAppPublisher "Keyina contributors"
-#define MyAppExeName "Keyina.Host.exe"
+#define MyAppResidentExeName "KeyinaInput.exe"
+#define MyAppSettingsExeName "Keyina.Host.exe"
 #define MyAppUrl "https://github.com/KanzuXHorizon/Keyina"
 
 [Setup]
@@ -34,15 +35,15 @@ OutputDir={#OutputDir}
 OutputBaseFilename=Keyina-Setup-{#MyAppVersion}-x64
 SetupIconFile=..\brand\generated\keyina.ico
 LicenseFile=..\LICENSE
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\{#MyAppResidentExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
-CloseApplicationsFilter={#MyAppExeName}
+CloseApplicationsFilter=Keyina*.exe
 RestartApplications=no
-AppMutex=Local\Keyina.Host
+AppMutex=Local\Keyina.NativeInput
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
 UsePreviousTasks=yes
@@ -68,8 +69,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Keyina"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--show-settings"; WorkingDir: "{app}"
-Name: "{autodesktop}\Keyina"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--show-settings"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; WorkingDir: "{app}"
+Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--show-settings"; Description: "Launch Keyina"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; Description: "Open Keyina settings"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

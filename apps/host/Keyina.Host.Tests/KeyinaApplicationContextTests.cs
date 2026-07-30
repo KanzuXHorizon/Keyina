@@ -26,6 +26,11 @@ internal static class KeyinaApplicationContextTests
             $"Keyina.Tests.{Guid.NewGuid():N}");
 
         using var context = new KeyinaApplicationContext(options);
+        var runtimeProfilePath = options.ResolveRuntimeInputProfilePath();
+        AssertEx.True(context.RuntimeInputProfileReady,
+            "Runtime input profile was not published during startup.");
+        AssertEx.True(File.Exists(runtimeProfilePath),
+            "Runtime input profile file was not created during startup.");
         AssertEx.True(context.CurrentState.VietnameseEnabled,
             "Vietnamese input did not start enabled.");
         AssertEx.True(!context.SettingsCreated,
@@ -40,6 +45,10 @@ internal static class KeyinaApplicationContextTests
             .GetAwaiter().GetResult();
         AssertEx.True(!context.CurrentState.VietnameseEnabled,
             "Toggle command did not update runtime state.");
+        var published = RuntimeInputProfileCodec.Decode(
+            File.ReadAllBytes(runtimeProfilePath));
+        AssertEx.False(published.VietnameseEnabled,
+            "Runtime input profile did not receive the toggled state.");
 
         context.OpenSettings();
         AssertEx.True(context.SettingsCreated,
@@ -50,6 +59,78 @@ internal static class KeyinaApplicationContextTests
 
         context.Dispose();
         context.Dispose();
+    }
+
+    [KeyinaTest("settings companion opens without resident hooks and exits after close")]
+    private static void SettingsCompanionLifecycleIsBounded()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { FirstRunCompleted = true },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSettingsCompanion(
+            configurationPath,
+            $"Keyina.Settings.Tests.{Guid.NewGuid():N}");
+        var exited = false;
+
+        using var context = new KeyinaApplicationContext(options);
+        context.ThreadExit += (_, _) => exited = true;
+
+        AssertEx.True(context.SettingsCreated,
+            "Settings companion did not open the settings window.");
+        AssertEx.False(context.NotifyIconVisible,
+            "Settings companion exposed a resident tray icon.");
+        AssertEx.Equal(
+            "Hook bàn phím chưa khả dụng",
+            context.CurrentSettingsSnapshot.HotkeyStatus);
+
+        context.CloseSettings();
+        Application.DoEvents();
+
+        AssertEx.True(exited,
+            "Settings companion did not exit after its final window closed.");
+    }
+
+    [KeyinaTest("command companion creates focus-locked speech runtime without resident services")]
+    private static void CommandCompanionCreatesDirectSpeechRuntime()
+    {
+        using var directory = new TemporaryDirectory();
+        var options = new KeyinaRuntimeOptions(
+            Path.Combine(directory.Path, "settings.json"),
+            $"Keyina.Command.Tests.{Guid.NewGuid():N}",
+            EnableNotifyIcon: false,
+            EnableGlobalHotkeys: false,
+            EnablePipe: false,
+            EnableSpeech: true,
+            ShowSettingsOnStart: false,
+            DisplaySettingsWindows: false)
+        {
+            PublishRuntimeProfileOnStartup = false,
+            ForegroundPresentationProbeFactory = static () =>
+                new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = static () => new RecordingOverlay(),
+            FeedbackSoundPlayerFactory = static () => new RecordingSoundPlayer(),
+            FocusedDictationWriterFactory = static () =>
+                new FocusedUnicodeEnvelopeWriter(
+                    static () => new Keyina.Host.Windows.Typing.VietnameseTypingContext(
+                        42,
+                        (nint)100,
+                        ShouldBypassTyping: false),
+                    static _ => { }),
+        };
+
+        using var context = new KeyinaApplicationContext(options);
+
+        AssertEx.True(context.FocusedDictationReady,
+            "Command companion did not initialize focus-locked speech delivery.");
+        AssertEx.False(context.NotifyIconVisible,
+            "Command companion exposed a resident tray icon.");
+        AssertEx.Equal(
+            "Hook bàn phím chưa khả dụng",
+            context.CurrentSettingsSnapshot.HotkeyStatus);
     }
 
     [KeyinaTest("resident context publishes shortcut feedback without changing focus state")]

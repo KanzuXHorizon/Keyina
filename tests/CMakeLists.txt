@@ -17,6 +17,17 @@ target_link_libraries(keyina_tests PRIVATE keyina::core)
 target_include_directories(keyina_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(WIN32)
+  target_sources(keyina_tests PRIVATE
+    windows/input_injection_test.cpp
+    windows/pointer_input_test.cpp
+    windows/resident_input_controller_test.cpp
+    windows/runtime_hotkeys_test.cpp
+    windows/runtime_profile_test.cpp
+  )
+  target_link_libraries(keyina_tests PRIVATE keyina::windows_input)
+endif()
+
 if(WIN32 AND KEYINA_BUILD_TSF)
   target_sources(keyina_tests PRIVATE
     windows/edit_translator_test.cpp

@@ -190,9 +190,10 @@ $versionProperties = @(
     "-p:FileVersion=$fileVersion"
 )
 
+Invoke-Checked 'cmake.exe' @('--preset', 'windows-msvc-release')
+Invoke-Checked 'cmake.exe' @('--build', '--preset', 'windows-msvc-release')
+
 if (-not $SkipVerification) {
-    Invoke-Checked 'cmake.exe' @('--preset', 'windows-msvc-release')
-    Invoke-Checked 'cmake.exe' @('--build', '--preset', 'windows-msvc-release')
     Invoke-Checked 'ctest.exe' @('--preset', 'windows-msvc-release', '--output-on-failure')
     Invoke-Checked 'python.exe' @('tools/check_vectors.py')
     Invoke-Checked 'python.exe' @('tools/test_compare_benchmark.py')
@@ -227,7 +228,14 @@ Invoke-Checked 'dotnet.exe' (@(
     '-o', $publishDir
 ) + $versionProperties)
 
+$nativeInputPath = Join-Path $repoRoot 'build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe'
+if (-not (Test-Path -LiteralPath $nativeInputPath -PathType Leaf)) {
+    throw "Native resident output was not found: $nativeInputPath"
+}
+Copy-Item -LiteralPath $nativeInputPath -Destination (Join-Path $publishDir 'KeyinaInput.exe') -Force
+
 $requiredFiles = @(
+    (Join-Path $publishDir 'KeyinaInput.exe'),
     (Join-Path $publishDir 'Keyina.Host.exe'),
     (Join-Path $publishDir 'KeyinaEngine.dll'),
     (Join-Path $publishDir 'Assets\keyina-tray-active.ico'),
@@ -247,14 +255,24 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $documentati
 Copy-Item -LiteralPath (Join-Path $repoRoot 'SECURITY.md') -Destination $documentationDir
 Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\translation.md') -Destination $documentationDir
 
-$publishedExe = Join-Path $publishDir 'Keyina.Host.exe'
-$versionResult = Invoke-CheckedCapturedProcess $publishedExe '--version' $publishDir
+$publishedHost = Join-Path $publishDir 'Keyina.Host.exe'
+$publishedResident = Join-Path $publishDir 'KeyinaInput.exe'
+$versionResult = Invoke-CheckedCapturedProcess $publishedHost '--version' $publishDir
 $reportedVersion = (($versionResult.StandardOutput -split "`r?`n") | Select-Object -First 1).Trim()
 if ($reportedVersion -ne $Version) {
     throw "Published host reports version '$reportedVersion'; expected '$Version'."
 }
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
-    $null = Invoke-CheckedCapturedProcess $publishedExe $selfTest $publishDir
+    $null = Invoke-CheckedCapturedProcess $publishedHost $selfTest $publishDir
+}
+foreach ($selfTest in @(
+    '--self-test',
+    '--resource-self-test',
+    '--typing-self-test',
+    '--tray-resource-self-test',
+    '--profile-reload-self-test'
+)) {
+    $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
 }
 
 if ($Sign) {

@@ -16,8 +16,10 @@ constexpr char32_t ToAsciiLower(char32_t value) noexcept {
   return value >= U'A' && value <= U'Z' ? value + (U'a' - U'A') : value;
 }
 
-TextEdit Difference(std::u32string_view before, std::u32string_view after,
-                    bool consumed) {
+TextEditView DifferenceView(std::u32string_view before,
+                            std::u32string_view after,
+                            bool consumed,
+                            std::u32string& edit_buffer) {
   std::size_t common_prefix = 0;
   const std::size_t shared_size = std::min(before.size(), after.size());
   while (common_prefix < shared_size &&
@@ -25,9 +27,10 @@ TextEdit Difference(std::u32string_view before, std::u32string_view after,
     ++common_prefix;
   }
 
-  return TextEdit{
+  edit_buffer.assign(after.substr(common_prefix));
+  return TextEditView{
       before.size() - common_prefix,
-      std::u32string{after.substr(common_prefix)},
+      edit_buffer,
       consumed,
   };
 }
@@ -392,11 +395,23 @@ Engine::Engine(EngineConfig config) : config_(config) {
   visible_text_.reserve(kBufferCapacity);
   composition_buffer_.reserve(kBufferCapacity);
   previous_key_buffer_.reserve(kBufferCapacity);
+  edit_buffer_.reserve(kBufferCapacity);
 }
 
 TextEdit Engine::Process(const KeyEvent& event) {
+  const auto edit = ProcessView(event);
+  return TextEdit{
+      edit.erase_codepoints,
+      std::u32string{edit.insert},
+      edit.consumed,
+      edit.commit_before,
+  };
+}
+
+TextEditView Engine::ProcessView(const KeyEvent& event) {
+  edit_buffer_.clear();
   if (event.kind == KeyKind::Reset) {
-    Reset();
+    ResetCompositionState();
     return {};
   }
   if (event.kind == KeyKind::CommitBoundary) {
@@ -404,11 +419,11 @@ TextEdit Engine::Process(const KeyEvent& event) {
     // current composition. They must never rewrite the word that the user has
     // already seen, because that feels like autocorrect and makes Space
     // destructive.
-    Reset();
+    ResetCompositionState();
     return {};
   }
   if (event.control || event.alt) {
-    Reset();
+    ResetCompositionState();
     return {};
   }
   if (event.kind == KeyKind::Backspace) {
@@ -421,24 +436,29 @@ TextEdit Engine::Process(const KeyEvent& event) {
     } else {
       BuildVisibleForRaw();
     }
-    return ReplaceVisible(true);
+    return ReplaceVisibleView(true);
   }
 
   if (raw_keys_.size() >= kMaxActiveKeys) {
-    Reset();
+    ResetCompositionState();
     raw_keys_.push_back(event.character);
     BuildVisibleForRaw();
-    auto edit = ReplaceVisible(true);
+    auto edit = ReplaceVisibleView(true);
     edit.commit_before = true;
     return edit;
   }
 
   raw_keys_.push_back(event.character);
   BuildVisibleForRaw();
-  return ReplaceVisible(true);
+  return ReplaceVisibleView(true);
 }
 
 void Engine::Reset() noexcept {
+  ResetCompositionState();
+  edit_buffer_.clear();
+}
+
+void Engine::ResetCompositionState() noexcept {
   raw_keys_.clear();
   visible_text_.clear();
   composition_buffer_.clear();
@@ -472,8 +492,9 @@ void Engine::BuildVisibleForRaw() {
   }
 }
 
-TextEdit Engine::ReplaceVisible(bool consumed) {
-  auto edit = Difference(visible_text_, composition_buffer_, consumed);
+TextEditView Engine::ReplaceVisibleView(bool consumed) {
+  auto edit = DifferenceView(
+      visible_text_, composition_buffer_, consumed, edit_buffer_);
   visible_text_.swap(composition_buffer_);
   composition_buffer_.clear();
   return edit;
