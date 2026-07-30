@@ -334,6 +334,74 @@ internal static class SettingsFormTests
             "Existing translation exclusion was not preserved.");
     }
 
+    [KeyinaTest("diagnostics exposes a focused raw typing sandbox")]
+    private static void DiagnosticsExposesFocusedTypingSandbox()
+    {
+        TypingDiagnosticTrace.ClearAndDisable();
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample,
+            SettingsActions.NoOp);
+
+        var input = (TextBox)form.Controls.Find("typingDiagnosticInput", true).Single();
+        var status = (Label)form.Controls.Find("typingDiagnosticStatus", true).Single();
+        var filter = (ComboBox)form.Controls.Find("typingDiagnosticFilter", true).Single();
+        var log = (TextBox)form.Controls.Find("typingDiagnosticLog", true).Single();
+        var clear = (Button)form.Controls.Find("clearTypingDiagnostic", true).Single();
+        var copy = (Button)form.Controls.Find("copyTypingDiagnostic", true).Single();
+        var export = (Button)form.Controls.Find("exportTypingDiagnostic", true).Single();
+        var privacy = (Label)form.Controls.Find("typingDiagnosticPrivacy", true).Single();
+
+        AssertEx.True(input.Multiline, "The typing sandbox input must support realistic text cases.");
+        AssertEx.True(input.MaxLength is > 0 and <= 4096,
+            "The typing sandbox input must have a bounded content size.");
+        AssertEx.True(log.Multiline && log.ReadOnly && !log.WordWrap,
+            "The diagnostic log must be a read-only scrollable trace surface.");
+        AssertEx.True(copy.Enabled && export.Enabled,
+            "The typing trace must expose explicit copy and export actions.");
+        AssertEx.True(
+            privacy.Text.Contains("chỉ", StringComparison.OrdinalIgnoreCase) &&
+            privacy.Text.Contains('ô'),
+            "The privacy copy must state that raw capture is limited to this input.");
+
+        input.CreateControl();
+        InvokeEnter(input);
+        AssertEx.True(TypingDiagnosticTrace.IsEnabled,
+            "Entering the sandbox did not activate target-scoped tracing.");
+        AssertEx.True(
+            status.Text.Contains("Đang ghi", StringComparison.OrdinalIgnoreCase),
+            "The sandbox did not expose its active recording state.");
+
+        _ = InvokeKeyDown(input, Keys.S);
+        InvokeKeyPress(input, 's');
+        input.Text = "casse";
+        InvokeKeyUp(input, Keys.S);
+        AssertEx.True(
+            TypingDiagnosticTrace.Snapshot(TypingDiagnosticTraceKind.Output).Count >= 4,
+            "WinForms key and visible-output evidence was not recorded.");
+        AssertEx.True(
+            log.Text.Contains("TextChanged", StringComparison.Ordinal),
+            "The rendered log did not include the visible text result.");
+
+        filter.SelectedIndex = 3;
+        AssertEx.True(
+            log.Text.Contains("[Output]", StringComparison.Ordinal),
+            "The output filter did not render output events.");
+
+        InvokeLeave(input);
+        AssertEx.False(TypingDiagnosticTrace.IsEnabled,
+            "Leaving the sandbox did not pause raw capture.");
+        AssertEx.True(
+            status.Text.Contains("Tạm dừng", StringComparison.OrdinalIgnoreCase),
+            "The sandbox did not expose its paused state.");
+        AssertEx.True(log.Text.Length > 0,
+            "Pausing the sandbox unexpectedly discarded its trace.");
+
+        InvokeClick(clear);
+        AssertEx.Equal(0, TypingDiagnosticTrace.Snapshot().Count);
+        AssertEx.Equal(string.Empty, log.Text);
+        TypingDiagnosticTrace.ClearAndDisable();
+    }
+
     [KeyinaTest("diagnostics exposes safe settings import and export controls")]
     private static void DiagnosticsExposesSafeSettingsPortability()
     {
@@ -511,6 +579,42 @@ internal static class SettingsFormTests
         var eventArgs = new KeyEventArgs(key);
         _ = onKeyDown.Invoke(control, [eventArgs]);
         return eventArgs;
+    }
+
+    private static void InvokeKeyPress(Control control, char character)
+    {
+        var onKeyPress = control.GetType().GetMethod(
+            "OnKeyPress",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Control key press handler could not be invoked.");
+        _ = onKeyPress.Invoke(control, [new KeyPressEventArgs(character)]);
+    }
+
+    private static void InvokeKeyUp(Control control, Keys key)
+    {
+        var onKeyUp = control.GetType().GetMethod(
+            "OnKeyUp",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Control key up handler could not be invoked.");
+        _ = onKeyUp.Invoke(control, [new KeyEventArgs(key)]);
+    }
+
+    private static void InvokeEnter(Control control)
+    {
+        var onEnter = control.GetType().GetMethod(
+            "OnEnter",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Control enter handler could not be invoked.");
+        _ = onEnter.Invoke(control, [EventArgs.Empty]);
+    }
+
+    private static void InvokeLeave(Control control)
+    {
+        var onLeave = control.GetType().GetMethod(
+            "OnLeave",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Control leave handler could not be invoked.");
+        _ = onLeave.Invoke(control, [EventArgs.Empty]);
     }
 
     private static List<TControl> FindDescendants<TControl>(Control root)

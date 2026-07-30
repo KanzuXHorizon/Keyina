@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
@@ -28,7 +29,7 @@ public sealed partial class SettingsForm : Form
             ["hotkeys"] = ("Phím tắt", "Các thao tác nhanh hoạt động trên toàn hệ thống."),
             ["applications"] = ("Ứng dụng", "Tùy chỉnh hành vi Keyina theo tên file thực thi."),
             ["snippets"] = ("Gõ tắt", "Mở rộng cụm từ và lệnh cục bộ, có kiểm soát."),
-            ["diagnostics"] = ("Chẩn đoán", "Kiểm tra trạng thái mà không thu thập nội dung đã nhập."),
+            ["diagnostics"] = ("Chẩn đoán", "Kiểm tra trạng thái; raw trace chỉ chạy trong ô sandbox đang focus."),
         };
 
     private readonly SettingsActions actions;
@@ -62,6 +63,11 @@ public sealed partial class SettingsForm : Form
     private readonly FluentToggle startupToggle;
     private readonly FluentToggle typingLatencyToggle;
     private readonly ListView typingLatencyTable;
+    private readonly TextBox typingDiagnosticInput;
+    private readonly Label typingDiagnosticStatus;
+    private readonly ComboBox typingDiagnosticFilter;
+    private readonly TextBox typingDiagnosticLog;
+    private readonly System.Windows.Forms.Timer typingDiagnosticTimer;
     private readonly ComboBox feedbackMode;
     private readonly FluentButton previewFeedback;
     private readonly TextBox speechApiKey;
@@ -143,6 +149,58 @@ public sealed partial class SettingsForm : Form
             "typingLatencyToggle",
             "Đo độ trễ từng công đoạn");
         typingLatencyTable = CreateTypingLatencyTable();
+        typingDiagnosticInput = CreateTextBox(
+            "typingDiagnosticInput",
+            "Gõ ca sai dấu hoặc double phím tại đây",
+            "Ô nhập sandbox chẩn đoán bộ gõ");
+        typingDiagnosticInput.Multiline = true;
+        typingDiagnosticInput.AcceptsReturn = true;
+        typingDiagnosticInput.AcceptsTab = false;
+        typingDiagnosticInput.ScrollBars = ScrollBars.Vertical;
+        typingDiagnosticInput.MaxLength = 4096;
+        typingDiagnosticInput.Font = new Font(Font.FontFamily, 11F, FontStyle.Regular);
+        typingDiagnosticInput.AccessibleDescription =
+            "Chỉ khi ô này có focus, Keyina mới ghi phím thô, quyết định engine và kết quả hiển thị.";
+        typingDiagnosticStatus = CreateLabel(
+            "typingDiagnosticStatus",
+            "Tạm dừng — nhấp vào ô để bắt đầu ghi.",
+            LabelRole.Caption);
+        typingDiagnosticFilter = new ComboBox
+        {
+            Name = "typingDiagnosticFilter",
+            AccessibleName = "Bộ lọc log chẩn đoán bộ gõ",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font(Font.FontFamily, 9F, FontStyle.Regular),
+            Width = 148,
+            Height = 34,
+            IntegralHeight = false,
+            DropDownHeight = 160,
+            Margin = Padding.Empty,
+        };
+        typingDiagnosticFilter.Items.AddRange(
+        [
+            "Tất cả",
+            "Phím vật lý",
+            "Engine",
+            "Kết quả",
+            "Bất thường",
+        ]);
+        typingDiagnosticFilter.SelectedIndex = 0;
+        typingDiagnosticLog = CreateTextBox(
+            "typingDiagnosticLog",
+            "Log sẽ xuất hiện khi bắt đầu gõ",
+            "Log chi tiết chẩn đoán bộ gõ");
+        typingDiagnosticLog.Multiline = true;
+        typingDiagnosticLog.ReadOnly = true;
+        typingDiagnosticLog.WordWrap = false;
+        typingDiagnosticLog.ScrollBars = ScrollBars.Both;
+        typingDiagnosticLog.TabStop = false;
+        typingDiagnosticLog.Font = new Font("Cascadia Mono", 9F, FontStyle.Regular);
+        typingDiagnosticTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 120,
+        };
         feedbackMode = CreateFeedbackModeSelector();
         previewFeedback = CreateButton(
             "previewFeedback",
@@ -467,6 +525,20 @@ public sealed partial class SettingsForm : Form
             };
         }
         setupTsfButton.Click += SetupTsfButtonClick;
+        typingDiagnosticInput.Enter += (_, _) => StartTypingDiagnosticCapture();
+        typingDiagnosticInput.Leave += (_, _) => PauseTypingDiagnosticCapture();
+        typingDiagnosticInput.KeyDown += (_, eventArgs) =>
+            RecordTypingDiagnosticControlEvent($"WinForms.KeyDown:{eventArgs.KeyCode}");
+        typingDiagnosticInput.KeyPress += (_, eventArgs) =>
+            RecordTypingDiagnosticControlEvent(
+                $"WinForms.KeyPress:{FormatDiagnosticCharacter(eventArgs.KeyChar)}");
+        typingDiagnosticInput.KeyUp += (_, eventArgs) =>
+            RecordTypingDiagnosticControlEvent($"WinForms.KeyUp:{eventArgs.KeyCode}");
+        typingDiagnosticInput.TextChanged += (_, _) =>
+            RecordTypingDiagnosticControlEvent("TextChanged");
+        typingDiagnosticFilter.SelectedIndexChanged += (_, _) =>
+            RefreshTypingDiagnosticLog();
+        typingDiagnosticTimer.Tick += (_, _) => RefreshTypingDiagnosticLog();
 
         SystemEvents.UserPreferenceChanged += SystemEventsUserPreferenceChanged;
         Resize += (_, _) => UpdateResponsiveShell();
@@ -634,6 +706,9 @@ public sealed partial class SettingsForm : Form
         {
             resourcesReleased = true;
             SystemEvents.UserPreferenceChanged -= SystemEventsUserPreferenceChanged;
+            typingDiagnosticTimer.Stop();
+            typingDiagnosticTimer.Dispose();
+            TypingDiagnosticTrace.ClearAndDisable();
             lifetime.Cancel();
             lifetime.Dispose();
         }
@@ -1764,6 +1839,108 @@ public sealed partial class SettingsForm : Form
         resultLayout.Controls.Add(actionBar, 0, 2);
         stack.Controls.Add(resultCard);
 
+        var typingDiagnosticCard = CreateCard("typingDiagnosticCard", 560);
+        var typingDiagnosticLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 6,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        typingDiagnosticLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        typingDiagnosticLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 108F));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        typingDiagnosticLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+        typingDiagnosticCard.Controls.Add(typingDiagnosticLayout);
+
+        var typingDiagnosticTitle = CreateLabel(
+            "typingDiagnosticTitle",
+            "Sandbox debug bộ gõ",
+            LabelRole.Heading);
+        typingDiagnosticTitle.Dock = DockStyle.Fill;
+        typingDiagnosticTitle.TextAlign = ContentAlignment.MiddleLeft;
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticTitle, 0, 0);
+        typingDiagnosticStatus.AutoSize = true;
+        typingDiagnosticStatus.Anchor = AnchorStyles.Right;
+        typingDiagnosticStatus.Margin = new Padding(12, 8, 0, 0);
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticStatus, 1, 0);
+
+        var typingDiagnosticPrivacy = CreateLabel(
+            "typingDiagnosticPrivacy",
+            "Chỉ ô này ghi phím thô và nội dung hiển thị. Rời focus sẽ tạm dừng; Keyina không ghi ở ứng dụng khác.",
+            LabelRole.Secondary);
+        typingDiagnosticPrivacy.Dock = DockStyle.Fill;
+        typingDiagnosticPrivacy.TextAlign = ContentAlignment.MiddleLeft;
+        typingDiagnosticPrivacy.AccessibleDescription =
+            "Raw trace is active only for this focused diagnostic input and remains in memory until cleared or the window closes.";
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticPrivacy, 0, 1);
+        typingDiagnosticLayout.SetColumnSpan(typingDiagnosticPrivacy, 2);
+
+        var typingDiagnosticInputFrame = CreateInputFrame(typingDiagnosticInput);
+        typingDiagnosticInputFrame.Height = 96;
+        typingDiagnosticInputFrame.Dock = DockStyle.Fill;
+        typingDiagnosticInputFrame.Padding = new Padding(12, 10, 12, 10);
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticInputFrame, 0, 2);
+        typingDiagnosticLayout.SetColumnSpan(typingDiagnosticInputFrame, 2);
+
+        var typingDiagnosticLogTitle = CreateLabel(
+            "typingDiagnosticLogTitle",
+            "Dòng sự kiện",
+            LabelRole.Caption);
+        typingDiagnosticLogTitle.Dock = DockStyle.Fill;
+        typingDiagnosticLogTitle.TextAlign = ContentAlignment.MiddleLeft;
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticLogTitle, 0, 3);
+        typingDiagnosticFilter.Anchor = AnchorStyles.Right;
+        typingDiagnosticFilter.Margin = new Padding(12, 4, 0, 4);
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticFilter, 1, 3);
+
+        var typingDiagnosticLogFrame = CreateInputFrame(typingDiagnosticLog);
+        typingDiagnosticLogFrame.Dock = DockStyle.Fill;
+        typingDiagnosticLogFrame.Padding = new Padding(12, 10, 12, 10);
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticLogFrame, 0, 4);
+        typingDiagnosticLayout.SetColumnSpan(typingDiagnosticLogFrame, 2);
+
+        var typingDiagnosticActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 6, 0, 0),
+        };
+        var clearTypingDiagnostic = CreateButton(
+            "clearTypingDiagnostic",
+            "Xóa log",
+            FluentButtonKind.Secondary,
+            108);
+        var copyTypingDiagnostic = CreateButton(
+            "copyTypingDiagnostic",
+            "Sao chép log",
+            FluentButtonKind.Primary,
+            142);
+        var exportTypingDiagnostic = CreateButton(
+            "exportTypingDiagnostic",
+            "Xuất log",
+            FluentButtonKind.Secondary,
+            112);
+        clearTypingDiagnostic.Margin = new Padding(0, 0, 8, 0);
+        copyTypingDiagnostic.Margin = new Padding(0, 0, 8, 0);
+        exportTypingDiagnostic.Margin = Padding.Empty;
+        clearTypingDiagnostic.Click += (_, _) => ClearTypingDiagnosticLog();
+        copyTypingDiagnostic.Click += (_, _) => CopyTypingDiagnosticLog();
+        exportTypingDiagnostic.Click += (_, _) => ExportTypingDiagnosticLog();
+        typingDiagnosticActions.Controls.Add(clearTypingDiagnostic);
+        typingDiagnosticActions.Controls.Add(copyTypingDiagnostic);
+        typingDiagnosticActions.Controls.Add(exportTypingDiagnostic);
+        typingDiagnosticLayout.Controls.Add(typingDiagnosticActions, 0, 5);
+        typingDiagnosticLayout.SetColumnSpan(typingDiagnosticActions, 2);
+        stack.Controls.Add(typingDiagnosticCard);
+
         var latencyCard = CreateCard("typingLatencyCard", 352);
         var latencyLayout = new TableLayoutPanel
         {
@@ -1899,8 +2076,8 @@ public sealed partial class SettingsForm : Form
         var privacy = CreateCard("diagnosticsPrivacyCard", 116);
         privacy.Controls.Add(CreateIconTextLayout(
             "\uEA18",
-            "Không thu thập nội dung",
-            "Kiểm tra không đọc transcript, âm thanh, clipboard, nội dung gõ tắt hoặc phím thô."));
+            "Không thu thập ngoài sandbox",
+            "Báo cáo thường không đọc transcript, âm thanh, clipboard hoặc phím thô; sandbox chỉ ghi đúng ô đang focus."));
         stack.Controls.Add(privacy);
         return page;
     }
@@ -2626,6 +2803,160 @@ public sealed partial class SettingsForm : Form
             }
         }
     }
+
+    private void StartTypingDiagnosticCapture()
+    {
+        if (!typingDiagnosticInput.IsHandleCreated)
+        {
+            _ = typingDiagnosticInput.Handle;
+        }
+        TypingDiagnosticTrace.Activate(typingDiagnosticInput.Handle);
+        typingDiagnosticStatus.Text = "Đang ghi — chỉ ô sandbox này.";
+        typingDiagnosticStatus.ForeColor = palette.Success;
+        typingDiagnosticTimer.Start();
+        RecordTypingDiagnosticControlEvent("Session.Start");
+    }
+
+    private void PauseTypingDiagnosticCapture()
+    {
+        if (typingDiagnosticInput.IsHandleCreated)
+        {
+            RecordTypingDiagnosticControlEvent("Session.Pause");
+            TypingDiagnosticTrace.Deactivate(typingDiagnosticInput.Handle);
+        }
+        typingDiagnosticTimer.Stop();
+        typingDiagnosticStatus.Text = "Tạm dừng — log vẫn được giữ để xem hoặc xuất.";
+        typingDiagnosticStatus.ForeColor = palette.TextSecondary;
+        RefreshTypingDiagnosticLog();
+    }
+
+    private void RecordTypingDiagnosticControlEvent(string eventName)
+    {
+        if (!typingDiagnosticInput.IsHandleCreated)
+        {
+            return;
+        }
+        TypingDiagnosticTrace.RecordOutput(
+            typingDiagnosticInput.Handle,
+            eventName,
+            typingDiagnosticInput.Text,
+            typingDiagnosticInput.SelectionStart,
+            typingDiagnosticInput.SelectionLength);
+        RefreshTypingDiagnosticLog();
+    }
+
+    private void RefreshTypingDiagnosticLog()
+    {
+        if (typingDiagnosticLog.IsDisposed)
+        {
+            return;
+        }
+        typingDiagnosticLog.Text = TypingDiagnosticTrace.FormatSnapshot(
+            GetTypingDiagnosticFilter());
+        if (typingDiagnosticLog.TextLength > 0)
+        {
+            typingDiagnosticLog.SelectionStart = typingDiagnosticLog.TextLength;
+            typingDiagnosticLog.SelectionLength = 0;
+            typingDiagnosticLog.ScrollToCaret();
+        }
+    }
+
+    private TypingDiagnosticTraceKind? GetTypingDiagnosticFilter() =>
+        typingDiagnosticFilter.SelectedIndex switch
+        {
+            0 => null,
+            1 => TypingDiagnosticTraceKind.Physical,
+            2 => TypingDiagnosticTraceKind.Engine,
+            3 => TypingDiagnosticTraceKind.Output,
+            4 => TypingDiagnosticTraceKind.Anomaly,
+            _ => null,
+        };
+
+    private void ClearTypingDiagnosticLog()
+    {
+        TypingDiagnosticTrace.Clear();
+        typingDiagnosticLog.Clear();
+        typingDiagnosticStatus.Text = TypingDiagnosticTrace.IsEnabled
+            ? "Đang ghi — log vừa được xóa."
+            : "Tạm dừng — log đã được xóa.";
+        typingDiagnosticStatus.ForeColor = TypingDiagnosticTrace.IsEnabled
+            ? palette.Success
+            : palette.TextSecondary;
+    }
+
+    private void CopyTypingDiagnosticLog()
+    {
+        var text = TypingDiagnosticTrace.FormatSnapshot(GetTypingDiagnosticFilter());
+        if (text.Length == 0)
+        {
+            typingDiagnosticStatus.Text = "Chưa có sự kiện để sao chép.";
+            typingDiagnosticStatus.ForeColor = palette.Warning;
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(text, TextDataFormat.UnicodeText);
+            typingDiagnosticStatus.Text = "Đã sao chép log đang hiển thị.";
+            typingDiagnosticStatus.ForeColor = palette.Success;
+        }
+        catch (ExternalException)
+        {
+            typingDiagnosticStatus.Text = "Clipboard đang bận; hãy thử lại.";
+            typingDiagnosticStatus.ForeColor = palette.Error;
+        }
+    }
+
+    private void ExportTypingDiagnosticLog()
+    {
+        var text = TypingDiagnosticTrace.FormatSnapshot(GetTypingDiagnosticFilter());
+        if (text.Length == 0)
+        {
+            typingDiagnosticStatus.Text = "Chưa có sự kiện để xuất.";
+            typingDiagnosticStatus.ForeColor = palette.Warning;
+            return;
+        }
+
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Xuất log chẩn đoán bộ gõ",
+            Filter = "Keyina typing log (*.log)|*.log|Text file (*.txt)|*.txt",
+            DefaultExt = "log",
+            AddExtension = true,
+            FileName = $"keyina-typing-{DateTime.Now:yyyyMMdd-HHmmss}.log",
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            File.WriteAllText(
+                dialog.FileName,
+                text,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            typingDiagnosticStatus.Text = "Đã xuất log vào file đã chọn.";
+            typingDiagnosticStatus.ForeColor = palette.Success;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            UnauthorizedAccessException or
+            ArgumentException)
+        {
+            typingDiagnosticStatus.Text = "Không thể xuất log; hãy chọn vị trí khác.";
+            typingDiagnosticStatus.ForeColor = palette.Error;
+        }
+    }
+
+    private static string FormatDiagnosticCharacter(char character) => character switch
+    {
+        '\r' => "\\r",
+        '\n' => "\\n",
+        '\t' => "\\t",
+        _ => character.ToString(),
+    };
 
     private async Task RunDiagnosticsAsync(FluentButton runButton)
     {

@@ -48,6 +48,40 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("tiếng Việt", injector.Text);
     }
 
+    [KeyinaTest("resident hook emits target scoped physical and engine diagnostics")]
+    private static void HookEmitsTargetScopedDiagnostics()
+    {
+        TypingDiagnosticTrace.ClearAndDisable();
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+        TypingDiagnosticTrace.Activate(native.TypingContext.FocusWindow);
+
+        Type(native, "as");
+
+        var entries = TypingDiagnosticTrace.Snapshot();
+        AssertEx.True(
+            entries.Count(entry => entry.Kind == TypingDiagnosticTraceKind.Physical) >= 4,
+            "The focused sandbox did not receive physical key down and key up evidence.");
+        AssertEx.True(
+            entries.Any(entry =>
+                entry.Kind == TypingDiagnosticTraceKind.Engine &&
+                entry.Event == "transform" &&
+                entry.Detail.Contains('á')),
+            "The focused sandbox did not receive the engine transform result.");
+
+        TypingDiagnosticTrace.Clear();
+        native.TypingContext = native.TypingContext with { FocusWindow = (nint)2 };
+        Type(native, "as");
+        AssertEx.Equal(0, TypingDiagnosticTrace.Snapshot().Count);
+        TypingDiagnosticTrace.ClearAndDisable();
+    }
+
     [KeyinaTest("resident hook supports literal tone-key escape and flexible late vowel shape")]
     private static void HookHandlesLiteralUxAndLateShapeToneOrder()
     {

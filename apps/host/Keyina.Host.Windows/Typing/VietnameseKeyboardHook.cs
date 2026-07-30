@@ -15,7 +15,8 @@ public readonly record struct VietnameseKeyboardEvent(
     bool Control,
     bool Alt,
     bool Windows,
-    Rune Character);
+    Rune Character,
+    uint ScanCode = 0);
 
 public readonly record struct VietnameseTypingContext(
     int ForegroundProcessId,
@@ -155,8 +156,18 @@ public sealed class VietnameseKeyboardHook : IDisposable
 
     private bool ProcessRawEvent(VietnameseKeyboardEvent keyboardEvent)
     {
+        var diagnosticTracing = TypingDiagnosticTrace.IsEnabled;
         if (keyboardEvent.ExtraInfo == UnicodeInputInjector.InjectionMarker)
         {
+            if (diagnosticTracing)
+            {
+                var injectedContext = nativeApi.GetTypingContext();
+                TypingDiagnosticTrace.RecordEngine(
+                    "keyina-injected-bypass",
+                    keyboardEvent,
+                    injectedContext,
+                    "Injected edit was allowed through without re-entering the engine.");
+            }
             return false;
         }
         NotifyPhysicalEvent(keyboardEvent);
@@ -165,6 +176,11 @@ public sealed class VietnameseKeyboardHook : IDisposable
         var keyIndex = keyboardEvent.VirtualKey;
         if (!keyboardEvent.IsKeyDown)
         {
+            if (diagnosticTracing)
+            {
+                var releaseContext = nativeApi.GetTypingContext();
+                TypingDiagnosticTrace.RecordPhysical(keyboardEvent, releaseContext);
+            }
             try
             {
                 if (resetPending)
@@ -203,6 +219,10 @@ public sealed class VietnameseKeyboardHook : IDisposable
             try
             {
                 currentContext = nativeApi.GetTypingContext();
+                if (diagnosticTracing)
+                {
+                    TypingDiagnosticTrace.RecordPhysical(keyboardEvent, currentContext);
+                }
                 if (resetPending || HasContextChanged(typingContext, currentContext))
                 {
                     TypingTraceBuffer.Record(
@@ -228,6 +248,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
             {
                 if (keyboardEvent.Control || keyboardEvent.Alt || keyboardEvent.Windows)
                 {
+                    if (diagnosticTracing)
+                    {
+                        TypingDiagnosticTrace.RecordEngine(
+                            "shortcut-bypass",
+                            keyboardEvent,
+                            currentContext,
+                            "A Control, Alt, or Windows modifier bypassed Vietnamese composition.");
+                    }
                     TypingTraceBuffer.Record(
                         "shortcut-bypass",
                         keyIndex,
@@ -241,6 +269,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 }
                 if (currentContext.ShouldBypassTyping)
                 {
+                    if (diagnosticTracing)
+                    {
+                        TypingDiagnosticTrace.RecordEngine(
+                            "secure-bypass",
+                            keyboardEvent,
+                            currentContext,
+                            "The focused control was classified as unsafe for composition.");
+                    }
                     TypingTraceBuffer.Record(
                         "secure-bypass",
                         keyIndex,
@@ -250,6 +286,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 }
                 if (ShouldBypassApplication(currentContext.ForegroundProcessId))
                 {
+                    if (diagnosticTracing)
+                    {
+                        TypingDiagnosticTrace.RecordEngine(
+                            "application-bypass",
+                            keyboardEvent,
+                            currentContext,
+                            "The foreground application is excluded from Vietnamese composition.");
+                    }
                     TypingTraceBuffer.Record(
                         "application-bypass",
                         keyIndex,
@@ -338,9 +382,28 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 return false;
             }
 
-            if (!edit.ConsumePhysicalKey ||
-                IsLiteralPassThrough(edit, keyboardEvent.Character))
+            if (!edit.ConsumePhysicalKey)
             {
+                if (diagnosticTracing)
+                {
+                    TypingDiagnosticTrace.RecordEngine(
+                        "physical-pass-through",
+                        keyboardEvent,
+                        currentContext,
+                        $"backspaces={edit.BackspaceCount};insert=\"{edit.InsertText}\"");
+                }
+                return false;
+            }
+            if (IsLiteralPassThrough(edit, keyboardEvent.Character))
+            {
+                if (diagnosticTracing)
+                {
+                    TypingDiagnosticTrace.RecordEngine(
+                        "literal-pass-through",
+                        keyboardEvent,
+                        currentContext,
+                        $"backspaces={edit.BackspaceCount};insert=\"{edit.InsertText}\"");
+                }
                 return false;
             }
 
@@ -349,6 +412,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
             {
                 try
                 {
+                    if (diagnosticTracing)
+                    {
+                        TypingDiagnosticTrace.RecordEngine(
+                            "transform",
+                            keyboardEvent,
+                            currentContext,
+                            $"backspaces={edit.BackspaceCount};insert=\"{edit.InsertText}\"");
+                    }
                     if (TypingTraceBuffer.IsEnabled)
                     {
                         TypingTraceBuffer.Record(
@@ -363,6 +434,14 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 catch (Exception exception) when (
                     exception is Win32Exception or InvalidOperationException)
                 {
+                    if (diagnosticTracing)
+                    {
+                        TypingDiagnosticTrace.RecordEngine(
+                            "inject-failed",
+                            keyboardEvent,
+                            currentContext,
+                            exception.GetType().Name);
+                    }
                     if (TypingTraceBuffer.IsEnabled)
                     {
                         TypingTraceBuffer.Record(
@@ -1008,7 +1087,8 @@ public sealed class VietnameseKeyboardHook : IDisposable
                             control,
                             alt,
                             windows,
-                            character));
+                            character,
+                            nativeEvent.ScanCode));
                         if (handled)
                         {
                             return 1;
