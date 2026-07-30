@@ -9,8 +9,9 @@ internal static class RepositoryPaths
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current is not null)
         {
+            var gitPath = Path.Combine(current.FullName, ".git");
             if (File.Exists(Path.Combine(current.FullName, "Keyina.slnx")) &&
-                Directory.Exists(Path.Combine(current.FullName, ".git")))
+                (Directory.Exists(gitPath) || File.Exists(gitPath)))
             {
                 return current.FullName;
             }

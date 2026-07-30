@@ -22,6 +22,9 @@ public enum FeedbackEventKind
     DictationFinalizing,
     DictationInserted,
     DictationCancelled,
+    TranslationStarted,
+    TranslationCompleted,
+    TranslationCancelled,
     Error,
     Preview,
 }

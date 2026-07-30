@@ -18,6 +18,8 @@ internal static class ConfigurationStoreTests
             VietnameseEnabled = false,
             SpeechEnabled = true,
             Theme = KeyinaTheme.Dark,
+            TranslationEnabled = true,
+            TranslationTargetLanguage = "JA",
             Snippets =
             [
                 new SnippetConfiguration(
@@ -40,6 +42,8 @@ internal static class ConfigurationStoreTests
         AssertEx.Equal(configuration.VietnameseEnabled, loaded.VietnameseEnabled);
         AssertEx.Equal(configuration.SpeechEnabled, loaded.SpeechEnabled);
         AssertEx.Equal(configuration.Theme, loaded.Theme);
+        AssertEx.Equal(configuration.TranslationEnabled, loaded.TranslationEnabled);
+        AssertEx.Equal(configuration.TranslationTargetLanguage, loaded.TranslationTargetLanguage);
         AssertEx.Equal(configuration.Feedback, loaded.Feedback);
         AssertEx.Equal(configuration.Snippets.Length, loaded.Snippets.Length);
         AssertEx.Equal(configuration.Snippets[0].Trigger, loaded.Snippets[0].Trigger);
@@ -98,6 +102,23 @@ internal static class ConfigurationStoreTests
             .GetAwaiter().GetResult();
 
         AssertEx.Equal(FeedbackPreferences.Default, loaded.Feedback);
+    }
+
+    [KeyinaTest("schema one configuration without translation fields uses safe defaults")]
+    private static void LegacySchemaOneUsesTranslationDefaults()
+    {
+        using var directory = new TemporaryDirectory();
+        var path = Path.Combine(directory.Path, "settings.json");
+        var store = new AtomicConfigurationStore(path);
+        File.WriteAllText(
+            path,
+            "{\"schema_version\":1,\"vietnamese_enabled\":true,\"speech_enabled\":false,\"theme\":\"system\",\"snippets\":[]}");
+
+        var loaded = store.LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.False(loaded.TranslationEnabled, "Translation must remain opt-in.");
+        AssertEx.Equal("EN-US", loaded.TranslationTargetLanguage);
     }
 
     [KeyinaTest("configuration rejects invalid feedback mode")]

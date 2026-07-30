@@ -115,7 +115,7 @@ internal static class HotkeyStateMachineTests
     private static void DefaultBindingsAreValid()
     {
         var bindings = DefaultHotkeys.Create();
-        AssertEx.Equal(3, bindings.Count);
+        AssertEx.Equal(4, bindings.Count);
         AssertEx.Equal(
             new HotkeyBinding(
                 new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.Space),
@@ -127,9 +127,14 @@ internal static class HotkeyStateMachineTests
                 HotkeyCommand.ToggleDictation),
             bindings[1]);
         AssertEx.Equal(
+            new HotkeyBinding(
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.T),
+                HotkeyCommand.TranslateSelection),
+            bindings[2]);
+        AssertEx.Equal(
             new HotkeyBinding(new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
                 HotkeyCommand.CancelDictation),
-            bindings[2]);
+            bindings[3]);
 
         HotkeyBindingValidator.Validate(bindings);
     }

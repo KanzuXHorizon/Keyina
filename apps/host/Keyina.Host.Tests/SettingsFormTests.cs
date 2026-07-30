@@ -31,6 +31,7 @@ internal static class SettingsFormTests
                      "navOverview",
                      "navTyping",
                      "navSpeech",
+                     "navTranslation",
                      "navHotkeys",
                      "navSnippets",
                      "navDiagnostics",
@@ -50,6 +51,17 @@ internal static class SettingsFormTests
         var apiKey = (TextBox)form.Controls.Find("speechApiKey", true).Single();
         AssertEx.True(apiKey.UseSystemPasswordChar, "Speech API key was not masked.");
         AssertEx.Equal(string.Empty, apiKey.Text);
+
+        var deepLApiKey = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
+        AssertEx.True(deepLApiKey.UseSystemPasswordChar, "DeepL API key was not masked.");
+        AssertEx.Equal(string.Empty, deepLApiKey.Text);
+        AssertEx.Equal(1, form.Controls.Find("translationToggle", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("translationTargetLanguage", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("translationHotkeyStatus", true).Length);
+        var privacy = (Label)form.Controls.Find("translationPrivacyWarning", true).Single();
+        AssertEx.True(
+            privacy.Text.Contains("nhạy cảm", StringComparison.OrdinalIgnoreCase),
+            "DeepL Free privacy warning must mention sensitive content.");
 
         var vietnamese = (CheckBox)form.Controls.Find("vietnameseToggle", true).Single();
         var startup = (CheckBox)form.Controls.Find("startupToggle", true).Single();
@@ -183,6 +195,10 @@ internal static class SettingsFormTests
             StartupEnabled = false,
             Listening = true,
             SpeechCredentialConfigured = false,
+            TranslationEnabled = true,
+            TranslationCredentialConfigured = false,
+            TranslationHotkeyRegistered = false,
+            TranslationTargetLanguage = "VI",
             StatusMessage = "Listening",
         });
 
@@ -198,6 +214,9 @@ internal static class SettingsFormTests
         AssertEx.Equal(
             "Chưa cấu hình",
             ((Label)form.Controls.Find("speechCredentialStatus", true).Single()).Text);
+        AssertEx.Equal(
+            "Đang xung đột",
+            ((Label)form.Controls.Find("translationHotkeyStatus", true).Single()).Text);
     }
 
     [KeyinaTest("settings form uses localized production copy")]
@@ -293,6 +312,7 @@ internal static class SettingsFormTests
                 "overview.png",
                 "typing.png",
                 "speech.png",
+                "translation.png",
                 "hotkeys.png",
                 "snippets.png",
                 "diagnostics.png",

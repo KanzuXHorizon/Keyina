@@ -24,6 +24,7 @@ public static class SettingsScreenshotRenderer
             ("overview.png", "navOverview"),
             ("typing.png", "navTyping"),
             ("speech.png", "navSpeech"),
+            ("translation.png", "navTranslation"),
             ("hotkeys.png", "navHotkeys"),
             ("snippets.png", "navSnippets"),
             ("diagnostics.png", "navDiagnostics"),

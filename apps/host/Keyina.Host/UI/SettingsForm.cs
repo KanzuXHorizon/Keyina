@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Translation;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Typing;
 using Microsoft.Win32;
@@ -17,6 +18,7 @@ public sealed class SettingsForm : Form
             ["overview"] = ("Tổng quan", "Trạng thái bộ gõ và các hành động cần thiết."),
             ["typing"] = ("Bộ gõ", "Thiết lập cách Keyina xử lý tiếng Việt trong Windows."),
             ["speech"] = ("Nhập bằng giọng nói", "Đọc tiếng Việt vào ứng dụng đang được chọn."),
+            ["translation"] = ("Dịch nhanh", "Dịch phần văn bản đang chọn mà không làm mất focus."),
             ["hotkeys"] = ("Phím tắt", "Các thao tác nhanh hoạt động trên toàn hệ thống."),
             ["snippets"] = ("Gõ tắt", "Mở rộng cụm từ và lệnh cục bộ, có kiểm soát."),
             ["diagnostics"] = ("Chẩn đoán", "Kiểm tra trạng thái mà không thu thập nội dung đã nhập."),
@@ -37,11 +39,14 @@ public sealed class SettingsForm : Form
     private readonly FluentStatusBadge inputStatus;
     private readonly FluentStatusBadge speechStatus;
     private readonly FluentStatusBadge speechCredentialStatus;
+    private readonly FluentStatusBadge translationCredentialStatus;
+    private readonly FluentStatusBadge translationHotkeyStatus;
     private readonly FluentStatusBadge ipcStatus;
     private readonly FluentStatusBadge hotkeyStatus;
     private readonly Label snippetCount;
     private readonly FluentToggle vietnameseToggle;
     private readonly FluentToggle speechToggle;
+    private readonly FluentToggle translationToggle;
     private readonly FluentToggle startupToggle;
     private readonly FluentToggle typingLatencyToggle;
     private readonly ListView typingLatencyTable;
@@ -50,6 +55,10 @@ public sealed class SettingsForm : Form
     private readonly TextBox speechApiKey;
     private readonly FluentButton saveSpeechKey;
     private readonly FluentButton removeSpeechKey;
+    private readonly ComboBox translationTargetLanguage;
+    private readonly TextBox deepLApiKey;
+    private readonly FluentButton saveDeepLKey;
+    private readonly FluentButton removeDeepLKey;
     private readonly Label diagnosticsResult;
     private readonly FluentButton setupTsfButton;
     private readonly FlowLayoutPanel snippetsList;
@@ -86,12 +95,15 @@ public sealed class SettingsForm : Form
         inputStatus = CreateBadge("inputStatus", 104);
         speechStatus = CreateBadge("speechStatus", 104);
         speechCredentialStatus = CreateBadge("speechCredentialStatus", 118);
+        translationCredentialStatus = CreateBadge("translationCredentialStatus", 118);
+        translationHotkeyStatus = CreateBadge("translationHotkeyStatus", 126);
         ipcStatus = CreateBadge("ipcStatus", 150);
         hotkeyStatus = CreateBadge("hotkeyStatus", 120);
         snippetCount = CreateLabel("snippetCount", string.Empty, LabelRole.Secondary);
 
         vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
         speechToggle = CreateToggle("speechToggle", "Bật nhập bằng giọng nói");
+        translationToggle = CreateToggle("translationToggle", "Bật dịch nhanh văn bản đang chọn");
         startupToggle = CreateToggle("startupToggle", "Khởi động Keyina cùng Windows");
         typingLatencyToggle = CreateToggle(
             "typingLatencyToggle",
@@ -117,6 +129,36 @@ public sealed class SettingsForm : Form
         saveSpeechKey.Enabled = false;
         removeSpeechKey = CreateButton(
             "removeSpeechKey",
+            "Xóa khóa",
+            FluentButtonKind.Secondary,
+            108);
+
+        translationTargetLanguage = new ComboBox
+        {
+            Name = "translationTargetLanguage",
+            AccessibleName = "Ngôn ngữ đích",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            DisplayMember = nameof(TranslationLanguage.DisplayName),
+            ValueMember = nameof(TranslationLanguage.Code),
+            DataSource = TranslationLanguageCatalog.SupportedTargets.ToArray(),
+            Height = 36,
+            IntegralHeight = false,
+            DropDownHeight = 280,
+        };
+        deepLApiKey = CreateTextBox(
+            "deepLApiKey",
+            "Dán khóa DeepL API Free",
+            "Khóa API DeepL");
+        deepLApiKey.UseSystemPasswordChar = true;
+        saveDeepLKey = CreateButton(
+            "saveDeepLKey",
+            "Lưu khóa",
+            FluentButtonKind.Primary,
+            112);
+        saveDeepLKey.Enabled = false;
+        removeDeepLKey = CreateButton(
+            "removeDeepLKey",
             "Xóa khóa",
             FluentButtonKind.Secondary,
             108);
@@ -227,6 +269,7 @@ public sealed class SettingsForm : Form
         pages.Add("overview", CreateOverviewPage());
         pages.Add("typing", CreateTypingPage());
         pages.Add("speech", CreateSpeechPage());
+        pages.Add("translation", CreateTranslationPage());
         pages.Add("hotkeys", CreateHotkeysPage());
         pages.Add("snippets", CreateSnippetsPage());
         pages.Add("diagnostics", CreateDiagnosticsPage());
@@ -247,6 +290,21 @@ public sealed class SettingsForm : Form
             if (!applyingSnapshot)
             {
                 actions.SetSpeechEnabled(speechToggle.Checked);
+            }
+        };
+        translationToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetTranslationEnabled(translationToggle.Checked);
+            }
+        };
+        translationTargetLanguage.SelectedValueChanged += (_, _) =>
+        {
+            if (!applyingSnapshot &&
+                translationTargetLanguage.SelectedValue is string targetLanguage)
+            {
+                actions.SetTranslationTargetLanguage(targetLanguage);
             }
         };
         startupToggle.CheckedChanged += (_, _) =>
@@ -275,6 +333,10 @@ public sealed class SettingsForm : Form
             !string.IsNullOrWhiteSpace(speechApiKey.Text);
         saveSpeechKey.Click += (_, _) => SaveSpeechCredential();
         removeSpeechKey.Click += (_, _) => actions.DeleteSpeechApiKey();
+        deepLApiKey.TextChanged += (_, _) => saveDeepLKey.Enabled =
+            !string.IsNullOrWhiteSpace(deepLApiKey.Text);
+        saveDeepLKey.Click += (_, _) => SaveDeepLCredential();
+        removeDeepLKey.Click += (_, _) => actions.DeleteDeepLApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
         setupTsfButton.Click += SetupTsfButtonClick;
 
@@ -297,6 +359,8 @@ public sealed class SettingsForm : Form
         {
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
             speechToggle.Checked = snapshot.SpeechEnabled;
+            translationToggle.Checked = snapshot.TranslationEnabled;
+            translationTargetLanguage.SelectedValue = snapshot.TranslationTargetLanguage;
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
             feedbackMode.SelectedIndex = FeedbackModeToIndex(snapshot.FeedbackMode);
@@ -346,6 +410,22 @@ public sealed class SettingsForm : Form
                 snapshot.SpeechCredentialConfigured ? "Đã cấu hình" : "Chưa cấu hình",
                 snapshot.SpeechCredentialConfigured ? FluentTone.Success : FluentTone.Warning);
             SetBadge(
+                translationCredentialStatus,
+                snapshot.TranslationCredentialConfigured ? "Đã cấu hình" : "Chưa cấu hình",
+                snapshot.TranslationCredentialConfigured ? FluentTone.Success : FluentTone.Warning);
+            SetBadge(
+                translationHotkeyStatus,
+                !snapshot.TranslationEnabled
+                    ? "Chưa bật"
+                    : snapshot.TranslationHotkeyRegistered
+                        ? "Đã đăng ký"
+                        : "Đang xung đột",
+                !snapshot.TranslationEnabled
+                    ? FluentTone.Neutral
+                    : snapshot.TranslationHotkeyRegistered
+                        ? FluentTone.Success
+                        : FluentTone.Warning);
+            SetBadge(
                 ipcStatus,
                 LocalizeRuntimeStatus(snapshot.IpcStatus),
                 snapshot.IpcStatus.Contains("connected", StringComparison.OrdinalIgnoreCase)
@@ -362,6 +442,7 @@ public sealed class SettingsForm : Form
                 ? "1 gõ tắt tùy chỉnh"
                 : $"{snapshot.CustomSnippetCount} gõ tắt tùy chỉnh";
             removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
+            removeDeepLKey.Enabled = snapshot.TranslationCredentialConfigured;
             setupTsfButton.Text = snapshot.Readiness switch
             {
                 KeyinaReadiness.Ready => "Mở kiểm tra gõ",
@@ -478,6 +559,7 @@ public sealed class SettingsForm : Form
         AddNavigation(navigation, "navOverview", "Tổng quan", "\uE80F", "overview");
         AddNavigation(navigation, "navTyping", "Bộ gõ", "\uE765", "typing");
         AddNavigation(navigation, "navSpeech", "Nhập bằng giọng nói", "\uE720", "speech");
+        AddNavigation(navigation, "navTranslation", "Dịch nhanh", "\uE8C1", "translation");
         AddNavigation(navigation, "navHotkeys", "Phím tắt", "\uE92E", "hotkeys");
         AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
         AddNavigation(navigation, "navDiagnostics", "Chẩn đoán", "\uE9D9", "diagnostics");
@@ -884,6 +966,170 @@ public sealed class SettingsForm : Form
         return page;
     }
 
+    private Panel CreateTranslationPage()
+    {
+        var page = CreatePage("translationPage");
+        var stack = CreateVerticalStack("translationStack");
+        page.Controls.Add(stack);
+
+        stack.Controls.Add(CreateSettingRow(
+            "translationEnabledRow",
+            "\uE8C1",
+            "Dịch văn bản đang chọn",
+            "Chọn văn bản trong ứng dụng bất kỳ rồi dịch và thay thế ngay, không mở cửa sổ chiếm focus.",
+            "Ctrl + Alt + T",
+            translationToggle));
+
+        var targetCard = CreateCard("translationTargetCard", 118);
+        var targetLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        targetLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        targetLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280F));
+        targetLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        targetLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        targetCard.Controls.Add(targetLayout);
+        var targetTitle = CreateLabel(
+            "translationTargetTitle",
+            "Ngôn ngữ đích",
+            LabelRole.Heading);
+        targetTitle.Dock = DockStyle.Fill;
+        targetLayout.Controls.Add(targetTitle, 0, 0);
+        translationTargetLanguage.Dock = DockStyle.Fill;
+        translationTargetLanguage.Margin = new Padding(8, 0, 0, 4);
+        targetLayout.Controls.Add(translationTargetLanguage, 1, 0);
+        var targetHint = CreateLabel(
+            "translationTargetHint",
+            "Keyina tự nhận diện ngôn ngữ nguồn. Đổi lựa chọn này không gửi nội dung ra mạng.",
+            LabelRole.Secondary);
+        targetHint.Dock = DockStyle.Fill;
+        targetLayout.Controls.Add(targetHint, 0, 1);
+        targetLayout.SetColumnSpan(targetHint, 2);
+        stack.Controls.Add(targetCard);
+
+        var credentialCard = CreateCard("translationCredentialCard", 270);
+        var credentialLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 5,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+        credentialLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        credentialCard.Controls.Add(credentialLayout);
+
+        var credentialTitle = CreateLabel(
+            "translationCredentialTitle",
+            "Khóa DeepL API Free",
+            LabelRole.Heading);
+        credentialTitle.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(credentialTitle, 0, 0);
+        credentialLayout.SetColumnSpan(credentialTitle, 2);
+        translationCredentialStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        credentialLayout.Controls.Add(translationCredentialStatus, 2, 0);
+
+        var credentialHint = CreateLabel(
+            "translationCredentialHint",
+            "Miễn phí tối đa 500.000 ký tự mỗi tháng; khóa chỉ lưu trong Windows Credential Manager.",
+            LabelRole.Secondary);
+        credentialHint.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(credentialHint, 0, 1);
+        credentialLayout.SetColumnSpan(credentialHint, 3);
+
+        var reveal = CreateButton(
+            "toggleDeepLKeyVisibility",
+            "Hiện",
+            FluentButtonKind.Subtle,
+            72);
+        reveal.AccessibleName = "Hiện hoặc ẩn khóa DeepL API";
+        reveal.Click += (_, _) =>
+        {
+            deepLApiKey.UseSystemPasswordChar = !deepLApiKey.UseSystemPasswordChar;
+            reveal.Text = deepLApiKey.UseSystemPasswordChar ? "Hiện" : "Ẩn";
+        };
+        var credentialInput = CreateInputFrame(deepLApiKey, reveal);
+        credentialInput.Dock = DockStyle.Fill;
+        credentialInput.Margin = new Padding(0, 4, 0, 4);
+        credentialLayout.Controls.Add(credentialInput, 0, 2);
+        credentialLayout.SetColumnSpan(credentialInput, 3);
+
+        var actionsPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 4, 0, 4),
+        };
+        saveDeepLKey.Margin = new Padding(0, 0, 8, 0);
+        removeDeepLKey.Margin = Padding.Empty;
+        actionsPanel.Controls.Add(saveDeepLKey);
+        actionsPanel.Controls.Add(removeDeepLKey);
+        credentialLayout.Controls.Add(actionsPanel, 0, 3);
+        credentialLayout.SetColumnSpan(actionsPanel, 3);
+
+        var privacyWarning = CreateLabel(
+            "translationPrivacyWarning",
+            "DeepL API Free nhận phần văn bản bạn chọn. Không dùng tính năng này cho dữ liệu cá nhân, bí mật hoặc nội dung nhạy cảm.",
+            LabelRole.Tertiary);
+        privacyWarning.Dock = DockStyle.Fill;
+        credentialLayout.Controls.Add(privacyWarning, 0, 4);
+        credentialLayout.SetColumnSpan(privacyWarning, 3);
+        stack.Controls.Add(credentialCard);
+
+        var shortcutCard = CreateCard("translationShortcutCard", 112);
+        var shortcutLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        shortcutLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        shortcutLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        shortcutLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        shortcutLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        shortcutCard.Controls.Add(shortcutLayout);
+        var shortcutTitle = CreateLabel(
+            "translationShortcutTitle",
+            "Phím tắt Ctrl + Alt + T",
+            LabelRole.Heading);
+        shortcutTitle.Dock = DockStyle.Fill;
+        shortcutLayout.Controls.Add(shortcutTitle, 0, 0);
+        translationHotkeyStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        shortcutLayout.Controls.Add(translationHotkeyStatus, 1, 0);
+        var shortcutHint = CreateLabel(
+            "translationShortcutHint",
+            "Nếu phím tắt bị ứng dụng khác chiếm, bộ gõ vẫn hoạt động và bạn vẫn có thể dịch từ menu khay hệ thống.",
+            LabelRole.Secondary);
+        shortcutHint.Dock = DockStyle.Fill;
+        shortcutLayout.Controls.Add(shortcutHint, 0, 1);
+        shortcutLayout.SetColumnSpan(shortcutHint, 2);
+        stack.Controls.Add(shortcutCard);
+
+        var behaviorCard = CreateCard("translationBehaviorCard", 126);
+        behaviorCard.Controls.Add(CreateIconTextLayout(
+            "\uE73E",
+            "Giữ nguyên nội dung kỹ thuật",
+            "Code, URL, email, đường dẫn và placeholder được khóa bằng XML; yêu cầu hết hạn sau 8 giây và không chèn nếu bạn đã đổi cửa sổ."));
+        stack.Controls.Add(behaviorCard);
+        return page;
+    }
+
     private Panel CreateHotkeysPage()
     {
         var page = CreatePage("hotkeysPage");
@@ -906,10 +1152,15 @@ public sealed class SettingsForm : Form
             "Ctrl + Alt + V",
             "Bắt đầu hoặc dừng phiên đọc"));
         stack.Controls.Add(CreateShortcutRow(
+            "hotkeyTranslation",
+            "\uE8C1",
+            "Ctrl + Alt + T",
+            "Dịch phần văn bản đang chọn"));
+        stack.Controls.Add(CreateShortcutRow(
             "hotkeyCancel",
             "\uE711",
             "Escape",
-            "Hủy phiên đọc hiện tại"));
+            "Hủy phiên đọc hoặc yêu cầu dịch hiện tại"));
 
         var feedbackCard = CreateCard("hotkeyFeedbackCard", 184);
         var feedbackLayout = new TableLayoutPanel
@@ -1928,6 +2179,17 @@ public sealed class SettingsForm : Form
         }
         actions.SaveSpeechApiKey(secret);
         speechApiKey.Clear();
+    }
+
+    private void SaveDeepLCredential()
+    {
+        var secret = deepLApiKey.Text;
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return;
+        }
+        actions.SaveDeepLApiKey(secret);
+        deepLApiKey.Clear();
     }
 
     private void CopyDiagnostics()

@@ -27,7 +27,7 @@ Keyina is a clean-room Vietnamese input platform focused on behavior that can be
 - **Context Guard** — deterministic protection for source code, URLs, email addresses, commands, paths, identifiers, and English-heavy tokens.
 - **Offline ordinary typing** — the native typing path does not need a network connection, cloud model, clipboard replacement, or telemetry.
 - **Fail-open safety** — secure, elevated, unsupported, and uncertain contexts fall back to literal physical input.
-- **Optional productivity layer** — tray controls, hotkeys, snippets, diagnostics, and opt-in Vietnamese speech input remain outside the native engine.
+- **Optional productivity layer** — tray controls, hotkeys, snippets, diagnostics, opt-in Vietnamese speech input, and focus-safe selection translation remain outside the native engine.
 
 ## Interface
 
@@ -88,6 +88,7 @@ The older Windows Text Services Framework implementation remains optional behind
 - Deterministic snippets and secure-input bypass.
 - Tray lifecycle, startup registration, diagnostics, and self-tests.
 - Optional Speechmatics Vietnamese dictation with Windows Credential Manager storage.
+- Optional DeepL API Free selection translation with `Ctrl + Alt + T`, automatic source detection, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and Credential Manager storage.
 - Deterministic generated icons, lockups, and screenshot gallery.
 
 ## Privacy and security model
@@ -95,6 +96,8 @@ The older Windows Text Services Framework implementation remains optional behind
 Ordinary Vietnamese typing stays local. `KeyinaEngine.dll` has no responsibility for network access, microphone capture, cloud credentials, telemetry, settings UI, or clipboard replacement.
 
 Speech input is explicitly optional and isolated in the host. Its API credential must be stored in Windows Credential Manager and must never be committed to the repository or written to normal configuration files.
+
+Selection translation is also opt-in. It sends only the text explicitly selected by the user to the configured DeepL endpoint, restores the previous clipboard contents, never logs source or translated text, and refuses to insert after focus changes. DeepL API Free must not be used for personal, confidential, or sensitive content. Setup and limits are documented in [docs/translation.md](docs/translation.md).
 
 See [SECURITY.md](SECURITY.md) for private vulnerability reporting and [docs/compatibility/typing.md](docs/compatibility/typing.md) for compatibility boundaries.
 

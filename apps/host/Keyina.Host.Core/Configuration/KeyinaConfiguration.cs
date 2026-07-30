@@ -1,5 +1,6 @@
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Snippets;
+using Keyina.Host.Core.Translation;
 
 namespace Keyina.Host.Core.Configuration;
 
@@ -52,6 +53,10 @@ public sealed record KeyinaConfiguration(
     public const int CurrentSchemaVersion = 1;
     public const int MaximumCustomSnippets = 10_000;
 
+    public bool TranslationEnabled { get; init; }
+
+    public string TranslationTargetLanguage { get; init; } = "EN-US";
+
     public static KeyinaConfiguration Default { get; } = new(
         CurrentSchemaVersion,
         VietnameseEnabled: true,
@@ -74,6 +79,11 @@ public sealed record KeyinaConfiguration(
         if (Feedback is null || !Enum.IsDefined(Feedback.Mode))
         {
             throw new ConfigurationValidationException("Configuration feedback mode is invalid.");
+        }
+        if (!TranslationLanguageCatalog.IsSupportedTarget(TranslationTargetLanguage))
+        {
+            throw new ConfigurationValidationException(
+                "Configuration translation target language is invalid.");
         }
         if (Snippets is null)
         {

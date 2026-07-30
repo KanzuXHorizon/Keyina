@@ -42,13 +42,21 @@ internal static class WindowsCredentialVaultTests
         AssertThrows<ArgumentException>(() => vault.Delete(""));
     }
 
-    [KeyinaTest("Speechmatics production credential target is stable and contains no secret")]
-    private static void ProductionTargetIsStable()
+    [KeyinaTest("production credential targets are stable and contain no secret")]
+    private static void ProductionTargetsAreStable()
     {
         AssertEx.Equal("Keyina/Speechmatics/ApiKey", CredentialTargets.SpeechmaticsApiKey);
-        AssertEx.True(
-            !CredentialTargets.SpeechmaticsApiKey.Contains("token", StringComparison.OrdinalIgnoreCase),
-            "Credential target accidentally resembles a secret value.");
+        AssertEx.Equal("Keyina/DeepL/ApiKey", CredentialTargets.DeepLApiKey);
+        foreach (var target in new[]
+                 {
+                     CredentialTargets.SpeechmaticsApiKey,
+                     CredentialTargets.DeepLApiKey,
+                 })
+        {
+            AssertEx.True(
+                !target.Contains("token", StringComparison.OrdinalIgnoreCase),
+                "Credential target accidentally resembles a secret value.");
+        }
     }
 
     private static void AssertThrows<TException>(Action action) where TException : Exception

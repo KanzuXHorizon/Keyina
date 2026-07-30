@@ -111,6 +111,65 @@ public sealed class RegisteredHotkeyManager : IDisposable
         }
     }
 
+    public bool TryRegister(
+        RegisteredHotkeyBinding binding,
+        out HotkeyRegistrationException? failure)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(binding);
+        Validate([binding]);
+        if (registered.ContainsKey(binding.Id))
+        {
+            throw new ArgumentException(
+                "Registered hotkey IDs must be unique positive integers.",
+                nameof(binding));
+        }
+        if (registered.Values.Any(existing => existing.Chord == binding.Chord))
+        {
+            throw new ArgumentException(
+                "Registered hotkey chords must be unique.",
+                nameof(binding));
+        }
+
+        var nativeModifiers = ToNativeModifiers(binding.Chord.Modifiers);
+        if (!nativeApi.Register(
+                windowHandle,
+                binding.Id,
+                nativeModifiers,
+                (uint)binding.Chord.Key,
+                out var errorCode))
+        {
+            failure = new HotkeyRegistrationException(
+                binding.Id,
+                binding.Chord,
+                errorCode);
+            return false;
+        }
+
+        registered.Add(binding.Id, binding);
+        failure = null;
+        return true;
+    }
+
+    public bool TryUnregister(int hotkeyId, out int errorCode)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!registered.ContainsKey(hotkeyId))
+        {
+            errorCode = 0;
+            return true;
+        }
+
+        if (!nativeApi.Unregister(windowHandle, hotkeyId, out errorCode))
+        {
+            return false;
+        }
+
+        registered.Remove(hotkeyId);
+        errorCode = 0;
+        return true;
+    }
+
     public bool TryDispatch(int hotkeyId)
     {
         ObjectDisposedException.ThrowIf(disposed, this);

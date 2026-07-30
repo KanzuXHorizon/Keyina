@@ -16,6 +16,7 @@ public enum VirtualKey : ushort
     Space = 0x20,
     A = 0x41,
     C = 0x43,
+    T = 0x54,
     V = 0x56,
     LeftWindows = 0x5B,
     RightWindows = 0x5C,

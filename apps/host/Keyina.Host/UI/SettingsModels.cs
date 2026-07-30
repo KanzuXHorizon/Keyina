@@ -19,6 +19,14 @@ public sealed record SettingsSnapshot(
 {
     public KeyinaHealthSnapshot Health { get; init; } = KeyinaHealthSnapshot.Healthy;
 
+    public bool TranslationEnabled { get; init; }
+
+    public bool TranslationCredentialConfigured { get; init; }
+
+    public bool TranslationHotkeyRegistered { get; init; }
+
+    public string TranslationTargetLanguage { get; init; } = "EN-US";
+
     public KeyinaReadiness Readiness => ReadinessMapper.Map(Health);
     public static SettingsSnapshot Sample { get; } = new(
         VietnameseEnabled: true,
@@ -32,7 +40,13 @@ public sealed record SettingsSnapshot(
         IpcStatus: "Focused app connected",
         HotkeyStatus: "Registered",
         TsfRegistered: true,
-        FeedbackMode: FeedbackMode.Automatic);
+        FeedbackMode: FeedbackMode.Automatic)
+    {
+        TranslationEnabled = true,
+        TranslationCredentialConfigured = true,
+        TranslationHotkeyRegistered = true,
+        TranslationTargetLanguage = "EN-US",
+    };
 }
 
 public sealed record SettingsActions(
@@ -51,6 +65,14 @@ public sealed record SettingsActions(
     Action<FeedbackMode> SetFeedbackMode,
     Action PreviewFeedback)
 {
+    public Action<bool> SetTranslationEnabled { get; init; } = _ => { };
+
+    public Action<string> SetTranslationTargetLanguage { get; init; } = _ => { };
+
+    public Action<string> SaveDeepLApiKey { get; init; } = _ => { };
+
+    public Action DeleteDeepLApiKey { get; init; } = () => { };
+
     public static SettingsActions NoOp { get; } = new(
         _ => { },
         _ => { },

@@ -47,6 +47,30 @@ internal static class FeedbackPolicyTests
         AssertEx.Equal(null, FeedbackEvents.ForDictation(DictationStatus.Idle));
     }
 
+    [KeyinaTest("translation feedback reports progress completion and cancellation without content")]
+    private static void TranslationFeedbackContainsOnlySafeStatusCopy()
+    {
+        var started = FeedbackEvents.TranslationStarted("English (United States)");
+        AssertEx.Equal(FeedbackEventKind.TranslationStarted, started.Kind);
+        AssertEx.Equal("Đang dịch sang English (United States)", started.Message);
+        AssertEx.Equal(FeedbackTone.Accent, started.Tone);
+        AssertEx.Equal(FeedbackSoundCue.Start, started.SoundCue);
+        AssertEx.Equal(Timeout.InfiniteTimeSpan, started.Duration);
+
+        var completed = FeedbackEvents.TranslationCompleted("English (United States)");
+        AssertEx.Equal(FeedbackEventKind.TranslationCompleted, completed.Kind);
+        AssertEx.Equal("Đã dịch sang English (United States)", completed.Message);
+        AssertEx.Equal(FeedbackTone.Success, completed.Tone);
+        AssertEx.Equal(FeedbackSoundCue.Success, completed.SoundCue);
+        AssertEx.True(completed.Duration > TimeSpan.Zero,
+            "Completed translation feedback did not auto-dismiss.");
+
+        var cancelled = FeedbackEvents.TranslationCancelled();
+        AssertEx.Equal(FeedbackEventKind.TranslationCancelled, cancelled.Kind);
+        AssertEx.Equal("Đã hủy dịch", cancelled.Message);
+        AssertEx.Equal(FeedbackSoundCue.Cancel, cancelled.SoundCue);
+    }
+
     [KeyinaTest("explicit feedback modes override foreground presentation")]
     private static void ExplicitModesOverrideForegroundPresentation()
     {

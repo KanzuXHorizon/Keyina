@@ -14,7 +14,7 @@ internal static class RegisteredHotkeyManagerTests
         manager.CommandReceived += (_, command) => commands.Add(command);
 
         manager.Register(CreateRegisteredBindings());
-        AssertEx.Equal(3, native.Registered.Count);
+        AssertEx.Equal(4, native.Registered.Count);
         AssertEx.True(
             native.Registered.Values.Any(value =>
                 value.Modifiers == 0x4003 &&
@@ -28,7 +28,91 @@ internal static class RegisteredHotkeyManagerTests
 
         manager.Dispose();
         manager.Dispose();
-        AssertEx.Equal(3, native.Unregistered.Count);
+        AssertEx.Equal(4, native.Unregistered.Count);
+    }
+
+    [KeyinaTest("optional hotkey conflict preserves existing registrations")]
+    private static void OptionalConflictPreservesExistingRegistrations()
+    {
+        var native = new FakeHotkeyNativeApi { FailRegistrationId = 4, FailureCode = 1409 };
+        var commands = new List<HotkeyCommand>();
+        using var manager = new RegisteredHotkeyManager(native, windowHandle: 456);
+        manager.CommandReceived += (_, command) => commands.Add(command);
+        manager.Register(
+        [
+            new RegisteredHotkeyBinding(
+                1,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.Space),
+                HotkeyCommand.PushToTalkPressed),
+            new RegisteredHotkeyBinding(
+                2,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.V),
+                HotkeyCommand.ToggleDictation),
+            new RegisteredHotkeyBinding(
+                3,
+                new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
+                HotkeyCommand.CancelDictation),
+        ]);
+
+        var registered = manager.TryRegister(
+            new RegisteredHotkeyBinding(
+                4,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.T),
+                HotkeyCommand.TranslateSelection),
+            out var failure);
+
+        AssertEx.False(registered, "Conflicting optional hotkey unexpectedly registered.");
+        AssertEx.NotNull(failure, "Optional conflict did not expose registration details.");
+        AssertEx.Equal(4, failure!.HotkeyId);
+        AssertEx.Equal(3, manager.RegisteredCount);
+        AssertEx.Equal(0, native.Unregistered.Count);
+        AssertEx.True(manager.TryDispatch(2), "Existing hotkey stopped dispatching after optional conflict.");
+        AssertEx.True(commands.SequenceEqual([HotkeyCommand.ToggleDictation]),
+            "Optional conflict changed an existing command binding.");
+    }
+
+    [KeyinaTest("optional hotkey can be released without affecting existing registrations")]
+    private static void OptionalHotkeyCanBeReleased()
+    {
+        var native = new FakeHotkeyNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var manager = new RegisteredHotkeyManager(native, windowHandle: 456);
+        manager.CommandReceived += (_, command) => commands.Add(command);
+        manager.Register(
+        [
+            new RegisteredHotkeyBinding(
+                1,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.Space),
+                HotkeyCommand.PushToTalkPressed),
+            new RegisteredHotkeyBinding(
+                2,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.V),
+                HotkeyCommand.ToggleDictation),
+            new RegisteredHotkeyBinding(
+                3,
+                new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
+                HotkeyCommand.CancelDictation),
+        ]);
+        AssertEx.True(
+            manager.TryRegister(
+                new RegisteredHotkeyBinding(
+                    4,
+                    new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.T),
+                    HotkeyCommand.TranslateSelection),
+                out _),
+            "Optional translation hotkey was not registered.");
+
+        var released = manager.TryUnregister(4, out var failureCode);
+
+        AssertEx.True(released, "Optional translation hotkey was not released.");
+        AssertEx.Equal(0, failureCode);
+        AssertEx.Equal(3, manager.RegisteredCount);
+        AssertEx.True(native.Unregistered.SequenceEqual([4]),
+            "Optional hotkey release unregistered an unexpected binding.");
+        AssertEx.True(manager.TryDispatch(2),
+            "Existing hotkey stopped dispatching after optional release.");
+        AssertEx.True(commands.SequenceEqual([HotkeyCommand.ToggleDictation]),
+            "Optional hotkey release changed an existing command binding.");
     }
 
     [KeyinaTest("registered hotkey conflict rolls back earlier registrations and reports the chord")]

@@ -12,4 +12,5 @@ public interface ICredentialVault
 public static class CredentialTargets
 {
     public const string SpeechmaticsApiKey = "Keyina/Speechmatics/ApiKey";
+    public const string DeepLApiKey = "Keyina/DeepL/ApiKey";
 }

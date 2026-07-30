@@ -7,6 +7,7 @@ public enum HotkeyCommand
     PushToTalkPressed,
     PushToTalkReleased,
     ToggleDictation,
+    TranslateSelection,
     CancelDictation,
 }
 
@@ -22,6 +23,9 @@ public static class DefaultHotkeys
         new(
             new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.V),
             HotkeyCommand.ToggleDictation),
+        new(
+            new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Alt, VirtualKey.T),
+            HotkeyCommand.TranslateSelection),
         new(
             new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
             HotkeyCommand.CancelDictation),

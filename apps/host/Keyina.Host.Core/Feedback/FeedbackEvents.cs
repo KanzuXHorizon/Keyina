@@ -57,6 +57,35 @@ public static class FeedbackEvents
         _ => throw new ArgumentOutOfRangeException(nameof(status)),
     };
 
+    public static FeedbackEvent TranslationStarted(string targetDisplayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDisplayName);
+        return new FeedbackEvent(
+            FeedbackEventKind.TranslationStarted,
+            $"Đang dịch sang {targetDisplayName}",
+            FeedbackTone.Accent,
+            FeedbackSoundCue.Start,
+            Timeout.InfiniteTimeSpan);
+    }
+
+    public static FeedbackEvent TranslationCompleted(string targetDisplayName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetDisplayName);
+        return new FeedbackEvent(
+            FeedbackEventKind.TranslationCompleted,
+            $"Đã dịch sang {targetDisplayName}",
+            FeedbackTone.Success,
+            FeedbackSoundCue.Success,
+            StandardDuration);
+    }
+
+    public static FeedbackEvent TranslationCancelled() => new(
+        FeedbackEventKind.TranslationCancelled,
+        "Đã hủy dịch",
+        FeedbackTone.Neutral,
+        FeedbackSoundCue.Cancel,
+        StandardDuration);
+
     public static FeedbackEvent Error(string message)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(message);

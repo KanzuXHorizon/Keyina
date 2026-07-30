@@ -1,10 +1,14 @@
 using System.Reflection;
 using Keyina.Host.Configuration;
+using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Translation;
 using Keyina.Host.Runtime;
+using Keyina.Host.Translation;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Feedback;
+using Keyina.Host.Windows.Credentials;
 using Keyina.Host.Windows.Feedback;
 
 namespace Keyina.Host.Tests;
@@ -186,6 +190,7 @@ internal static class KeyinaApplicationContextTests
                      "setup",
                      "toggleVietnamese",
                      "toggleDictation",
+                     "translateSelection",
                      "startup",
                      "settings",
                      "exit",
@@ -194,6 +199,60 @@ internal static class KeyinaApplicationContextTests
             AssertEx.True(commands.Contains(expected, StringComparer.Ordinal),
                 $"Tray command {expected} was missing.");
         }
+    }
+
+    [KeyinaTest("resident context translates the selected text with configured DeepL credentials")]
+    private static void TranslationCommandUsesConfiguredProvider()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var overlay = new RecordingOverlay();
+        var sound = new RecordingSoundPlayer();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            ForegroundPresentationProbeFactory =
+                static () => new FixedForegroundProbe(ForegroundPresentationState.Windowed),
+            FeedbackOverlayFactory = () => overlay,
+            FeedbackSoundPlayerFactory = () => sound,
+        };
+        var store = new AtomicConfigurationStore(configurationPath);
+        store.SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    TranslationTargetLanguage = "EN-US",
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var credentialVault = new FakeCredentialVault("test-key:fx");
+        var provider = new FakeTranslationProvider();
+        var accessor = new FakeSelectionAccessor();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            credentialVault,
+            provider,
+            accessor);
+        context.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(2))
+            .GetAwaiter().GetResult();
+
+        AssertEx.Equal(1, provider.CallCount);
+        AssertEx.Equal("test-key:fx", provider.LastApiKey);
+        AssertEx.Equal("Xin chào", provider.LastRequest!.Text);
+        AssertEx.Equal("EN-US", provider.LastRequest.TargetLanguage);
+        AssertEx.Equal(1, accessor.ReplaceCount);
+        AssertEx.Equal("Hello", accessor.LastReplacement);
+        AssertEx.Equal(2, overlay.Events.Count);
+        AssertEx.Equal(FeedbackEventKind.TranslationStarted, overlay.Events[0].Kind);
+        AssertEx.Equal(FeedbackEventKind.TranslationCompleted, overlay.Events[1].Kind);
+        AssertEx.Equal(2, sound.Cues.Count);
+        AssertEx.Equal(FeedbackSoundCue.Start, sound.Cues[0]);
+        AssertEx.Equal(FeedbackSoundCue.Success, sound.Cues[1]);
     }
 
     private static void InvokeClick(Button button)
@@ -271,6 +330,55 @@ internal static class KeyinaApplicationContextTests
         public List<FeedbackSoundCue> Cues { get; } = [];
 
         public void Play(FeedbackSoundCue cue) => Cues.Add(cue);
+    }
+
+    private sealed class FakeCredentialVault(string? secret) : ICredentialVault
+    {
+        public void Write(string target, string value)
+        {
+        }
+
+        public string? Read(string target) => secret;
+
+        public bool Delete(string target) => true;
+    }
+
+    private sealed class FakeTranslationProvider : ITranslationProvider
+    {
+        public int CallCount { get; private set; }
+
+        public string? LastApiKey { get; private set; }
+
+        public TranslationRequest? LastRequest { get; private set; }
+
+        public Task<TranslationResult> TranslateAsync(
+            string apiKey,
+            TranslationRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastApiKey = apiKey;
+            LastRequest = request;
+            return Task.FromResult(new TranslationResult("Hello", "VI", "Fake"));
+        }
+    }
+
+    private sealed class FakeSelectionAccessor : ISelectedTextAccessor
+    {
+        public int ReplaceCount { get; private set; }
+
+        public string? LastReplacement { get; private set; }
+
+        public Task<SelectedTextCapture?> CaptureAsync(CancellationToken cancellationToken) =>
+            Task.FromResult<SelectedTextCapture?>(
+                new("Xin chào", (nint)42, (nint)420));
+
+        public bool TryReplace(SelectedTextCapture selectedText, string translatedText)
+        {
+            ReplaceCount++;
+            LastReplacement = translatedText;
+            return true;
+        }
     }
 
     private sealed class TemporaryDirectory : IDisposable

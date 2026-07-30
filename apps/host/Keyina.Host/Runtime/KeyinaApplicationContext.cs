@@ -7,7 +7,9 @@ using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Ipc;
 using Keyina.Host.Core.Speech;
+using Keyina.Host.Core.Translation;
 using Keyina.Host.Speech;
+using Keyina.Host.Translation;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Feedback;
 using Keyina.Host.UI.Fluent;
@@ -26,12 +28,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private const int PushToTalkHotkeyId = 1;
     private const int ToggleDictationHotkeyId = 2;
     private const int CancelDictationHotkeyId = 3;
+    private const int TranslateSelectionHotkeyId = 4;
 
     private readonly KeyinaRuntimeOptions options;
     private readonly AtomicConfigurationStore configurationStore;
     private readonly WindowsStartupRegistration startupRegistration;
-    private readonly WindowsCredentialVault credentialVault = new();
+    private readonly ICredentialVault credentialVault;
     private readonly TsfSetupService tsfSetupService = new();
+    private readonly HttpClient? translationHttpClient;
+    private readonly TranslationCoordinator translationCoordinator;
     private readonly ConcurrentQueue<Action> pendingSignals = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim speechCommandGate = new(1, 1);
@@ -41,6 +46,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem setupMenuItem;
     private readonly ToolStripMenuItem toggleVietnameseMenuItem;
     private readonly ToolStripMenuItem toggleDictationMenuItem;
+    private readonly ToolStripMenuItem translateSelectionMenuItem;
     private readonly ToolStripMenuItem startupMenuItem;
     private readonly ToolStripMenuItem settingsMenuItem;
     private readonly ToolStripMenuItem exitMenuItem;
@@ -62,6 +68,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private SettingsForm? settingsForm;
     private int drainScheduled;
     private bool hotkeysReady;
+    private bool translationHotkeyReady;
     private bool typingReady;
     private bool pipeReady;
     private bool endToEndTypingPassed;
@@ -71,9 +78,27 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private bool disposed;
 
     public KeyinaApplicationContext(KeyinaRuntimeOptions options)
+        : this(options, null, null, null)
+    {
+    }
+
+    public KeyinaApplicationContext(
+        KeyinaRuntimeOptions options,
+        ICredentialVault? credentialVault,
+        ITranslationProvider? translationProvider,
+        ISelectedTextAccessor? selectedTextAccessor)
     {
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         options.Validate();
+        this.credentialVault = credentialVault ?? new WindowsCredentialVault();
+        if (translationProvider is null)
+        {
+            translationHttpClient = new HttpClient();
+            translationProvider = new DeepLTranslationProvider(translationHttpClient);
+        }
+        translationCoordinator = new TranslationCoordinator(
+            selectedTextAccessor ?? new ClipboardSelectionAccessor(),
+            translationProvider);
 
         configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
         configuration = LoadConfiguration();
@@ -117,6 +142,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             ShortcutKeyDisplayString = "Ctrl+Alt+V",
             AccessibleName = "Bắt đầu hoặc dừng nhập bằng giọng nói",
         };
+        translateSelectionMenuItem = new ToolStripMenuItem
+        {
+            Name = "translateSelection",
+            Text = "Dịch văn bản đang chọn",
+            ShortcutKeyDisplayString = "Ctrl+Alt+T",
+            AccessibleName = "Dịch văn bản đang chọn sang ngôn ngữ đã cài đặt",
+        };
         startupMenuItem = new ToolStripMenuItem
         {
             Name = "startup",
@@ -145,6 +177,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             setupMenuItem,
             toggleVietnameseMenuItem,
             toggleDictationMenuItem,
+            translateSelectionMenuItem,
             new ToolStripSeparator(),
             startupMenuItem,
             settingsMenuItem,
@@ -165,6 +198,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             PostCommand(HotkeyCommand.ToggleVietnamese);
         toggleDictationMenuItem.Click += (_, _) =>
             PostCommand(HotkeyCommand.ToggleDictation);
+        translateSelectionMenuItem.Click += (_, _) =>
+            PostCommand(HotkeyCommand.TranslateSelection);
         startupMenuItem.Click += (_, _) =>
             SetStartupEnabled(!startupRegistration.IsEnabled);
         settingsMenuItem.Click += (_, _) => OpenSettings();
@@ -242,7 +277,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     await StartDictationAsync(cancellationToken).ConfigureAwait(true);
                 }
                 return;
+            case HotkeyCommand.TranslateSelection:
+                await TranslateSelectionAsync(cancellationToken).ConfigureAwait(true);
+                return;
             case HotkeyCommand.CancelDictation:
+                translationCoordinator.Cancel();
                 await CancelDictationAsync().ConfigureAwait(true);
                 return;
             default:
@@ -373,7 +412,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 hotkeyWindow.HotkeyReceived += (_, id) =>
                     _ = hotkeyManager.TryDispatch(id);
                 hotkeyManager.CommandReceived += (_, command) => PostCommand(command);
-                hotkeyWindow.Invoke(() => hotkeyManager.Register(CreateRegisteredBindings()));
+                hotkeyWindow.Invoke(() =>
+                {
+                    hotkeyManager.Register(CreateRequiredRegisteredBindings());
+                    translationHotkeyReady = configuration.TranslationEnabled &&
+                        hotkeyManager.TryRegister(
+                            CreateTranslationRegisteredBinding(),
+                            out _);
+                });
 
                 modifierHook = new ModifierKeyboardHook();
                 modifierHook.CommandReceived += (_, command) => PostCommand(command);
@@ -390,6 +436,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 typingHook = null;
                 typingReady = false;
                 hotkeysReady = false;
+                translationHotkeyReady = false;
                 ReportFailure("hotkey_start_failed");
             }
         }
@@ -410,7 +457,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
-    private static RegisteredHotkeyBinding[] CreateRegisteredBindings() =>
+    private static RegisteredHotkeyBinding[] CreateRequiredRegisteredBindings() =>
     [
         new(
             PushToTalkHotkeyId,
@@ -429,6 +476,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
             HotkeyCommand.CancelDictation),
     ];
+
+    private static RegisteredHotkeyBinding CreateTranslationRegisteredBinding() =>
+        new(
+            TranslateSelectionHotkeyId,
+            new HotkeyChord(
+                HotkeyModifiers.Control | HotkeyModifiers.Alt,
+                VirtualKey.T),
+            HotkeyCommand.TranslateSelection);
 
     private void PostCommand(HotkeyCommand command) =>
         PostSignal(() => _ = ExecuteCommandSafelyAsync(command));
@@ -518,6 +573,71 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         configuration = configuration with { SpeechEnabled = enabled };
         _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetTranslationEnabled(bool enabled)
+    {
+        configuration = configuration with { TranslationEnabled = enabled };
+        UpdateTranslationHotkeyRegistration(enabled);
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void UpdateTranslationHotkeyRegistration(bool enabled)
+    {
+        if (!options.EnableGlobalHotkeys || hotkeyWindow is null || hotkeyManager is null)
+        {
+            translationHotkeyReady = false;
+            return;
+        }
+
+        try
+        {
+            var wasRegistered = translationHotkeyReady;
+            translationHotkeyReady = hotkeyWindow.Invoke(() =>
+            {
+                if (enabled)
+                {
+                    return wasRegistered || hotkeyManager.TryRegister(
+                        CreateTranslationRegisteredBinding(),
+                        out _);
+                }
+                if (!wasRegistered)
+                {
+                    return false;
+                }
+
+                return !hotkeyManager.TryUnregister(
+                    TranslateSelectionHotkeyId,
+                    out _);
+            });
+        }
+        catch (Exception)
+        {
+            if (enabled)
+            {
+                translationHotkeyReady = false;
+            }
+        }
+    }
+
+    private void SetTranslationTargetLanguage(string targetLanguage)
+    {
+        try
+        {
+            configuration = configuration with
+            {
+                TranslationTargetLanguage =
+                    TranslationLanguageCatalog.NormalizeTarget(targetLanguage),
+            };
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+        }
+        catch (Exception)
+        {
+            ReportFailure("translation_target_invalid");
+        }
         RefreshVisualState();
     }
 
@@ -652,6 +772,91 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
+    private async Task TranslateSelectionAsync(CancellationToken cancellationToken)
+    {
+        if (!configuration.TranslationEnabled)
+        {
+            ReportFailure("translation_disabled");
+            PublishFeedback(FeedbackEvents.Error("Dịch nhanh đang tắt"));
+            return;
+        }
+
+        string? apiKey;
+        try
+        {
+            apiKey = credentialVault.Read(CredentialTargets.DeepLApiKey);
+        }
+        catch (Exception)
+        {
+            ReportFailure("translation_credential_read_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể đọc khóa DeepL"));
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            ReportFailure("translation_credential_missing");
+            PublishFeedback(FeedbackEvents.Error("Chưa cấu hình khóa DeepL"));
+            return;
+        }
+
+        var targetDisplayName = TranslationLanguageCatalog.GetDisplayName(
+            configuration.TranslationTargetLanguage);
+        PublishFeedback(FeedbackEvents.TranslationStarted(targetDisplayName));
+        var outcome = await translationCoordinator.TranslateSelectionAsync(
+                apiKey,
+                configuration.TranslationTargetLanguage,
+                cancellationToken)
+            .ConfigureAwait(true);
+        if (outcome.Status == TranslationOutcomeStatus.Cancelled)
+        {
+            PublishFeedback(FeedbackEvents.TranslationCancelled());
+            return;
+        }
+        if (outcome.Status == TranslationOutcomeStatus.Succeeded)
+        {
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.TranslationCompleted(targetDisplayName));
+            RefreshVisualState();
+            return;
+        }
+
+        var (errorCode, message) = MapTranslationFailure(outcome.FailureCode);
+        ReportFailure(errorCode);
+        PublishFeedback(FeedbackEvents.Error(message));
+    }
+
+    private static (string ErrorCode, string Message) MapTranslationFailure(
+        TranslationFailureCode? failureCode) => failureCode switch
+        {
+            TranslationFailureCode.NoSelection => (
+                "translation_no_selection",
+                "Chưa chọn văn bản để dịch"),
+            TranslationFailureCode.FocusChanged => (
+                "translation_focus_changed",
+                "Đã đổi vị trí nhập, không chèn bản dịch"),
+            TranslationFailureCode.AuthenticationFailed => (
+                "translation_auth_failed",
+                "Khóa DeepL không hợp lệ"),
+            TranslationFailureCode.RateLimited => (
+                "translation_rate_limited",
+                "DeepL đang giới hạn yêu cầu"),
+            TranslationFailureCode.QuotaExceeded => (
+                "translation_quota_exceeded",
+                "Đã hết hạn mức DeepL miễn phí"),
+            TranslationFailureCode.InvalidResponse => (
+                "translation_invalid_response",
+                "Bản dịch không giữ nguyên nội dung kỹ thuật"),
+            TranslationFailureCode.UnsupportedLanguage => (
+                "translation_unsupported_language",
+                "Ngôn ngữ đích không được hỗ trợ"),
+            TranslationFailureCode.SelectionTooLarge => (
+                "translation_selection_too_large",
+                "Đoạn chọn quá dài để dịch"),
+            _ => (
+                "translation_unavailable",
+                "Không thể kết nối dịch vụ dịch"),
+        };
+
     private void ApplyHostEvent(HostEvent hostEvent)
     {
         state = HostReducer.Reduce(state, hostEvent);
@@ -743,7 +948,36 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         TypingLatencyProfiler.Snapshot,
         ClearTypingInstrumentation,
         SetFeedbackMode,
-        PreviewFeedback);
+        PreviewFeedback)
+    {
+        SetTranslationEnabled = SetTranslationEnabled,
+        SetTranslationTargetLanguage = SetTranslationTargetLanguage,
+        SaveDeepLApiKey = secret =>
+        {
+            try
+            {
+                credentialVault.Write(CredentialTargets.DeepLApiKey, secret);
+                RecoverHost();
+            }
+            catch (Exception)
+            {
+                ReportFailure("translation_credential_write_failed");
+            }
+            RefreshVisualState();
+        },
+        DeleteDeepLApiKey = () =>
+        {
+            try
+            {
+                _ = credentialVault.Delete(CredentialTargets.DeepLApiKey);
+            }
+            catch (Exception)
+            {
+                ReportFailure("translation_credential_delete_failed");
+            }
+            RefreshVisualState();
+        },
+    };
 
     private static void SetTypingInstrumentationEnabled(bool enabled)
     {
@@ -786,6 +1020,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private SettingsSnapshot CreateSettingsSnapshot()
     {
         bool credentialConfigured;
+        bool translationCredentialConfigured;
         try
         {
             credentialConfigured = !string.IsNullOrWhiteSpace(
@@ -794,6 +1029,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         catch (Exception)
         {
             credentialConfigured = false;
+        }
+        try
+        {
+            translationCredentialConfigured = !string.IsNullOrWhiteSpace(
+                credentialVault.Read(CredentialTargets.DeepLApiKey));
+        }
+        catch (Exception)
+        {
+            translationCredentialConfigured = false;
         }
 
         var ipcConnected = pipeReady && pipeServer?.ActiveTarget is not null;
@@ -834,6 +1078,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             configuration.Feedback?.Mode ?? FeedbackMode.Automatic)
         {
             Health = health,
+            TranslationEnabled = configuration.TranslationEnabled,
+            TranslationCredentialConfigured = translationCredentialConfigured,
+            TranslationHotkeyRegistered = translationHotkeyReady,
+            TranslationTargetLanguage = configuration.TranslationTargetLanguage,
         };
     }
 
@@ -898,6 +1146,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             ? "Dừng nhập bằng giọng nói"
             : "Bắt đầu nhập bằng giọng nói";
         toggleDictationMenuItem.Enabled = configuration.SpeechEnabled;
+        translateSelectionMenuItem.Enabled = configuration.TranslationEnabled;
+        translateSelectionMenuItem.Text =
+            $"Dịch sang {TranslationLanguageCatalog.GetDisplayName(configuration.TranslationTargetLanguage)}";
+        translateSelectionMenuItem.ShortcutKeyDisplayString =
+            !configuration.TranslationEnabled
+                ? string.Empty
+                : translationHotkeyReady
+                    ? "Ctrl+Alt+T"
+                    : "Phím tắt xung đột";
         startupMenuItem.Checked = startupRegistration.IsEnabled;
         if (notifyIcon.Icon is { } trayIcon)
         {
@@ -921,6 +1178,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ReplaceMenuImage(setupMenuItem, FluentTrayMenu.CreateGlyph("\uE90F", palette, FluentTone.Warning));
         ReplaceMenuImage(toggleVietnameseMenuItem, FluentTrayMenu.CreateGlyph("\uE765", palette));
         ReplaceMenuImage(toggleDictationMenuItem, FluentTrayMenu.CreateGlyph("\uE720", palette));
+        ReplaceMenuImage(translateSelectionMenuItem, FluentTrayMenu.CreateGlyph("\uE8C1", palette));
         ReplaceMenuImage(startupMenuItem, FluentTrayMenu.CreateGlyph("\uE7E8", palette));
         ReplaceMenuImage(settingsMenuItem, FluentTrayMenu.CreateGlyph("\uE713", palette));
         ReplaceMenuImage(exitMenuItem, FluentTrayMenu.CreateGlyph("\uE7E8", palette, FluentTone.Error));
@@ -1070,6 +1328,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             pipeServer = null;
         }
 
+        translationCoordinator.Dispose();
+        translationHttpClient?.Dispose();
         notifyIcon.Dispose();
         trayMenu.Dispose();
         activeIcon.Dispose();
