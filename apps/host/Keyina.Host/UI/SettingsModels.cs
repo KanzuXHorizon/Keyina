@@ -1,4 +1,5 @@
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.UI;
@@ -27,6 +28,8 @@ public sealed record SettingsSnapshot(
 
     public string TranslationTargetLanguage { get; init; } = "EN-US";
 
+    public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
+
     public KeyinaReadiness Readiness => ReadinessMapper.Map(Health);
     public static SettingsSnapshot Sample { get; } = new(
         VietnameseEnabled: true,
@@ -46,6 +49,7 @@ public sealed record SettingsSnapshot(
         TranslationCredentialConfigured = true,
         TranslationHotkeyRegistered = true,
         TranslationTargetLanguage = "EN-US",
+        Hotkeys = HotkeyPreferences.Default,
     };
 }
 
@@ -72,6 +76,12 @@ public sealed record SettingsActions(
     public Action<string> SaveDeepLApiKey { get; init; } = _ => { };
 
     public Action DeleteDeepLApiKey { get; init; } = () => { };
+
+    public Action<HotkeyCommand, HotkeyChord> SetHotkey { get; init; } = (_, _) => { };
+
+    public Action<HotkeyCommand> ResetHotkey { get; init; } = _ => { };
+
+    public Action ResetAllHotkeys { get; init; } = () => { };
 
     public static SettingsActions NoOp { get; } = new(
         _ => { },

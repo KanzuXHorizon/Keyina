@@ -116,6 +116,80 @@ internal static class RegisteredHotkeyManagerTests
             "Optional hotkey release changed an existing command binding.");
     }
 
+    [KeyinaTest("registered hotkey replacement swaps the complete binding set")]
+    private static void ReplacementSwapsCompleteSet()
+    {
+        var native = new FakeHotkeyNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var manager = new RegisteredHotkeyManager(native, windowHandle: 456);
+        manager.CommandReceived += (_, command) => commands.Add(command);
+        manager.Register(CreateRegisteredBindings());
+        var replacement = new[]
+        {
+            new RegisteredHotkeyBinding(
+                1,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Shift, VirtualKey.K),
+                HotkeyCommand.PushToTalkPressed),
+            new RegisteredHotkeyBinding(
+                2,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Shift, VirtualKey.D),
+                HotkeyCommand.ToggleDictation),
+            new RegisteredHotkeyBinding(
+                3,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Shift, VirtualKey.Escape),
+                HotkeyCommand.CancelDictation),
+            new RegisteredHotkeyBinding(
+                4,
+                new HotkeyChord(HotkeyModifiers.Control | HotkeyModifiers.Shift, VirtualKey.T),
+                HotkeyCommand.TranslateSelection),
+        };
+
+        var replaced = manager.TryReplaceAll(replacement, out var failure);
+
+        AssertEx.True(replaced, "Complete hotkey replacement failed.");
+        AssertEx.Equal(null, failure);
+        AssertEx.Equal(4, manager.RegisteredCount);
+        AssertEx.True(native.Unregistered.Order().SequenceEqual([1, 2, 3, 4]),
+            "Old registered set was not fully released.");
+        AssertEx.True(manager.TryDispatch(2), "Replacement binding did not dispatch.");
+        AssertEx.True(commands.SequenceEqual([HotkeyCommand.ToggleDictation]),
+            "Replacement dispatched the wrong command.");
+        AssertEx.Equal((uint)VirtualKey.D, native.Registered[2].Key);
+    }
+
+    [KeyinaTest("registered hotkey replacement restores the previous set after conflict")]
+    private static void ReplacementConflictRestoresPreviousSet()
+    {
+        var native = new FakeHotkeyNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var manager = new RegisteredHotkeyManager(native, windowHandle: 456);
+        manager.CommandReceived += (_, command) => commands.Add(command);
+        var original = CreateRegisteredBindings();
+        manager.Register(original);
+        native.FailNextRegistrationId = 2;
+        var replacement = original
+            .Select(binding => binding with
+            {
+                Chord = binding.Chord with
+                {
+                    Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                },
+            })
+            .ToArray();
+
+        var replaced = manager.TryReplaceAll(replacement, out var failure);
+
+        AssertEx.False(replaced, "Conflicting replacement unexpectedly succeeded.");
+        AssertEx.NotNull(failure, "Replacement conflict did not expose failure details.");
+        AssertEx.Equal(2, failure!.HotkeyId);
+        AssertEx.Equal(original.Length, manager.RegisteredCount);
+        AssertEx.Equal((uint)VirtualKey.V, native.Registered[2].Key);
+        AssertEx.Equal(0x4003u, native.Registered[2].Modifiers);
+        AssertEx.True(manager.TryDispatch(2), "Previous binding was not restored.");
+        AssertEx.True(commands.SequenceEqual([HotkeyCommand.ToggleDictation]),
+            "Restored binding dispatched the wrong command.");
+    }
+
     [KeyinaTest("registered hotkey conflict rolls back earlier registrations and reports the chord")]
     private static void ConflictRollsBack()
     {
@@ -244,6 +318,46 @@ internal static class RegisteredHotkeyManagerTests
             "Modifier-first release did not emit exactly one stop command.");
     }
 
+    [KeyinaTest("modifier keyboard hook applies custom modifier and hold gestures")]
+    private static void ModifierHookAppliesCustomGestures()
+    {
+        var native = new FakeKeyboardHookNativeApi();
+        var commands = new List<HotkeyCommand>();
+        using var hook = new ModifierKeyboardHook(native);
+        hook.CommandReceived += (_, command) => commands.Add(command);
+        hook.Configure(
+            new HotkeyPreference(
+                HotkeyGestureKind.ModifierGesture,
+                new HotkeyChord(
+                    HotkeyModifiers.Alt | HotkeyModifiers.Shift,
+                    VirtualKey.None)),
+            new HotkeyPreference(
+                HotkeyGestureKind.Hold,
+                new HotkeyChord(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    VirtualKey.K)));
+        hook.Start();
+
+        _ = native.Callback!(new RawKeyboardEvent(VirtualKey.LeftAlt, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftShift, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftShift, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftAlt, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftControl, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftShift, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.K, true, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.K, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftShift, false, false));
+        _ = native.Callback(new RawKeyboardEvent(VirtualKey.LeftControl, false, false));
+
+        AssertEx.True(
+            commands.SequenceEqual(
+            [
+                HotkeyCommand.ToggleVietnamese,
+                HotkeyCommand.PushToTalkReleased,
+            ]),
+            "Custom modifier or hold gesture was not applied.");
+    }
+
     [KeyinaTest("modifier keyboard hook delegates transitions without swallowing input")]
     private static void ModifierHookPostsOnlyCommands()
     {
@@ -316,13 +430,18 @@ internal static class RegisteredHotkeyManagerTests
         public Dictionary<int, (uint Modifiers, uint Key)> Registered { get; } = [];
         public List<int> Unregistered { get; } = [];
         public int? FailRegistrationId { get; init; }
+        public int? FailNextRegistrationId { get; set; }
         public int FailureCode { get; init; }
 
         public bool Register(nint windowHandle, int id, uint modifiers, uint virtualKey, out int errorCode)
         {
-            if (id == FailRegistrationId)
+            if (id == FailRegistrationId || id == FailNextRegistrationId)
             {
-                errorCode = FailureCode;
+                if (id == FailNextRegistrationId)
+                {
+                    FailNextRegistrationId = null;
+                }
+                errorCode = FailureCode == 0 ? 1409 : FailureCode;
                 return false;
             }
 

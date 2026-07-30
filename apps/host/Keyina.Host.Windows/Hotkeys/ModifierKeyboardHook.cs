@@ -34,10 +34,8 @@ public sealed class SharedTypingKeyboardHookNativeApi(
 public sealed class ModifierKeyboardHook : IDisposable
 {
     private readonly IKeyboardHookNativeApi nativeApi;
-    private readonly ModifierToggleStateMachine stateMachine = new();
-    private readonly bool[] pressedKeys = new bool[256];
+    private HookGestureState gestureState = HookGestureState.CreateDefault();
     private IDisposable? installation;
-    private bool pushToTalkActive;
     private bool disposed;
 
     public ModifierKeyboardHook(IKeyboardHookNativeApi? nativeApi = null)
@@ -46,6 +44,34 @@ public sealed class ModifierKeyboardHook : IDisposable
     }
 
     public event EventHandler<HotkeyCommand>? CommandReceived;
+
+    public void Configure(
+        HotkeyPreference modifierGesture,
+        HotkeyPreference holdGesture)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(modifierGesture);
+        ArgumentNullException.ThrowIfNull(holdGesture);
+        if (modifierGesture.GestureKind != HotkeyGestureKind.ModifierGesture ||
+            modifierGesture.Chord.Key != VirtualKey.None)
+        {
+            throw new ArgumentException(
+                "The input toggle requires a modifier-only gesture.",
+                nameof(modifierGesture));
+        }
+        if (holdGesture.GestureKind != HotkeyGestureKind.Hold ||
+            !holdGesture.Chord.HasPrimaryKey ||
+            holdGesture.Chord.Modifiers == HotkeyModifiers.None)
+        {
+            throw new ArgumentException(
+                "Push to talk requires a modified hold gesture.",
+                nameof(holdGesture));
+        }
+
+        Interlocked.Exchange(
+            ref gestureState,
+            new HookGestureState(modifierGesture.Chord, holdGesture.Chord));
+    }
 
     public void Start()
     {
@@ -58,12 +84,7 @@ public sealed class ModifierKeyboardHook : IDisposable
         installation = nativeApi.Install(ProcessRawEvent);
     }
 
-    public void Reset()
-    {
-        Array.Clear(pressedKeys);
-        pushToTalkActive = false;
-        _ = stateMachine.Process(KeyboardTransition.Reset);
-    }
+    public void Reset() => Volatile.Read(ref gestureState).Reset();
 
     public void Dispose()
     {
@@ -84,34 +105,31 @@ public sealed class ModifierKeyboardHook : IDisposable
             return false;
         }
 
+        var state = Volatile.Read(ref gestureState);
         var keyIndex = (int)rawEvent.Key;
-        var wasPressed = (uint)keyIndex < (uint)pressedKeys.Length &&
-            pressedKeys[keyIndex];
+        var wasPressed = (uint)keyIndex < (uint)state.PressedKeys.Length &&
+            state.PressedKeys[keyIndex];
         var isRepeat = rawEvent.IsKeyDown && wasPressed;
-        var controlPressedBefore = IsPressed(VirtualKey.LeftControl) ||
-            IsPressed(VirtualKey.RightControl);
-        var altPressedBefore = IsPressed(VirtualKey.LeftAlt) ||
-            IsPressed(VirtualKey.RightAlt);
 
-        if (rawEvent.IsKeyDown && !isRepeat && rawEvent.Key == VirtualKey.Space &&
-            controlPressedBefore && altPressedBefore)
+        if (rawEvent.IsKeyDown && !isRepeat &&
+            rawEvent.Key == state.HoldChord.Key &&
+            state.GetPressedModifiers() == state.HoldChord.Modifiers)
         {
-            pushToTalkActive = true;
+            state.PushToTalkActive = true;
         }
 
-        var releasePushToTalk = !rawEvent.IsKeyDown && pushToTalkActive &&
-            rawEvent.Key is VirtualKey.Space or
-                VirtualKey.LeftControl or VirtualKey.RightControl or
-                VirtualKey.LeftAlt or VirtualKey.RightAlt;
-
-        if ((uint)keyIndex < (uint)pressedKeys.Length)
+        if ((uint)keyIndex < (uint)state.PressedKeys.Length)
         {
-            pressedKeys[keyIndex] = rawEvent.IsKeyDown;
+            state.PressedKeys[keyIndex] = rawEvent.IsKeyDown;
         }
 
+        var releasePushToTalk = !rawEvent.IsKeyDown &&
+            state.PushToTalkActive &&
+            (rawEvent.Key == state.HoldChord.Key ||
+             !state.HasRequiredHoldModifiers());
         if (releasePushToTalk)
         {
-            pushToTalkActive = false;
+            state.PushToTalkActive = false;
             CommandReceived?.Invoke(this, HotkeyCommand.PushToTalkReleased);
         }
 
@@ -121,7 +139,7 @@ public sealed class ModifierKeyboardHook : IDisposable
                 ? KeyboardTransitionKind.KeyDown
                 : KeyboardTransitionKind.KeyUp,
             isRepeat);
-        var command = stateMachine.Process(transition);
+        var command = state.ToggleStateMachine.Process(transition);
         if (command != HotkeyCommand.None)
         {
             CommandReceived?.Invoke(this, command);
@@ -130,10 +148,66 @@ public sealed class ModifierKeyboardHook : IDisposable
         return false;
     }
 
-    private bool IsPressed(VirtualKey key)
+    private sealed class HookGestureState
     {
-        var index = (int)key;
-        return (uint)index < (uint)pressedKeys.Length && pressedKeys[index];
+        public HookGestureState(
+            HotkeyChord modifierGesture,
+            HotkeyChord holdChord)
+        {
+            ToggleStateMachine = new ModifierToggleStateMachine(
+                modifierGesture.Modifiers);
+            HoldChord = holdChord;
+        }
+
+        public ModifierToggleStateMachine ToggleStateMachine { get; }
+
+        public HotkeyChord HoldChord { get; }
+
+        public bool[] PressedKeys { get; } = new bool[256];
+
+        public bool PushToTalkActive { get; set; }
+
+        public static HookGestureState CreateDefault() => new(
+            HotkeyPreferences.Default.ToggleVietnamese.Chord,
+            HotkeyPreferences.Default.PushToTalk.Chord);
+
+        public HotkeyModifiers GetPressedModifiers()
+        {
+            var modifiers = HotkeyModifiers.None;
+            if (IsPressed(VirtualKey.LeftControl) || IsPressed(VirtualKey.RightControl))
+            {
+                modifiers |= HotkeyModifiers.Control;
+            }
+            if (IsPressed(VirtualKey.LeftShift) || IsPressed(VirtualKey.RightShift))
+            {
+                modifiers |= HotkeyModifiers.Shift;
+            }
+            if (IsPressed(VirtualKey.LeftAlt) || IsPressed(VirtualKey.RightAlt))
+            {
+                modifiers |= HotkeyModifiers.Alt;
+            }
+            if (IsPressed(VirtualKey.LeftWindows) || IsPressed(VirtualKey.RightWindows))
+            {
+                modifiers |= HotkeyModifiers.Windows;
+            }
+            return modifiers;
+        }
+
+        public bool HasRequiredHoldModifiers() =>
+            (GetPressedModifiers() & HoldChord.Modifiers) == HoldChord.Modifiers;
+
+        public void Reset()
+        {
+            Array.Clear(PressedKeys);
+            PushToTalkActive = false;
+            _ = ToggleStateMachine.Process(KeyboardTransition.Reset);
+        }
+
+        private bool IsPressed(VirtualKey key)
+        {
+            var index = (int)key;
+            return (uint)index < (uint)PressedKeys.Length && PressedKeys[index];
+        }
     }
 
     private sealed class WindowsKeyboardHookNativeApi : IKeyboardHookNativeApi

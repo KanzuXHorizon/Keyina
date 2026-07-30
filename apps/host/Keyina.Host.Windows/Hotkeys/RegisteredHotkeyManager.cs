@@ -111,6 +111,48 @@ public sealed class RegisteredHotkeyManager : IDisposable
         }
     }
 
+    public bool TryReplaceAll(
+        IReadOnlyList<RegisteredHotkeyBinding> bindings,
+        out HotkeyRegistrationException? failure)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(bindings);
+        Validate(bindings);
+
+        var previous = registered.Values
+            .OrderBy(binding => binding.Id)
+            .ToArray();
+        if (previous.SequenceEqual(bindings))
+        {
+            failure = null;
+            return true;
+        }
+
+        UnregisterCurrentSetOrThrow(previous);
+        try
+        {
+            Register(bindings);
+            failure = null;
+            return true;
+        }
+        catch (HotkeyRegistrationException exception)
+        {
+            try
+            {
+                Register(previous);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new InvalidOperationException(
+                    "Hotkey replacement failed and the previous set could not be restored.",
+                    new AggregateException(exception, rollbackException));
+            }
+
+            failure = exception;
+            return false;
+        }
+    }
+
     public bool TryRegister(
         RegisteredHotkeyBinding binding,
         out HotkeyRegistrationException? failure)
@@ -195,6 +237,59 @@ public sealed class RegisteredHotkeyManager : IDisposable
             _ = nativeApi.Unregister(windowHandle, id, out _);
         }
         registered.Clear();
+    }
+
+    private void UnregisterCurrentSetOrThrow(
+        RegisteredHotkeyBinding[] previous)
+    {
+        var removed = new List<RegisteredHotkeyBinding>(previous.Length);
+        foreach (var binding in previous.OrderByDescending(binding => binding.Id))
+        {
+            if (!nativeApi.Unregister(windowHandle, binding.Id, out var errorCode))
+            {
+                RestoreRemovedBindingsOrThrow(removed, errorCode);
+                throw new Win32Exception(
+                    errorCode,
+                    $"Windows could not unregister hotkey id {binding.Id}.");
+            }
+
+            registered.Remove(binding.Id);
+            removed.Add(binding);
+        }
+    }
+
+    private void RestoreRemovedBindingsOrThrow(
+        IReadOnlyList<RegisteredHotkeyBinding> removed,
+        int unregisterErrorCode)
+    {
+        try
+        {
+            foreach (var binding in removed.OrderBy(binding => binding.Id))
+            {
+                var nativeModifiers = ToNativeModifiers(binding.Chord.Modifiers);
+                if (!nativeApi.Register(
+                        windowHandle,
+                        binding.Id,
+                        nativeModifiers,
+                        (uint)binding.Chord.Key,
+                        out var registerErrorCode))
+                {
+                    throw new HotkeyRegistrationException(
+                        binding.Id,
+                        binding.Chord,
+                        registerErrorCode);
+                }
+                registered.Add(binding.Id, binding);
+            }
+        }
+        catch (Exception rollbackException)
+        {
+            throw new InvalidOperationException(
+                "Hotkey unregistration failed and the partial removal could not be restored.",
+                new AggregateException(
+                    new Win32Exception(unregisterErrorCode),
+                    rollbackException));
+        }
     }
 
     private static uint ToNativeModifiers(HotkeyModifiers modifiers)

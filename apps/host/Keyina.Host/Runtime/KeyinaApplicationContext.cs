@@ -133,20 +133,23 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         toggleVietnameseMenuItem = new ToolStripMenuItem
         {
             Name = "toggleVietnamese",
-            ShortcutKeyDisplayString = "Ctrl+Shift",
+            ShortcutKeyDisplayString = FormatShortcutDisplay(
+                configuration.Hotkeys.ToggleVietnamese.Chord),
             AccessibleName = "Bật hoặc tắt bộ gõ tiếng Việt",
         };
         toggleDictationMenuItem = new ToolStripMenuItem
         {
             Name = "toggleDictation",
-            ShortcutKeyDisplayString = "Ctrl+Alt+V",
+            ShortcutKeyDisplayString = FormatShortcutDisplay(
+                configuration.Hotkeys.ToggleDictation.Chord),
             AccessibleName = "Bắt đầu hoặc dừng nhập bằng giọng nói",
         };
         translateSelectionMenuItem = new ToolStripMenuItem
         {
             Name = "translateSelection",
             Text = "Dịch văn bản đang chọn",
-            ShortcutKeyDisplayString = "Ctrl+Alt+T",
+            ShortcutKeyDisplayString = FormatShortcutDisplay(
+                configuration.Hotkeys.TranslateSelection.Chord),
             AccessibleName = "Dịch văn bản đang chọn sang ngôn ngữ đã cài đặt",
         };
         startupMenuItem = new ToolStripMenuItem
@@ -414,17 +417,21 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 hotkeyManager.CommandReceived += (_, command) => PostCommand(command);
                 hotkeyWindow.Invoke(() =>
                 {
-                    hotkeyManager.Register(CreateRequiredRegisteredBindings());
+                    hotkeyManager.Register(
+                        CreateRequiredRegisteredBindings(configuration.Hotkeys));
                     translationHotkeyReady = configuration.TranslationEnabled &&
                         IsDeepLCredentialConfigured() &&
                         hotkeyManager.TryRegister(
-                            CreateTranslationRegisteredBinding(),
+                            CreateTranslationRegisteredBinding(configuration.Hotkeys),
                             out _);
                 });
 
                 typingHook = new VietnameseKeyboardHook();
                 modifierHook = new ModifierKeyboardHook(
                     new SharedTypingKeyboardHookNativeApi(typingHook));
+                modifierHook.Configure(
+                    configuration.Hotkeys.ToggleVietnamese,
+                    configuration.Hotkeys.PushToTalk);
                 modifierHook.CommandReceived += (_, command) => PostCommand(command);
                 modifierHook.Start();
                 typingHook.Start(configuration.VietnameseEnabled);
@@ -460,32 +467,28 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
-    private static RegisteredHotkeyBinding[] CreateRequiredRegisteredBindings() =>
+    private static RegisteredHotkeyBinding[] CreateRequiredRegisteredBindings(
+        HotkeyPreferences preferences) =>
     [
         new(
             PushToTalkHotkeyId,
-            new HotkeyChord(
-                HotkeyModifiers.Control | HotkeyModifiers.Alt,
-                VirtualKey.Space),
+            preferences.PushToTalk.Chord,
             HotkeyCommand.PushToTalkPressed),
         new(
             ToggleDictationHotkeyId,
-            new HotkeyChord(
-                HotkeyModifiers.Control | HotkeyModifiers.Alt,
-                VirtualKey.V),
+            preferences.ToggleDictation.Chord,
             HotkeyCommand.ToggleDictation),
         new(
             CancelDictationHotkeyId,
-            new HotkeyChord(HotkeyModifiers.None, VirtualKey.Escape),
+            preferences.CancelActiveCommand.Chord,
             HotkeyCommand.CancelDictation),
     ];
 
-    private static RegisteredHotkeyBinding CreateTranslationRegisteredBinding() =>
+    private static RegisteredHotkeyBinding CreateTranslationRegisteredBinding(
+        HotkeyPreferences preferences) =>
         new(
             TranslateSelectionHotkeyId,
-            new HotkeyChord(
-                HotkeyModifiers.Control | HotkeyModifiers.Alt,
-                VirtualKey.T),
+            preferences.TranslateSelection.Chord,
             HotkeyCommand.TranslateSelection);
 
     private void PostCommand(HotkeyCommand command) =>
@@ -617,7 +620,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 if (enabled)
                 {
                     return wasRegistered || hotkeyManager.TryRegister(
-                        CreateTranslationRegisteredBinding(),
+                        CreateTranslationRegisteredBinding(configuration.Hotkeys),
                         out _);
                 }
                 if (!wasRegistered)
@@ -657,6 +660,166 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
         RefreshVisualState();
     }
+
+    private void SetHotkey(HotkeyCommand command, HotkeyChord chord)
+    {
+        try
+        {
+            if (IsDictationActive)
+            {
+                ReportFailure("hotkey_update_while_dictating");
+                PublishFeedback(FeedbackEvents.Error("Hãy dừng nhập giọng nói trước khi đổi phím tắt"));
+                return;
+            }
+
+            var candidate = WithHotkeyChord(configuration.Hotkeys, command, chord);
+            candidate.Validate();
+            if (!TryApplyHotkeyPreferences(candidate, command))
+            {
+                ReportFailure("hotkey_registration_conflict");
+                PublishFeedback(FeedbackEvents.Error("Phím tắt đang được ứng dụng khác sử dụng"));
+                return;
+            }
+
+            configuration = configuration with { Hotkeys = candidate };
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+        }
+        catch (ArgumentException)
+        {
+            ReportFailure("hotkey_invalid");
+            PublishFeedback(FeedbackEvents.Error("Tổ hợp phím không hợp lệ hoặc bị trùng"));
+        }
+        catch (Exception)
+        {
+            ReportFailure("hotkey_update_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể cập nhật phím tắt"));
+        }
+        finally
+        {
+            RefreshVisualState();
+        }
+    }
+
+    private void ResetHotkey(HotkeyCommand command)
+    {
+        var defaultBinding = HotkeyPreferences.Default.ToBindings()
+            .Single(binding => binding.Command == command);
+        SetHotkey(command, defaultBinding.Chord);
+    }
+
+    private void ResetAllHotkeys()
+    {
+        try
+        {
+            if (!TryApplyHotkeyPreferences(
+                    HotkeyPreferences.Default,
+                    changedCommand: null))
+            {
+                ReportFailure("hotkey_registration_conflict");
+                PublishFeedback(FeedbackEvents.Error("Phím tắt mặc định đang bị ứng dụng khác sử dụng"));
+                return;
+            }
+
+            configuration = configuration with { Hotkeys = HotkeyPreferences.Default };
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+        }
+        catch (Exception)
+        {
+            ReportFailure("hotkey_reset_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể khôi phục phím tắt mặc định"));
+        }
+        finally
+        {
+            RefreshVisualState();
+        }
+    }
+
+    private bool TryApplyHotkeyPreferences(
+        HotkeyPreferences candidate,
+        HotkeyCommand? changedCommand)
+    {
+        candidate.Validate();
+        if (!options.EnableGlobalHotkeys ||
+            hotkeyWindow is null ||
+            hotkeyManager is null)
+        {
+            modifierHook?.Configure(
+                candidate.ToggleVietnamese,
+                candidate.PushToTalk);
+            return true;
+        }
+
+        var translationEnabled = configuration.TranslationEnabled &&
+            IsDeepLCredentialConfigured();
+        var translationChanged =
+            candidate.TranslateSelection.Chord !=
+            configuration.Hotkeys.TranslateSelection.Chord;
+        var requireTranslationRegistration = translationEnabled &&
+            (translationHotkeyReady ||
+             translationChanged ||
+             changedCommand == HotkeyCommand.TranslateSelection);
+        var requiredBindings = CreateRequiredRegisteredBindings(candidate);
+        var replacement = requireTranslationRegistration
+            ? requiredBindings
+                .Append(CreateTranslationRegisteredBinding(candidate))
+                .ToArray()
+            : requiredBindings;
+
+        HotkeyRegistrationException? failure = null;
+        var replaced = hotkeyWindow.Invoke(() =>
+            hotkeyManager.TryReplaceAll(replacement, out failure));
+        if (!replaced)
+        {
+            return false;
+        }
+
+        modifierHook?.Configure(
+            candidate.ToggleVietnamese,
+            candidate.PushToTalk);
+        translationHotkeyReady = requireTranslationRegistration;
+        if (translationEnabled && !translationHotkeyReady)
+        {
+            translationHotkeyReady = hotkeyWindow.Invoke(() =>
+                hotkeyManager.TryRegister(
+                    CreateTranslationRegisteredBinding(candidate),
+                    out _));
+        }
+        hotkeysReady = true;
+        return true;
+    }
+
+    private static HotkeyPreferences WithHotkeyChord(
+        HotkeyPreferences preferences,
+        HotkeyCommand command,
+        HotkeyChord chord) => command switch
+    {
+        HotkeyCommand.ToggleVietnamese => preferences with
+        {
+            ToggleVietnamese = preferences.ToggleVietnamese with { Chord = chord },
+        },
+        HotkeyCommand.PushToTalkPressed => preferences with
+        {
+            PushToTalk = preferences.PushToTalk with { Chord = chord },
+        },
+        HotkeyCommand.ToggleDictation => preferences with
+        {
+            ToggleDictation = preferences.ToggleDictation with { Chord = chord },
+        },
+        HotkeyCommand.TranslateSelection => preferences with
+        {
+            TranslateSelection = preferences.TranslateSelection with { Chord = chord },
+        },
+        HotkeyCommand.CancelDictation => preferences with
+        {
+            CancelActiveCommand = preferences.CancelActiveCommand with { Chord = chord },
+        },
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(command),
+            command,
+            "The command does not expose a configurable shortcut."),
+    };
 
     private void SetStartupEnabled(bool enabled)
     {
@@ -1002,6 +1165,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             }
             RefreshVisualState();
         },
+        SetHotkey = SetHotkey,
+        ResetHotkey = ResetHotkey,
+        ResetAllHotkeys = ResetAllHotkeys,
     };
 
     private static void SetTypingInstrumentationEnabled(bool enabled)
@@ -1099,6 +1265,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationCredentialConfigured = translationCredentialConfigured,
             TranslationHotkeyRegistered = translationHotkeyReady,
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
+            Hotkeys = configuration.Hotkeys,
         };
     }
 
@@ -1159,10 +1326,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             ? "Tắt bộ gõ tiếng Việt"
             : "Bật bộ gõ tiếng Việt";
         toggleVietnameseMenuItem.Checked = state.VietnameseEnabled;
+        toggleVietnameseMenuItem.ShortcutKeyDisplayString = FormatShortcutDisplay(
+            configuration.Hotkeys.ToggleVietnamese.Chord);
         toggleDictationMenuItem.Text = IsDictationActive
             ? "Dừng nhập bằng giọng nói"
             : "Bắt đầu nhập bằng giọng nói";
         toggleDictationMenuItem.Enabled = configuration.SpeechEnabled;
+        toggleDictationMenuItem.ShortcutKeyDisplayString = FormatShortcutDisplay(
+            configuration.Hotkeys.ToggleDictation.Chord);
         var translationAvailable = configuration.TranslationEnabled &&
             settingsSnapshot.TranslationCredentialConfigured;
         translateSelectionMenuItem.Enabled = translationAvailable;
@@ -1174,7 +1345,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 : !settingsSnapshot.TranslationCredentialConfigured
                     ? "Cần khóa DeepL"
                     : translationHotkeyReady
-                        ? "Ctrl+Alt+T"
+                        ? FormatShortcutDisplay(
+                            configuration.Hotkeys.TranslateSelection.Chord)
                         : "Phím tắt xung đột";
         startupMenuItem.Checked = startupRegistration.IsEnabled;
         if (notifyIcon.Icon is { } trayIcon)
@@ -1209,6 +1381,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
         trayThemeMode = palette.Mode;
     }
+
+    private static string FormatShortcutDisplay(HotkeyChord chord) =>
+        HotkeyText.Format(chord).Replace(" + ", "+", StringComparison.Ordinal);
 
     private static string GetTrayStatusText(SettingsSnapshot snapshot)
     {

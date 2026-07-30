@@ -154,6 +154,76 @@ internal static class KeyinaApplicationContextTests
         context.CloseSettings();
     }
 
+    [KeyinaTest("resident context loads and displays configured shortcut preferences")]
+    private static void RuntimeLoadsConfiguredShortcutPreferences()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var custom = HotkeyPreferences.Default with
+        {
+            ToggleDictation = HotkeyPreferences.Default.ToggleDictation with
+            {
+                Chord = new HotkeyChord(
+                    HotkeyModifiers.Control | HotkeyModifiers.Shift,
+                    VirtualKey.D),
+            },
+        };
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { Hotkeys = custom },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+
+        using var context = new KeyinaApplicationContext(options);
+
+        AssertEx.Equal(custom, context.CurrentSettingsSnapshot.Hotkeys);
+        var menuField = typeof(KeyinaApplicationContext).GetField(
+            "toggleDictationMenuItem",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Dictation tray item field was not found.");
+        var menuItem = (ToolStripMenuItem?)menuField.GetValue(context)
+            ?? throw new InvalidOperationException("Dictation tray item was not created.");
+        AssertEx.Equal("Ctrl+Shift+D", menuItem.ShortcutKeyDisplayString);
+    }
+
+    [KeyinaTest("resident context persists custom shortcuts after successful runtime application")]
+    private static void RuntimePersistsCustomShortcut()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        using var context = new KeyinaApplicationContext(options);
+        var method = typeof(KeyinaApplicationContext).GetMethod(
+            "SetHotkey",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("SetHotkey method was not found.");
+        var chord = new HotkeyChord(
+            HotkeyModifiers.Control | HotkeyModifiers.Shift,
+            VirtualKey.K);
+
+        _ = method.Invoke(
+            context,
+            [HotkeyCommand.TranslateSelection, chord]);
+
+        AssertEx.Equal(
+            chord,
+            context.CurrentSettingsSnapshot.Hotkeys.TranslateSelection.Chord);
+        AssertEx.True(
+            SpinWait.SpinUntil(
+                () => File.Exists(configurationPath) &&
+                    new AtomicConfigurationStore(configurationPath)
+                        .LoadAsync(CancellationToken.None)
+                        .GetAwaiter().GetResult()
+                        .Hotkeys.TranslateSelection.Chord == chord,
+                TimeSpan.FromSeconds(2)),
+            "Custom shortcut was not persisted atomically.");
+    }
+
     [KeyinaTest("resident context never reports ready without native TSF and focused typing evidence")]
     private static void RuntimeReadinessIsTruthful()
     {
