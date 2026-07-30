@@ -1,0 +1,8 @@
+LIBRARY "KeyinaEngine"
+EXPORTS
+  keyina_engine_create
+  keyina_engine_destroy
+  keyina_engine_reset
+  keyina_engine_configure
+  keyina_engine_process
+  keyina_engine_visible

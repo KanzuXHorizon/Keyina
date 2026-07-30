@@ -1,12 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Keyina.Host.Windows</RootNamespace>
     <AssemblyName>Keyina.Host.Windows</AssemblyName>
     <Description>Windows-specific host adapters for credentials, audio, hotkeys, tray, and IPC.</Description>
+  </PropertyGroup>
+  <PropertyGroup>
+    <KeyinaRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</KeyinaRepoRoot>
+    <KeyinaNativePreset Condition="'$(Configuration)' == 'Release'">windows-msvc-release</KeyinaNativePreset>
+    <KeyinaNativePreset Condition="'$(KeyinaNativePreset)' == ''">windows-msvc-debug</KeyinaNativePreset>
+    <KeyinaNativeConfiguration Condition="'$(Configuration)' == 'Release'">Release</KeyinaNativeConfiguration>
+    <KeyinaNativeConfiguration Condition="'$(KeyinaNativeConfiguration)' == ''">Debug</KeyinaNativeConfiguration>
+    <KeyinaNativeEnginePath>$(KeyinaRepoRoot)\build\$(KeyinaNativePreset)\platform\windows\hook\$(KeyinaNativeConfiguration)\KeyinaEngine.dll</KeyinaNativeEnginePath>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
     <PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
   </ItemGroup>
+  <Target Name="BuildKeyinaNativeEngine" BeforeTargets="CoreCompile" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec
+      WorkingDirectory="$(KeyinaRepoRoot)"
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$cmake = (Get-Command cmake.exe -ErrorAction Stop).Source; &amp; $cmake --preset $(KeyinaNativePreset); if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; &amp; $cmake --build --preset $(KeyinaNativePreset) --target KeyinaEngine; exit $LASTEXITCODE&quot;" />
+  </Target>
+  <Target Name="CopyKeyinaNativeEngine" AfterTargets="Build" DependsOnTargets="BuildKeyinaNativeEngine" Condition="'$(OS)' == 'Windows_NT'">
+    <Error Condition="!Exists('$(KeyinaNativeEnginePath)')" Text="KeyinaEngine.dll was not built at $(KeyinaNativeEnginePath)." />
+    <Copy SourceFiles="$(KeyinaNativeEnginePath)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -7,6 +7,7 @@ internal static class Program
 {
     private sealed record TestCase(string Name, MethodInfo Method);
 
+    [STAThread]
     public static int Main()
     {
         var tests = Assembly.GetExecutingAssembly()
@@ -35,12 +36,12 @@ internal static class Program
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
             {
                 failures++;
-                Console.Error.WriteLine($"[FAIL] {test.Name}: {exception.InnerException.Message}");
+                Console.Error.WriteLine($"[FAIL] {test.Name}: {exception.InnerException}");
             }
             catch (Exception exception)
             {
                 failures++;
-                Console.Error.WriteLine($"[FAIL] {test.Name}: {exception.Message}");
+                Console.Error.WriteLine($"[FAIL] {test.Name}: {exception}");
             }
         }
 
