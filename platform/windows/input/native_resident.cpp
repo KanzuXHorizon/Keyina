@@ -224,6 +224,29 @@ std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
       : 0;
 }
 
+std::uint32_t SendTestKeyPairBatch(std::size_t pair_count) noexcept {
+  constexpr std::size_t kMaximumPairs = 64;
+  if (pair_count == 0 || pair_count > kMaximumPairs) {
+    return 0;
+  }
+  std::array<INPUT, kMaximumPairs * 2> inputs{};
+  std::size_t count = 0;
+  for (std::size_t index = 0; index < pair_count; ++index) {
+    INPUT down{};
+    down.type = INPUT_KEYBOARD;
+    down.ki.wVk = static_cast<WORD>('A');
+    inputs[count++] = down;
+
+    INPUT up = down;
+    up.ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[count++] = up;
+  }
+  const UINT expected = static_cast<UINT>(count);
+  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected
+             ? expected
+             : 0;
+}
+
 bool WaitForProcessedKeyboardEvents(
     keyina::windows::Win32InputRuntime& runtime,
     std::uint64_t minimum_count,
@@ -547,6 +570,226 @@ int RunProfileReloadSelfTest() noexcept {
   return success ? 0 : 1;
 }
 
+int RunCallbackLatencySelfTest() noexcept {
+  constexpr std::size_t kWarmupPairs = 256;
+  constexpr std::size_t kIterations = 4096;
+  constexpr std::size_t kBatchPairs = 64;
+  constexpr std::uint64_t kExpectedEvents = kIterations * 2;
+
+  const HWND previous_foreground = GetForegroundWindow();
+  const HINSTANCE instance = GetModuleHandleW(nullptr);
+  HWND window = CreateWindowExW(
+      WS_EX_TOOLWINDOW,
+      L"STATIC",
+      L"Keyina callback latency self-test",
+      WS_OVERLAPPEDWINDOW,
+      -1200,
+      320,
+      480,
+      180,
+      nullptr,
+      nullptr,
+      instance,
+      nullptr);
+  if (window == nullptr) {
+    WriteStandardOutput(
+        "{\"result\":\"callback_latency_self_test_failed\","
+        "\"error\":\"window_create_failed\"}\n");
+    return 1;
+  }
+  HWND edit = CreateWindowExW(
+      0,
+      L"EDIT",
+      L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+      12,
+      12,
+      440,
+      40,
+      window,
+      nullptr,
+      instance,
+      nullptr);
+  if (edit == nullptr) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"callback_latency_self_test_failed\","
+        "\"error\":\"edit_create_failed\"}\n");
+    return 1;
+  }
+
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = false;
+  profile.clipboard_compatibility_enabled = false;
+  keyina::windows::Win32InputRuntime runtime(
+      profile, false, false, true);
+  if (!runtime.Start()) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"callback_latency_self_test_failed\","
+        "\"error\":\"runtime_start_failed\"}\n");
+    return 1;
+  }
+
+  runtime.PumpMessagesFor(50);
+  const bool focus_ready = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(50);
+  const bool focus_confirmed = GetFocus() == edit;
+  const bool foreground_confirmed = GetForegroundWindow() == window;
+  bool success = focus_ready && focus_confirmed && foreground_confirmed;
+  std::uint64_t expected_total_processed = 0;
+
+  for (std::size_t offset = 0; offset < kWarmupPairs && success;
+       offset += kBatchPairs) {
+    if (GetFocus() != edit || GetForegroundWindow() != window) {
+      success = false;
+      break;
+    }
+    const std::size_t pair_count = std::min(
+        kBatchPairs, kWarmupPairs - offset);
+    const std::uint32_t sent = SendTestKeyPairBatch(pair_count);
+    const std::uint32_t expected_sent = static_cast<std::uint32_t>(
+        pair_count * 2);
+    if (sent != expected_sent) {
+      success = false;
+      break;
+    }
+    expected_total_processed += sent;
+    if (!WaitForProcessedKeyboardEvents(
+            runtime, expected_total_processed, 2000)) {
+      success = false;
+      break;
+    }
+    SetWindowTextW(edit, L"");
+  }
+
+  const std::uint64_t processed_before =
+      runtime.processed_keyboard_events();
+  const std::uint64_t contexts_before =
+      runtime.typing_context_capture_count();
+  const std::uint64_t suppressed_before =
+      runtime.suppressed_edit_count();
+  const std::uint64_t successful_injections_before =
+      runtime.successful_injection_count();
+  const std::uint64_t failed_injections_before =
+      runtime.failed_injection_count();
+  runtime.ClearCallbackLatency();
+
+  for (std::size_t offset = 0; offset < kIterations && success;
+       offset += kBatchPairs) {
+    if (GetFocus() != edit || GetForegroundWindow() != window) {
+      success = false;
+      break;
+    }
+    const std::size_t pair_count = std::min(
+        kBatchPairs, kIterations - offset);
+    const std::uint32_t sent = SendTestKeyPairBatch(pair_count);
+    const std::uint32_t expected_sent = static_cast<std::uint32_t>(
+        pair_count * 2);
+    if (sent != expected_sent) {
+      success = false;
+      break;
+    }
+    expected_total_processed += sent;
+    if (!WaitForProcessedKeyboardEvents(
+            runtime, expected_total_processed, 2000)) {
+      success = false;
+      break;
+    }
+    SetWindowTextW(edit, L"");
+  }
+
+  const std::uint64_t processed_total =
+      runtime.processed_keyboard_events();
+  const std::uint64_t contexts_total =
+      runtime.typing_context_capture_count();
+  const std::uint64_t suppressed_total =
+      runtime.suppressed_edit_count();
+  const std::uint64_t successful_injections_total =
+      runtime.successful_injection_count();
+  const std::uint64_t failed_injections_total =
+      runtime.failed_injection_count();
+  const std::uint64_t processed_events =
+      processed_total >= processed_before
+          ? processed_total - processed_before
+          : 0;
+  const std::uint64_t typing_context_captures =
+      contexts_total >= contexts_before
+          ? contexts_total - contexts_before
+          : 0;
+  const std::uint64_t suppressed_edits =
+      suppressed_total >= suppressed_before
+          ? suppressed_total - suppressed_before
+          : 0;
+  const std::uint64_t successful_injections =
+      successful_injections_total >= successful_injections_before
+          ? successful_injections_total - successful_injections_before
+          : 0;
+  const std::uint64_t failed_injections =
+      failed_injections_total >= failed_injections_before
+          ? failed_injections_total - failed_injections_before
+          : 0;
+  const auto callback_latency = runtime.callback_latency_snapshot();
+  const bool hook_running = runtime.hook_running();
+  success = success && processed_before == kWarmupPairs * 2 &&
+      processed_events == kExpectedEvents &&
+      expected_total_processed == (kWarmupPairs * 2) + kExpectedEvents &&
+      typing_context_captures == kIterations &&
+      callback_latency.sample_count == kExpectedEvents &&
+      suppressed_edits == 0 && successful_injections == 0 &&
+      failed_injections == 0 && callback_latency.p50_ns > 0 &&
+      callback_latency.p50_ns <= callback_latency.p95_ns &&
+      callback_latency.p95_ns <= callback_latency.p99_ns &&
+      hook_running;
+
+  runtime.Stop();
+  DestroyWindow(window);
+  if (previous_foreground != nullptr) {
+    SetForegroundWindow(previous_foreground);
+  }
+
+  std::array<char, 1024> json{};
+  const int length = sprintf_s(
+      json.data(),
+      json.size(),
+      "{\"result\":\"%s\",\"warmup_pairs\":%llu,"
+      "\"iterations\":%llu,\"expected_events\":%llu,"
+      "\"processed_events\":%llu,"
+      "\"typing_context_captures\":%llu,\"callback_samples\":%llu,"
+      "\"callback_p50_ns\":%llu,\"callback_p95_ns\":%llu,"
+      "\"callback_p99_ns\":%llu,\"callback_maximum_ns\":%llu,"
+      "\"callback_mean_ns\":%llu,\"suppressed_edits\":%llu,"
+      "\"successful_injections\":%llu,\"failed_injections\":%llu,"
+      "\"focus_ready\":%s,\"focus_confirmed\":%s,"
+      "\"foreground_confirmed\":%s,\"hook_running\":%s}\n",
+      success
+          ? "callback_latency_self_test_pass"
+          : "callback_latency_self_test_failed",
+      static_cast<unsigned long long>(kWarmupPairs),
+      static_cast<unsigned long long>(kIterations),
+      static_cast<unsigned long long>(kExpectedEvents),
+      static_cast<unsigned long long>(processed_events),
+      static_cast<unsigned long long>(typing_context_captures),
+      static_cast<unsigned long long>(callback_latency.sample_count),
+      static_cast<unsigned long long>(callback_latency.p50_ns),
+      static_cast<unsigned long long>(callback_latency.p95_ns),
+      static_cast<unsigned long long>(callback_latency.p99_ns),
+      static_cast<unsigned long long>(callback_latency.maximum_ns),
+      static_cast<unsigned long long>(callback_latency.mean_ns),
+      static_cast<unsigned long long>(suppressed_edits),
+      static_cast<unsigned long long>(successful_injections),
+      static_cast<unsigned long long>(failed_injections),
+      focus_ready ? "true" : "false",
+      focus_confirmed ? "true" : "false",
+      foreground_confirmed ? "true" : "false",
+      hook_running ? "true" : "false");
+  if (length > 0) {
+    WriteStandardOutput(
+        std::string_view(json.data(), static_cast<std::size_t>(length)));
+  }
+  return success ? 0 : 1;
+}
+
 int RunResourceSelfTest(bool enable_tray) noexcept {
   auto profile = keyina::windows::DefaultRuntimeInputProfile();
   profile.vietnamese_enabled = false;
@@ -619,6 +862,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--tray-resource-self-test");
   const bool profile_reload_self_test = HasArgument(
       __argc, __wargv, L"--profile-reload-self-test");
+  const bool callback_latency_self_test = HasArgument(
+      __argc, __wargv, L"--callback-latency-self-test");
   const bool open_settings = HasArgument(
       __argc, __wargv, L"--open-settings");
 
@@ -634,6 +879,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   }
   if (profile_reload_self_test) {
     return RunProfileReloadSelfTest();
+  }
+  if (callback_latency_self_test) {
+    return RunCallbackLatencySelfTest();
   }
 
   HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);

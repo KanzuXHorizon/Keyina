@@ -105,6 +105,10 @@ class Win32InputRuntime {
     return callback_latency_histogram_.Snapshot();
   }
 
+  void ClearCallbackLatency() noexcept {
+    callback_latency_histogram_.Clear();
+  }
+
   [[nodiscard]] RuntimeInputProfile profile() const noexcept {
     return profile_;
   }

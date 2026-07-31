@@ -91,3 +91,11 @@ set_tests_properties(keyina.windows.input_profile_reload PROPERTIES
   PASS_REGULAR_EXPRESSION "profile_reload_self_test_pass"
   TIMEOUT 10
 )
+
+add_test(NAME keyina.windows.input_callback_latency
+  COMMAND KeyinaInput --callback-latency-self-test)
+set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
+  TIMEOUT 20
+)
