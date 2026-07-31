@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -45,6 +46,64 @@ constexpr std::uint8_t kAltModifier = 1u << 2u;
 constexpr std::uint8_t kWindowsModifier = 1u << 3u;
 constexpr std::uint64_t kTenMiB = 10ULL * 1024ULL * 1024ULL;
 constexpr DWORD kClipboardPasteSettleMilliseconds = 100;
+constexpr std::uint64_t kNanosecondsPerSecond = 1000000000ULL;
+
+std::uint64_t CounterTicksToNanoseconds(
+    std::uint64_t ticks,
+    std::uint64_t frequency) noexcept {
+  if (frequency == 0) {
+    return 0;
+  }
+  const std::uint64_t seconds = ticks / frequency;
+  const std::uint64_t remainder = ticks % frequency;
+  constexpr std::uint64_t maximum =
+      std::numeric_limits<std::uint64_t>::max();
+  if (seconds > maximum / kNanosecondsPerSecond) {
+    return maximum;
+  }
+  const std::uint64_t whole = seconds * kNanosecondsPerSecond;
+  const auto fractional = static_cast<std::uint64_t>(
+      (static_cast<long double>(remainder) *
+       static_cast<long double>(kNanosecondsPerSecond)) /
+      static_cast<long double>(frequency));
+  return maximum - whole < fractional ? maximum : whole + fractional;
+}
+
+class NativeCallbackLatencyScope {
+ public:
+  NativeCallbackLatencyScope(
+      NativeLatencyHistogram* histogram,
+      std::uint64_t frequency) noexcept
+      : histogram_(histogram), frequency_(frequency) {
+    if (histogram_ == nullptr || frequency_ == 0 ||
+        QueryPerformanceCounter(&started_) == FALSE) {
+      histogram_ = nullptr;
+    }
+  }
+
+  ~NativeCallbackLatencyScope() {
+    if (histogram_ == nullptr) {
+      return;
+    }
+    LARGE_INTEGER finished{};
+    if (QueryPerformanceCounter(&finished) == FALSE ||
+        finished.QuadPart < started_.QuadPart) {
+      return;
+    }
+    histogram_->RecordNanoseconds(CounterTicksToNanoseconds(
+        static_cast<std::uint64_t>(finished.QuadPart - started_.QuadPart),
+        frequency_));
+  }
+
+  NativeCallbackLatencyScope(const NativeCallbackLatencyScope&) = delete;
+  NativeCallbackLatencyScope& operator=(
+      const NativeCallbackLatencyScope&) = delete;
+
+ private:
+  NativeLatencyHistogram* histogram_{};
+  std::uint64_t frequency_{};
+  LARGE_INTEGER started_{};
+};
 
 bool OpenClipboardWithRetry(HWND owner) noexcept {
   for (int attempt = 0; attempt < 5; ++attempt) {
@@ -562,13 +621,16 @@ bool TryGetRuntimeInputProfileWriteTime(
 
 Win32InputRuntime* Win32InputRuntime::active_runtime_ = nullptr;
 
-Win32InputRuntime::Win32InputRuntime(RuntimeInputProfile profile,
-                                     bool enable_tray,
-                                     bool reload_profiles) noexcept
+Win32InputRuntime::Win32InputRuntime(
+    RuntimeInputProfile profile,
+    bool enable_tray,
+    bool reload_profiles,
+    bool profile_callback_latency) noexcept
     : profile_(profile),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
       enable_tray_(enable_tray),
-      reload_profiles_(reload_profiles) {}
+      reload_profiles_(reload_profiles),
+      profile_callback_latency_(profile_callback_latency) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
@@ -580,6 +642,18 @@ bool Win32InputRuntime::Start() noexcept {
   toggle_chord_contaminated_ = false;
   startup_stage_ = NativeRuntimeStartupStage::None;
   startup_error_ = ERROR_SUCCESS;
+  callback_latency_histogram_.Clear();
+  performance_counter_frequency_ = 0;
+  if (profile_callback_latency_) {
+    LARGE_INTEGER frequency{};
+    if (QueryPerformanceFrequency(&frequency) != FALSE &&
+        frequency.QuadPart > 0) {
+      performance_counter_frequency_ =
+          static_cast<std::uint64_t>(frequency.QuadPart);
+    } else {
+      profile_callback_latency_ = false;
+    }
+  }
   if (hook_ != nullptr || active_runtime_ != nullptr) {
     startup_error_ = ERROR_ALREADY_EXISTS;
     return false;
@@ -905,6 +979,9 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return CallNextHookEx(nullptr, code, message, data);
     }
 
+    NativeCallbackLatencyScope callback_latency(
+        profile_callback_latency_ ? &callback_latency_histogram_ : nullptr,
+        performance_counter_frequency_);
     ++processed_keyboard_events_;
     const bool key_down = IsKeyDownMessage(message);
     const auto virtual_key = static_cast<std::uint16_t>(native_event.vkCode);

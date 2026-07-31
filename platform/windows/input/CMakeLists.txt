@@ -1,5 +1,6 @@
 add_library(keyina_windows_input STATIC
   input_injection.cpp
+  native_latency_histogram.cpp
   pointer_input.cpp
   resident_input_controller.cpp
   runtime_hotkeys.cpp

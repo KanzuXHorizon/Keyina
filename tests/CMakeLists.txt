@@ -20,6 +20,7 @@ target_include_directories(keyina_tests PRIVATE
 if(WIN32)
   target_sources(keyina_tests PRIVATE
     windows/input_injection_test.cpp
+    windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
     windows/resident_input_controller_test.cpp
     windows/runtime_hotkeys_test.cpp

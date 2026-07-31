@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keyina/windows/native_latency_histogram.h>
 #include <keyina/windows/resident_input_controller.h>
 #include <keyina/windows/runtime_hotkeys.h>
 
@@ -35,9 +36,11 @@ struct NativeResidentResourceSnapshot {
 
 class Win32InputRuntime {
  public:
-  explicit Win32InputRuntime(RuntimeInputProfile profile,
-                             bool enable_tray,
-                             bool reload_profiles = true) noexcept;
+  explicit Win32InputRuntime(
+      RuntimeInputProfile profile,
+      bool enable_tray,
+      bool reload_profiles = true,
+      bool profile_callback_latency = false) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -95,6 +98,11 @@ class Win32InputRuntime {
 
   [[nodiscard]] std::uint64_t typing_context_capture_count() const noexcept {
     return typing_context_capture_count_;
+  }
+
+  [[nodiscard]] NativeLatencySnapshot callback_latency_snapshot()
+      const noexcept {
+    return callback_latency_histogram_.Snapshot();
   }
 
   [[nodiscard]] RuntimeInputProfile profile() const noexcept {
@@ -169,6 +177,9 @@ class Win32InputRuntime {
   RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
   bool reload_profiles_{true};
+  bool profile_callback_latency_{false};
+  std::uint64_t performance_counter_frequency_{};
+  NativeLatencyHistogram callback_latency_histogram_{};
   HWND window_{nullptr};
   HWND snippet_overlay_window_{nullptr};
   HHOOK hook_{nullptr};

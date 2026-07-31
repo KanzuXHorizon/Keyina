@@ -315,6 +315,7 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   std::uint64_t pointer_resets = 0;
   std::uint64_t standard_edit_replaces = 0;
   std::uint64_t typing_context_captures = 0;
+  keyina::windows::NativeLatencySnapshot callback_latency{};
   std::array<wchar_t, 64> text{};
   int length = 0;
 
@@ -325,7 +326,8 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     auto profile = keyina::windows::DefaultRuntimeInputProfile();
     profile.vietnamese_enabled = true;
     profile.clipboard_compatibility_enabled = clipboard_compatibility;
-    keyina::windows::Win32InputRuntime runtime(profile, false, false);
+    keyina::windows::Win32InputRuntime runtime(
+        profile, false, false, true);
     if (!runtime.Start()) {
       DestroyWindow(window);
       WriteStandardOutput("typing_self_test_runtime_failed\n");
@@ -373,7 +375,9 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     pointer_resets = runtime.pointer_reset_count();
     standard_edit_replaces = runtime.standard_edit_replace_count();
     typing_context_captures = runtime.typing_context_capture_count();
-    success = success && typing_context_captures <= raw.size();
+    callback_latency = runtime.callback_latency_snapshot();
+    success = success && typing_context_captures <= raw.size() &&
+        callback_latency.sample_count == processed_events;
     runtime.Stop();
     if (!success) {
       DrainCurrentThreadMessages(300);
@@ -390,7 +394,10 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
         "{\"result\":\"%s\",\"processed_events\":%llu,"
         "\"suppressed_edits\":%llu,\"successful_injections\":%llu,"
         "\"failed_injections\":%llu,\"typing_context_captures\":%llu,"
-        "\"maximum_expected_context_captures\":%llu}\n",
+        "\"maximum_expected_context_captures\":%llu,"
+        "\"callback_samples\":%llu,\"callback_p50_ns\":%llu,"
+        "\"callback_p95_ns\":%llu,\"callback_p99_ns\":%llu,"
+        "\"callback_maximum_ns\":%llu,\"callback_mean_ns\":%llu}\n",
         clipboard_compatibility
             ? "clipboard_typing_self_test_pass"
             : "typing_self_test_pass",
@@ -399,7 +406,13 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
         static_cast<unsigned long long>(successful_injections),
         static_cast<unsigned long long>(failed_injections),
         static_cast<unsigned long long>(typing_context_captures),
-        static_cast<unsigned long long>(raw.size()));
+        static_cast<unsigned long long>(raw.size()),
+        static_cast<unsigned long long>(callback_latency.sample_count),
+        static_cast<unsigned long long>(callback_latency.p50_ns),
+        static_cast<unsigned long long>(callback_latency.p95_ns),
+        static_cast<unsigned long long>(callback_latency.p99_ns),
+        static_cast<unsigned long long>(callback_latency.maximum_ns),
+        static_cast<unsigned long long>(callback_latency.mean_ns));
     if (success_length > 0) {
       WriteStandardOutput(std::string_view(
           success_json.data(), static_cast<std::size_t>(success_length)));
@@ -423,6 +436,9 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       "\"bypass_contexts\":%llu,\"context_changes\":%llu,"
       "\"pointer_resets\":%llu,\"standard_edit_replaces\":%llu,"
       "\"typing_context_captures\":%llu,\"maximum_expected_context_captures\":%llu,"
+      "\"callback_samples\":%llu,\"callback_p50_ns\":%llu,"
+      "\"callback_p95_ns\":%llu,\"callback_p99_ns\":%llu,"
+      "\"callback_maximum_ns\":%llu,\"callback_mean_ns\":%llu,"
       "\"text_length\":%d,"
       "\"actual\":\"%.*s\"}\n",
       focus_ready ? "true" : "false",
@@ -438,6 +454,12 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       static_cast<unsigned long long>(standard_edit_replaces),
       static_cast<unsigned long long>(typing_context_captures),
       static_cast<unsigned long long>(raw.size()),
+      static_cast<unsigned long long>(callback_latency.sample_count),
+      static_cast<unsigned long long>(callback_latency.p50_ns),
+      static_cast<unsigned long long>(callback_latency.p95_ns),
+      static_cast<unsigned long long>(callback_latency.p99_ns),
+      static_cast<unsigned long long>(callback_latency.maximum_ns),
+      static_cast<unsigned long long>(callback_latency.mean_ns),
       length, utf8_length, actual_utf8.data());
   if (diagnostic_length > 0) {
     WriteStandardOutput(std::string_view(
