@@ -21,7 +21,6 @@ internal static class HotkeyPreferencesTests
         AssertEx.Equal("Ctrl + Alt + V", HotkeyText.Format(preferences.ToggleDictation.Chord));
         AssertEx.Equal("Ctrl + Alt + T", HotkeyText.Format(preferences.TranslateSelection.Chord));
         AssertEx.Equal("Ctrl + Alt + Z", HotkeyText.Format(preferences.UndoTranslation.Chord));
-        AssertEx.Equal("Escape", HotkeyText.Format(preferences.CancelActiveCommand.Chord));
     }
 
     [KeyinaTest("hotkey text round trips supported chords deterministically")]
@@ -95,8 +94,8 @@ internal static class HotkeyPreferencesTests
     {
         var bindings = HotkeyPreferences.Default.ToBindings();
 
-        AssertEx.Equal(6, bindings.Count);
-        AssertEx.Equal(6, bindings.Select(binding => binding.Command).Distinct().Count());
+        AssertEx.Equal(5, bindings.Count);
+        AssertEx.Equal(5, bindings.Select(binding => binding.Command).Distinct().Count());
         AssertEx.True(
             bindings.Any(binding => binding.Command == HotkeyCommand.ToggleVietnamese),
             "Toggle Vietnamese binding was missing.");
@@ -112,9 +111,9 @@ internal static class HotkeyPreferencesTests
         AssertEx.True(
             bindings.Any(binding => binding.Command == HotkeyCommand.UndoTranslation),
             "Translation undo binding was missing.");
-        AssertEx.True(
+        AssertEx.False(
             bindings.Any(binding => binding.Command == HotkeyCommand.CancelDictation),
-            "Cancel binding was missing.");
+            "Escape cancellation must not be exposed as a global shortcut.");
     }
 
     private static void AssertThrows<TException>(Action action)

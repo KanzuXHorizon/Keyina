@@ -130,10 +130,6 @@ public sealed record HotkeyPreferences(
             HotkeyCommand.UndoTranslation,
             UndoTranslation.GestureKind,
             UndoTranslation.Chord),
-        new(
-            HotkeyCommand.CancelDictation,
-            CancelActiveCommand.GestureKind,
-            CancelActiveCommand.Chord),
     ];
 
     public void Validate()
@@ -158,11 +154,6 @@ public sealed record HotkeyPreferences(
             UndoTranslation,
             HotkeyCommand.UndoTranslation,
             HotkeyGestureKind.Press);
-        ValidatePreference(
-            CancelActiveCommand,
-            HotkeyCommand.CancelDictation,
-            HotkeyGestureKind.Press);
-
         var chords = new HashSet<HotkeyChord>();
         foreach (var binding in ToBindings())
         {
@@ -223,11 +214,10 @@ public sealed record HotkeyPreferences(
             throw new ArgumentException(
                 "A hold shortcut requires at least one modifier.");
         }
-        if (command != HotkeyCommand.CancelDictation &&
-            chord.Key == VirtualKey.Escape)
+        if (chord.Key == VirtualKey.Escape)
         {
             throw new ArgumentException(
-                "Escape is reserved for cancelling an active command.");
+                "Escape is reserved for local dialog and overlay cancellation.");
         }
         if (chord.Modifiers == HotkeyModifiers.None &&
             RequiresModifier(chord.Key))

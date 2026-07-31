@@ -21,6 +21,8 @@ namespace keyina::windows {
 namespace {
 
 constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
+constexpr wchar_t kSnippetOverlayTitle[] = L"Keyina snippets";
+constexpr std::size_t kMaximumVisibleSnippetSuggestions = 8;
 constexpr UINT kPointerRegistrationMessage = WM_APP + 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 2;
 constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
@@ -55,6 +57,59 @@ bool IsModifierKey(std::uint16_t key) noexcept {
          key == VK_LCONTROL || key == VK_RCONTROL ||
          key == VK_LMENU || key == VK_RMENU ||
          key == VK_LWIN || key == VK_RWIN;
+}
+
+void AppendUtf32ToWide(std::u32string_view value, std::wstring& output) {
+  for (const char32_t codepoint : value) {
+    if (codepoint <= 0xFFFF && !(codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+      output.push_back(static_cast<wchar_t>(codepoint));
+    } else if (codepoint <= 0x10FFFF) {
+      const char32_t adjusted = codepoint - 0x10000;
+      output.push_back(static_cast<wchar_t>(0xD800 + (adjusted >> 10)));
+      output.push_back(static_cast<wchar_t>(0xDC00 + (adjusted & 0x3FF)));
+    }
+  }
+}
+
+std::wstring BuildSnippetOverlayText(
+    std::u32string_view token,
+    const std::vector<const RuntimeSnippetDefinition*>& suggestions) {
+  std::wstring text = L"Gõ tắt ";
+  AppendUtf32ToWide(token, text);
+  text += L"\r\n";
+  for (const auto* definition : suggestions) {
+    if (definition == nullptr) {
+      continue;
+    }
+    text += L"\r\n";
+    AppendUtf32ToWide(definition->trigger, text);
+    text += L"   ";
+    switch (definition->command) {
+      case RuntimeSnippetCommand::ToggleVietnamese:
+        text += L"Bật/tắt tiếng Việt";
+        break;
+      case RuntimeSnippetCommand::ToggleDictation:
+        text += L"Nhập bằng giọng nói";
+        break;
+      case RuntimeSnippetCommand::ExternalOutput:
+        text += L"Đầu ra lệnh";
+        break;
+      case RuntimeSnippetCommand::None:
+        if (!definition->expansion.empty()) {
+          const std::size_t preview_length =
+              std::min<std::size_t>(definition->expansion.size(), 48);
+          text.append(
+              reinterpret_cast<const wchar_t*>(definition->expansion.data()),
+              preview_length);
+          if (preview_length < definition->expansion.size()) {
+            text += L"…";
+          }
+        }
+        break;
+    }
+  }
+  text += L"\r\n\r\nGõ tiếp để lọc · Space/Enter để chèn";
+  return text;
 }
 
 char32_t TranslateCharacter(std::uint16_t virtual_key, bool shift,
@@ -545,6 +600,11 @@ void Win32InputRuntime::Stop() noexcept {
     FreeLibrary(shell_module_);
     shell_module_ = nullptr;
   }
+  HideSnippetOverlay();
+  if (snippet_overlay_window_ != nullptr) {
+    DestroyWindow(snippet_overlay_window_);
+    snippet_overlay_window_ = nullptr;
+  }
   if (window_ != nullptr) {
     DestroyWindow(window_);
     window_ = nullptr;
@@ -766,6 +826,9 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
 
     const TypingContext context = CaptureTypingContext();
     const InputDecision decision = controller_.Process(event, context);
+    if (key_down) {
+      UpdateSnippetOverlay();
+    }
     RequestPointerRegistration(
         controller_.pointer_observation_required() &&
         !context.bypass_typing);
@@ -1274,6 +1337,70 @@ void Win32InputRuntime::RefreshModifierState() noexcept {
     state |= kWindowsModifier;
   }
   modifier_state_ = state;
+}
+
+void Win32InputRuntime::UpdateSnippetOverlay() noexcept {
+  const auto suggestions = controller_.snippet_suggestions(
+      kMaximumVisibleSnippetSuggestions);
+  if (suggestions.empty()) {
+    HideSnippetOverlay();
+    return;
+  }
+
+  const std::wstring text = BuildSnippetOverlayText(
+      controller_.snippet_token(), suggestions);
+  if (snippet_overlay_window_ == nullptr) {
+    snippet_overlay_window_ = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
+            WS_EX_TRANSPARENT,
+        L"STATIC",
+        kSnippetOverlayTitle,
+        WS_POPUP | WS_BORDER | SS_LEFT,
+        0,
+        0,
+        420,
+        240,
+        nullptr,
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+    if (snippet_overlay_window_ == nullptr) {
+      return;
+    }
+    SendMessageW(
+        snippet_overlay_window_,
+        WM_SETFONT,
+        reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),
+        TRUE);
+  }
+
+  SetWindowTextW(snippet_overlay_window_, text.c_str());
+  RECT work_area{};
+  if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0)) {
+    work_area = RECT{0, 0, GetSystemMetrics(SM_CXSCREEN),
+                     GetSystemMetrics(SM_CYSCREEN)};
+  }
+  const int width = 440;
+  const int height = std::min<int>(
+      110 + static_cast<int>(suggestions.size()) * 30,
+      360);
+  const int x = std::max(work_area.left + 12, work_area.right - width - 20);
+  const int y = std::max(work_area.top + 12, work_area.bottom - height - 20);
+  SetWindowPos(
+      snippet_overlay_window_,
+      HWND_TOPMOST,
+      x,
+      y,
+      width,
+      height,
+      SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  ShowWindow(snippet_overlay_window_, SW_SHOWNOACTIVATE);
+}
+
+void Win32InputRuntime::HideSnippetOverlay() noexcept {
+  if (snippet_overlay_window_ != nullptr) {
+    ShowWindow(snippet_overlay_window_, SW_HIDE);
+  }
 }
 
 void Win32InputRuntime::UpdateTray() noexcept {

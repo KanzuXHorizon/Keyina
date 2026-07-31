@@ -108,6 +108,8 @@ class Win32InputRuntime {
   [[nodiscard]] bool IsCommandCompanionActive() const noexcept;
   void ReloadProfileIfChanged() noexcept;
   void RefreshModifierState() noexcept;
+  void UpdateSnippetOverlay() noexcept;
+  void HideSnippetOverlay() noexcept;
   void UpdateTray() noexcept;
   void ShowTrayMenu() noexcept;
   void OpenManagedSettings() noexcept;
@@ -118,6 +120,7 @@ class Win32InputRuntime {
   RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
   HWND window_{nullptr};
+  HWND snippet_overlay_window_{nullptr};
   HHOOK hook_{nullptr};
   HICON active_icon_{nullptr};
   HICON inactive_icon_{nullptr};

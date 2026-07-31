@@ -232,6 +232,26 @@ void RuntimeSnippetMatcher::Reset() noexcept {
   failed_token_.clear();
 }
 
+std::vector<const RuntimeSnippetDefinition*>
+RuntimeSnippetMatcher::Suggestions(std::size_t maximum) const {
+  std::vector<const RuntimeSnippetDefinition*> suggestions;
+  if (profile_ == nullptr || maximum == 0 || token_.size() < 2 ||
+      token_[0] != U';' || FoldAscii(token_[1]) != U'k') {
+    return suggestions;
+  }
+
+  suggestions.reserve(std::min(maximum, profile_->entries.size()));
+  for (const auto& definition : profile_->entries) {
+    if (StartsWith(definition.trigger, token_, definition.case_sensitive)) {
+      suggestions.push_back(&definition);
+      if (suggestions.size() >= maximum) {
+        break;
+      }
+    }
+  }
+  return suggestions;
+}
+
 void RuntimeSnippetMatcher::RebuildStartIndex() {
   ascii_starters_.fill(false);
   unicode_starters_.clear();

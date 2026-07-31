@@ -31,6 +31,23 @@ RuntimeSnippetDefinition Definition(
 
 }  // namespace
 
+KEYINA_TEST(runtime_snippet_matcher_exposes_bounded_k_prefix_suggestions) {
+  RuntimeSnippetProfile profile{};
+  profile.entries.push_back(Definition(U";kdate", u"${date}"));
+  profile.entries.push_back(Definition(U";ktime", u"${time}"));
+  profile.entries.push_back(Definition(U";other", u"hidden"));
+  RuntimeSnippetMatcher matcher(profile);
+
+  (void)matcher.ProcessCharacter(U';');
+  (void)matcher.ProcessCharacter(U'k');
+  const auto suggestions = matcher.Suggestions(8);
+
+  KEYINA_EXPECT_EQ(matcher.token(), std::u32string_view{U";k"});
+  KEYINA_EXPECT_EQ(suggestions.size(), std::size_t{2});
+  KEYINA_EXPECT_EQ(suggestions[0]->trigger, std::u32string{U";kdate"});
+  KEYINA_EXPECT_EQ(suggestions[1]->trigger, std::u32string{U";ktime"});
+}
+
 KEYINA_TEST(runtime_snippet_matcher_tracks_raw_prefix_before_telex) {
   RuntimeSnippetProfile profile{};
   profile.entries.push_back(Definition(

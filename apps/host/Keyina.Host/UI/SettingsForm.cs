@@ -1258,7 +1258,7 @@ public sealed partial class SettingsForm : Form
         providerCard.Controls.Add(CreateIconTextLayout(
             "\uE8D4",
             "Cấu hình hiện tại",
-            "Tiếng Việt · đoạn tạm chỉ hiển thị trên lớp phủ · Escape để hủy phiên."));
+            "Tiếng Việt · đoạn tạm chỉ hiển thị trên lớp phủ · nhấn lại phím tắt để hoàn tất."));
         stack.Controls.Add(providerCard);
         return page;
     }

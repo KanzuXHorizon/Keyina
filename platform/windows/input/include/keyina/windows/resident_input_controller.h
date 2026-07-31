@@ -71,6 +71,15 @@ class ResidentInputController {
     return profile_;
   }
 
+  [[nodiscard]] std::u32string_view snippet_token() const noexcept {
+    return snippet_matcher_.token();
+  }
+
+  [[nodiscard]] std::vector<const RuntimeSnippetDefinition*>
+  snippet_suggestions(std::size_t maximum) const {
+    return snippet_matcher_.Suggestions(maximum);
+  }
+
  private:
   class KeyStateSet {
    public:

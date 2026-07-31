@@ -46,6 +46,9 @@ class RuntimeSnippetMatcher {
   void Reset() noexcept;
 
   [[nodiscard]] bool active() const noexcept { return !token_.empty(); }
+  [[nodiscard]] std::u32string_view token() const noexcept { return token_; }
+  [[nodiscard]] std::vector<const RuntimeSnippetDefinition*> Suggestions(
+      std::size_t maximum) const;
 
  private:
   void RebuildStartIndex();

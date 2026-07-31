@@ -735,10 +735,6 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             UndoTranslationHotkeyId,
             preferences.UndoTranslation.Chord,
             HotkeyCommand.UndoTranslation),
-        new(
-            CancelDictationHotkeyId,
-            preferences.CancelActiveCommand.Chord,
-            HotkeyCommand.CancelDictation),
     ];
 
     private static RegisteredHotkeyBinding CreateTranslationRegisteredBinding(

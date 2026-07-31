@@ -31,7 +31,7 @@ RuntimeCommand CommandForBinding(std::size_t index) noexcept {
     case 4:
       return RuntimeCommand::UndoTranslation;
     case 5:
-      return RuntimeCommand::CancelActiveCommand;
+      return RuntimeCommand::None;
     default:
       return RuntimeCommand::None;
   }
@@ -114,7 +114,7 @@ RuntimeHotkeyDecision RuntimeHotkeyRouter::Process(
         binding.modifiers != modifiers) {
       continue;
     }
-    if ((index == 4 || index == 5) && !command_companion_active) {
+    if (index == 4 && !command_companion_active) {
       return {};
     }
 

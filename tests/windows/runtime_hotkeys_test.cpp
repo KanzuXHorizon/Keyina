@@ -175,6 +175,16 @@ KEYINA_TEST(native_hotkey_router_never_steals_escape_or_undo_without_companion) 
   KEYINA_EXPECT_EQ(
       active_undo.command,
       keyina::windows::RuntimeCommand::UndoTranslation);
+
+  const auto active_escape = router.Process(
+      Key(0x1B, true),
+      profile,
+      false,
+      true);
+  KEYINA_EXPECT_TRUE(!active_escape.suppress);
+  KEYINA_EXPECT_EQ(
+      active_escape.command,
+      keyina::windows::RuntimeCommand::None);
 }
 
 KEYINA_TEST(native_hotkey_router_cancels_suppression_when_launch_fails) {
