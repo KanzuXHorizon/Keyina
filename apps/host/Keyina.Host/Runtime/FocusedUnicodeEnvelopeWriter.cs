@@ -39,12 +39,16 @@ public sealed class FocusedUnicodeEnvelopeWriter : IIpcEnvelopeWriter
 
     public ulong FocusGeneration => focusGeneration;
 
-    public bool TryBindToCurrentFocus()
+    public bool TryBindToCurrentFocus() => TryBindToExpectedFocus(null, null);
+
+    public bool TryBindToExpectedFocus(int? foregroundProcessId, nint? focusWindow)
     {
         var current = captureContext();
         if (current.ForegroundProcessId <= 0 ||
             current.FocusWindow == 0 ||
-            current.ShouldBypassTyping)
+            current.ShouldBypassTyping ||
+            (foregroundProcessId is not null && current.ForegroundProcessId != foregroundProcessId.Value) ||
+            (focusWindow is not null && current.FocusWindow != focusWindow.Value))
         {
             bound = false;
             return false;

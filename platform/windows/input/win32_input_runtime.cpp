@@ -8,9 +8,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -30,6 +32,8 @@ constexpr wchar_t kCommandCompanionMutexName[] =
 constexpr UINT kToggleMenuCommand = 1001;
 constexpr UINT kSettingsMenuCommand = 1002;
 constexpr UINT kExitMenuCommand = 1003;
+constexpr UINT kDictationMenuCommand = 1004;
+constexpr UINT kTranslateMenuCommand = 1005;
 constexpr std::uint8_t kControlModifier = 1u << 0u;
 constexpr std::uint8_t kShiftModifier = 1u << 1u;
 constexpr std::uint8_t kAltModifier = 1u << 2u;
@@ -555,6 +559,10 @@ void Win32InputRuntime::Stop() noexcept {
   controller_.Reset();
 }
 
+void Win32InputRuntime::RequestOpenSettings() noexcept {
+  OpenManagedSettings();
+}
+
 void Win32InputRuntime::PumpMessagesFor(DWORD duration_milliseconds) noexcept {
   const ULONGLONG deadline = GetTickCount64() + duration_milliseconds;
   while (!stopping_ && GetTickCount64() < deadline) {
@@ -676,6 +684,12 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
         case kSettingsMenuCommand:
           OpenManagedSettings();
           return 0;
+        case kDictationMenuCommand:
+          static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+          return 0;
+        case kTranslateMenuCommand:
+          static_cast<void>(QueueManagedCommand(RuntimeCommand::TranslateSelection));
+          return 0;
         case kExitMenuCommand:
           RequestExit();
           return 0;
@@ -764,7 +778,11 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return CallNextHookEx(nullptr, code, message, data);
     }
     if (key_down) {
-      HandleSnippetCommand(decision.snippet_command);
+      HandleSnippetCommand(
+          decision.snippet_command,
+          decision.snippet_command_payload,
+          decision.snippet_target_process_id,
+          decision.snippet_target_focus_window);
     }
     return 1;
   } catch (...) {
@@ -802,11 +820,10 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
   const bool style_failed = style == 0 && GetLastError() != ERROR_SUCCESS;
   const bool password =
       style_failed || (style & ES_PASSWORD) != 0;
-  const bool fullscreen = IsFullscreenWindow(active);
   return TypingContext{
       cached_process_id_,
       reinterpret_cast<std::uintptr_t>(info.hwndFocus),
-      password || fullscreen,
+      password,
       cached_application_hash_,
   };
 }
@@ -935,7 +952,10 @@ void Win32InputRuntime::ProcessToggleGesture(
 }
 
 void Win32InputRuntime::HandleSnippetCommand(
-    RuntimeSnippetCommand command) noexcept {
+    RuntimeSnippetCommand command,
+    std::u16string_view payload,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
   switch (command) {
     case RuntimeSnippetCommand::ToggleVietnamese:
       profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
@@ -950,9 +970,180 @@ void Win32InputRuntime::HandleSnippetCommand(
     case RuntimeSnippetCommand::ToggleDictation:
       static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
       break;
+    case RuntimeSnippetCommand::ExternalOutput:
+      static_cast<void>(LaunchExternalSnippetCommand(
+          payload, target_process_id, target_focus_window));
+      break;
     case RuntimeSnippetCommand::None:
     default:
       break;
+  }
+}
+
+bool Win32InputRuntime::LaunchExternalSnippetCommand(
+    std::u16string_view payload,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
+  try {
+    if (payload.empty() || payload.size() > 16 * 1024 ||
+        target_process_id == 0 || target_focus_window == 0 ||
+        shell_execute_ == nullptr) {
+      return false;
+    }
+
+    const int payload_bytes = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        reinterpret_cast<LPCWCH>(payload.data()),
+        static_cast<int>(payload.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (payload_bytes <= 0 || payload_bytes > 32 * 1024) {
+      return false;
+    }
+    std::vector<char> utf8(static_cast<std::size_t>(payload_bytes));
+    if (WideCharToMultiByte(
+            CP_UTF8,
+            WC_ERR_INVALID_CHARS,
+            reinterpret_cast<LPCWCH>(payload.data()),
+            static_cast<int>(payload.size()),
+            utf8.data(),
+            payload_bytes,
+            nullptr,
+            nullptr) != payload_bytes) {
+      return false;
+    }
+
+    std::array<wchar_t, 32768> local_app_data{};
+    const DWORD local_length = GetEnvironmentVariableW(
+        L"LOCALAPPDATA",
+        local_app_data.data(),
+        static_cast<DWORD>(local_app_data.size()));
+    if (local_length == 0 || local_length >= local_app_data.size()) {
+      return false;
+    }
+    std::wstring keyina_directory(local_app_data.data(), local_length);
+    keyina_directory.append(L"\\Keyina");
+    if (CreateDirectoryW(keyina_directory.c_str(), nullptr) == FALSE &&
+        GetLastError() != ERROR_ALREADY_EXISTS) {
+      return false;
+    }
+    std::wstring commands_directory = keyina_directory + L"\\commands";
+    if (CreateDirectoryW(commands_directory.c_str(), nullptr) == FALSE &&
+        GetLastError() != ERROR_ALREADY_EXISTS) {
+      return false;
+    }
+
+    static std::atomic_uint64_t request_counter{0};
+    const auto request_id = request_counter.fetch_add(1) + 1;
+    std::array<wchar_t, 32768> request_path{};
+    if (swprintf_s(
+            request_path.data(),
+            request_path.size(),
+            L"%ls\\snippet-%lu-%llu-%llu.bin",
+            commands_directory.c_str(),
+            static_cast<unsigned long>(GetCurrentProcessId()),
+            static_cast<unsigned long long>(GetTickCount64()),
+            static_cast<unsigned long long>(request_id)) <= 0) {
+      return false;
+    }
+
+    HANDLE file = CreateFileW(
+        request_path.data(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_NEW,
+        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_WRITE_THROUGH,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+      return false;
+    }
+
+    std::array<std::byte, 20> header{};
+    header[0] = static_cast<std::byte>('K');
+    header[1] = static_cast<std::byte>('Y');
+    header[2] = static_cast<std::byte>('S');
+    header[3] = static_cast<std::byte>('C');
+    header[4] = static_cast<std::byte>(1);
+    header[5] = static_cast<std::byte>(20);
+    const auto write32 = [&header](std::size_t offset, std::uint32_t value) {
+      for (std::size_t index = 0; index < 4; ++index) {
+        header[offset + index] = static_cast<std::byte>(
+            (value >> (index * 8u)) & 0xFFu);
+      }
+    };
+    const auto write64 = [&header](std::size_t offset, std::uint64_t value) {
+      for (std::size_t index = 0; index < 8; ++index) {
+        header[offset + index] = static_cast<std::byte>(
+            (value >> (index * 8u)) & 0xFFu);
+      }
+    };
+    write32(8, target_process_id);
+    write64(12, static_cast<std::uint64_t>(target_focus_window));
+
+    DWORD written = 0;
+    const bool header_written = WriteFile(
+        file,
+        header.data(),
+        static_cast<DWORD>(header.size()),
+        &written,
+        nullptr) != FALSE && written == header.size();
+    const bool payload_written = header_written && WriteFile(
+        file,
+        utf8.data(),
+        static_cast<DWORD>(utf8.size()),
+        &written,
+        nullptr) != FALSE && written == utf8.size();
+    const bool flushed = payload_written && FlushFileBuffers(file) != FALSE;
+    CloseHandle(file);
+    if (!flushed) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
+
+    std::array<wchar_t, 32768> executable{};
+    const DWORD executable_length = GetModuleFileNameW(
+        nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (executable_length == 0 || executable_length >= executable.size()) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
+    wchar_t* separator = std::wcsrchr(executable.data(), L'\\');
+    if (separator == nullptr) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
+    *separator = L'\0';
+
+    std::array<wchar_t, 32768> companion{};
+    if (swprintf_s(
+            companion.data(),
+            companion.size(),
+            L"%ls\\Keyina.Host.exe",
+            executable.data()) <= 0) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
+    std::wstring arguments = L"--snippet-command-file=\"";
+    arguments.append(request_path.data());
+    arguments.push_back(L'\"');
+    const HINSTANCE result = shell_execute_(
+        window_,
+        L"open",
+        companion.data(),
+        arguments.c_str(),
+        executable.data(),
+        SW_SHOWNOACTIVATE);
+    if (reinterpret_cast<INT_PTR>(result) <= 32) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
+    return true;
+  } catch (...) {
+    return false;
   }
 }
 
@@ -1117,8 +1308,22 @@ void Win32InputRuntime::ShowTrayMenu() noexcept {
     return;
   }
   AppendMenuW(
+      menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0,
+      profile_.vietnamese_enabled
+          ? L"Keyina · Bộ gõ đang bật"
+          : L"Keyina · Bộ gõ đang tắt");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(
       menu, MF_STRING | (profile_.vietnamese_enabled ? MF_CHECKED : 0),
-      kToggleMenuCommand, L"Bật tiếng Việt");
+      kToggleMenuCommand,
+      profile_.vietnamese_enabled
+          ? L"Tắt bộ gõ tiếng Việt"
+          : L"Bật bộ gõ tiếng Việt");
+  AppendMenuW(menu, MF_STRING, kDictationMenuCommand,
+              L"Nhập bằng giọng nói");
+  AppendMenuW(menu, MF_STRING, kTranslateMenuCommand,
+              L"Dịch vùng chọn");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kSettingsMenuCommand, L"Mở cài đặt");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kExitMenuCommand, L"Thoát Keyina");

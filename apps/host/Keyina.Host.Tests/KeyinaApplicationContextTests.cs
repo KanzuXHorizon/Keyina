@@ -86,7 +86,7 @@ internal static class KeyinaApplicationContextTests
         AssertEx.False(context.NotifyIconVisible,
             "Settings companion exposed a resident tray icon.");
         AssertEx.Equal(
-            "Hook bàn phím chưa khả dụng",
+            "Unavailable",
             context.CurrentSettingsSnapshot.HotkeyStatus);
 
         context.CloseSettings();
@@ -131,7 +131,7 @@ internal static class KeyinaApplicationContextTests
         AssertEx.False(context.NotifyIconVisible,
             "Command companion exposed a resident tray icon.");
         AssertEx.Equal(
-            "Hook bàn phím chưa khả dụng",
+            "Unavailable",
             context.CurrentSettingsSnapshot.HotkeyStatus);
     }
 

@@ -22,9 +22,6 @@ internal static class Program
     };
 
     private const int AlreadyRunningExitCode = 17;
-    private const string HostMutexName = "Local\\Keyina.Host";
-    private const string SettingsCompanionMutexName =
-        "Local\\Keyina.SettingsCompanion";
 
     private sealed record ResidentInputResourceSnapshot(
         double HookStartupMilliseconds,
@@ -188,6 +185,28 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         FluentTheme.InitializeApplicationColorMode();
 
+        const string snippetCommandPrefix = "--snippet-command-file=";
+        var snippetCommandArgument = args.FirstOrDefault(argument =>
+            argument.StartsWith(snippetCommandPrefix, StringComparison.Ordinal));
+        if (snippetCommandArgument is not null)
+        {
+            try
+            {
+                var request = SnippetCommandRequestStore.LoadAndDelete(
+                    snippetCommandArgument[snippetCommandPrefix.Length..].Trim('"'));
+                var result = new SnippetCommandOutputRunner()
+                    .ExecuteAsync(request, CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+                return result.Success ? 0 : 1;
+            }
+            catch (Exception exception) when (
+                exception is IOException or ArgumentException or InvalidOperationException)
+            {
+                return 1;
+            }
+        }
+
         var companionCommandArgument = args.FirstOrDefault(argument =>
             CompanionCommandProtocol.TryParseArgument(argument, out _));
         if (CompanionCommandProtocol.TryParseArgument(
@@ -210,6 +229,7 @@ internal static class Program
                 using var context = new KeyinaApplicationContext(
                     KeyinaRuntimeOptions.CreateProductionCommandCompanion());
                 using var session = new CompanionCommandSession(context);
+                using var settingsSession = new SettingsCompanionSession(context);
                 session.Post(companionCommand);
                 Application.Run(context);
                 if (string.Equals(
@@ -252,34 +272,26 @@ internal static class Program
         if (args.Contains("--companion-settings", StringComparer.Ordinal))
         {
             _ = NativeResidentLauncher.TryEnsureRunning();
-            if (!SingleInstanceGuard.TryAcquire(
-                    SettingsCompanionMutexName,
-                    out var settingsGuard))
+            using var companionMutex = new Mutex(
+                initiallyOwned: true,
+                SettingsCompanionProtocol.MutexName,
+                out var createdNew);
+            if (!createdNew)
             {
-                return AlreadyRunningExitCode;
+                return SettingsCompanionSession.SignalExisting()
+                    ? 0
+                    : AlreadyRunningExitCode;
             }
 
-            using (settingsGuard)
-            {
-                using var context = new KeyinaApplicationContext(
-                    KeyinaRuntimeOptions.CreateProductionSettingsCompanion());
-                Application.Run(context);
-                return 0;
-            }
-        }
-
-        if (!SingleInstanceGuard.TryAcquire(HostMutexName, out var guard))
-        {
-            return AlreadyRunningExitCode;
-        }
-
-        using (guard)
-        {
             using var context = new KeyinaApplicationContext(
-                KeyinaRuntimeOptions.CreateProduction(
-                    showSettingsOnStart: args.Contains("--show-settings", StringComparer.Ordinal)));
+                KeyinaRuntimeOptions.CreateProductionCommandCompanion());
+            context.OpenSettings();
+            using var commandSession = new CompanionCommandSession(context);
+            using var settingsSession = new SettingsCompanionSession(context);
             Application.Run(context);
             return 0;
         }
+
+        return NativeResidentLauncher.TryOpenSettings() ? 0 : 1;
     }
 }

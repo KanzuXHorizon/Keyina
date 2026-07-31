@@ -197,7 +197,7 @@ std::u32string NormalizeTrigger(std::u32string_view trigger) {
 
 bool IsCommandValueValid(std::uint8_t raw) noexcept {
   return raw <= static_cast<std::uint8_t>(
-                    RuntimeSnippetCommand::ToggleDictation);
+                    RuntimeSnippetCommand::ExternalOutput);
 }
 
 RuntimeSnippetProfileResult Fail(RuntimeSnippetProfileError error) noexcept {
@@ -317,10 +317,13 @@ RuntimeSnippetProfileResult DecodeRuntimeSnippetProfile(
           IsAsciiAlphanumeric(definition.trigger.front()) ||
           ContainsAsciiWhitespace(definition.trigger) ||
           definition.delimiters.empty() ||
-          !ValidateTemplate(definition.expansion) ||
           (definition.command == RuntimeSnippetCommand::None &&
-           definition.expansion.empty()) ||
+           (!ValidateTemplate(definition.expansion) ||
+            definition.expansion.empty())) ||
+          (definition.command == RuntimeSnippetCommand::ExternalOutput &&
+           (definition.expansion.empty() || definition.preserve_delimiter)) ||
           (definition.command != RuntimeSnippetCommand::None &&
+           definition.command != RuntimeSnippetCommand::ExternalOutput &&
            !definition.expansion.empty())) {
         return Fail(RuntimeSnippetProfileError::InvalidEntry);
       }

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Keyina.Host.Core.Applications;
+using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Translation;
@@ -85,6 +86,7 @@ public sealed partial class SettingsForm : Form
     private readonly FluentButton setupTsfButton;
     private readonly FlowLayoutPanel snippetsList;
     private readonly TextBox snippetsSearch;
+    private readonly ComboBox snippetsFilter;
     private readonly TextBox disableVietnameseApplications;
     private readonly TextBox disableSpeechApplications;
     private readonly TextBox disableTranslationApplications;
@@ -298,12 +300,21 @@ public sealed partial class SettingsForm : Form
             FluentButtonKind.Primary,
             168);
         snippetsList = CreateVerticalStack("snippetsList");
-        snippetsList.AutoScroll = false;
+        snippetsList.AutoScroll = true;
         snippetsList.Dock = DockStyle.Fill;
         snippetsSearch = CreateTextBox(
             "snippetsSearch",
             "Tìm theo từ kích hoạt hoặc nội dung",
             "Tìm gõ tắt");
+        snippetsFilter = new ComboBox
+        {
+            Name = "snippetsFilter",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            AccessibleName = "Lọc gõ tắt",
+            Width = 164,
+        };
+        snippetsFilter.Items.AddRange(["Tất cả", "Có sẵn", "Tùy chỉnh", "Đầu ra lệnh"]);
+        snippetsFilter.SelectedIndex = 0;
         disableVietnameseApplications = CreateApplicationListTextBox(
             "disableVietnameseApplications",
             "Ứng dụng không dùng bộ gõ tiếng Việt");
@@ -537,6 +548,7 @@ public sealed partial class SettingsForm : Form
         saveLibreTranslateKey.Click += (_, _) => SaveLibreTranslateCredential();
         removeLibreTranslateKey.Click += (_, _) => actions.DeleteLibreTranslateApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
+        snippetsFilter.SelectedIndexChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
         foreach (var textBox in GetApplicationRuleTextBoxes())
         {
             textBox.TextChanged += (_, _) =>
@@ -683,13 +695,15 @@ public sealed partial class SettingsForm : Form
             SetBadge(
                 hotkeyStatus,
                 LocalizeRuntimeStatus(snapshot.HotkeyStatus),
-                snapshot.HotkeyStatus.Contains("registered", StringComparison.OrdinalIgnoreCase)
+                snapshot.HotkeyStatus.Contains("registered", StringComparison.OrdinalIgnoreCase) ||
+                snapshot.HotkeyStatus.Contains("active", StringComparison.OrdinalIgnoreCase)
                     ? FluentTone.Success
                     : FluentTone.Warning);
 
             snippetCount.Text = snapshot.CustomSnippetCount == 1
                 ? "1 gõ tắt tùy chỉnh"
                 : $"{snapshot.CustomSnippetCount} gõ tắt tùy chỉnh";
+            AddSnippetRows();
             removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
             removeDeepLKey.Enabled = snapshot.TranslationCredentialConfigured;
             saveDeepLKey.Text = snapshot.TranslationCredentialConfigured
@@ -701,9 +715,9 @@ public sealed partial class SettingsForm : Form
                 : "Lưu khóa";
             setupTsfButton.Text = snapshot.Readiness switch
             {
-                KeyinaReadiness.Ready => "Mở kiểm tra gõ",
-                KeyinaReadiness.NeedsSetup => "Thiết lập bộ gõ",
-                KeyinaReadiness.NeedsAttention => "Sửa kết nối",
+                KeyinaReadiness.Ready => "Kiểm tra bộ gõ",
+                KeyinaReadiness.NeedsSetup or
+                KeyinaReadiness.NeedsAttention or
                 KeyinaReadiness.Unavailable => "Mở chẩn đoán",
                 _ => "Kiểm tra lại",
             };
@@ -1755,11 +1769,23 @@ public sealed partial class SettingsForm : Form
         snippetCount.TextAlign = ContentAlignment.MiddleRight;
         libraryLayout.Controls.Add(snippetCount, 1, 0);
 
+        var searchToolbar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0, 4, 0, 4),
+        };
+        searchToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        searchToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 176F));
         var searchFrame = CreateInputFrame(snippetsSearch);
         searchFrame.Dock = DockStyle.Fill;
-        searchFrame.Margin = new Padding(0, 4, 0, 4);
-        libraryLayout.Controls.Add(searchFrame, 0, 1);
-        libraryLayout.SetColumnSpan(searchFrame, 2);
+        searchFrame.Margin = new Padding(0, 0, 8, 0);
+        searchToolbar.Controls.Add(searchFrame, 0, 0);
+        snippetsFilter.Dock = DockStyle.Fill;
+        searchToolbar.Controls.Add(snippetsFilter, 1, 0);
+        libraryLayout.Controls.Add(searchToolbar, 0, 1);
+        libraryLayout.SetColumnSpan(searchToolbar, 2);
 
         AddSnippetRows();
         libraryLayout.Controls.Add(snippetsList, 0, 2);
@@ -1781,13 +1807,13 @@ public sealed partial class SettingsForm : Form
         snippetNote.Dock = DockStyle.Fill;
         snippetNote.TextAlign = ContentAlignment.MiddleLeft;
         snippetFooter.Controls.Add(snippetNote, 0, 0);
-        var openConfig = CreateButton(
-            "openSnippetConfig",
-            "Mở thư mục cấu hình",
-            FluentButtonKind.Secondary,
-            168);
-        openConfig.Click += (_, _) => actions.OpenConfigurationFolder();
-        snippetFooter.Controls.Add(openConfig, 1, 0);
+        var addSnippet = CreateButton(
+            "addSnippet",
+            "Thêm gõ tắt",
+            FluentButtonKind.Primary,
+            132);
+        addSnippet.Click += (_, _) => AddCustomSnippet();
+        snippetFooter.Controls.Add(addSnippet, 1, 0);
         libraryLayout.Controls.Add(snippetFooter, 0, 3);
         libraryLayout.SetColumnSpan(snippetFooter, 2);
 
@@ -1819,9 +1845,9 @@ public sealed partial class SettingsForm : Form
         var checksTitle = CreateLabel("diagnosticsTitle", "Kiểm tra cục bộ", LabelRole.Heading);
         checksTitle.Dock = DockStyle.Fill;
         checksLayout.Controls.Add(checksTitle, 0, 0);
-        checksLayout.Controls.Add(CreateDiagnosticRow("\uE7BA", "Host nền", hotkeyStatus), 0, 1);
-        checksLayout.Controls.Add(CreateDiagnosticRow("\uE765", "Bộ gõ và đường nhập", inputStatus), 0, 2);
-        checksLayout.Controls.Add(CreateDiagnosticRow("\uE8C8", "Kết nối ứng dụng", ipcStatus), 0, 3);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE7BA", "Resident bộ gõ", hotkeyStatus), 0, 1);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE765", "Bộ gõ và snippet", inputStatus), 0, 2);
+        checksLayout.Controls.Add(CreateDiagnosticRow("\uE8C8", "Kết nối native", ipcStatus), 0, 3);
         checksLayout.Controls.Add(CreateDiagnosticRow("\uE720", "Dịch vụ giọng nói", speechStatus), 0, 4);
         stack.Controls.Add(checks);
 
@@ -2529,12 +2555,30 @@ public sealed partial class SettingsForm : Form
 
     private void AddSnippetRows()
     {
+        if (snippetsList is null)
+        {
+            return;
+        }
+        snippetsList.SuspendLayout();
         snippetsList.Controls.Clear();
-        foreach (var snippet in SnippetRow.All)
+        foreach (var snippet in SnippetRow.All.Concat(
+                     currentSnapshot.Snippets.Select(configuration => new SnippetRow(
+                         configuration.Trigger,
+                         configuration.Execution is null
+                             ? configuration.Expansion
+                             : $"{Path.GetFileName(configuration.Execution.ExecutablePath)} {configuration.Execution.Arguments}".Trim(),
+                         configuration.Execution is not null
+                             ? "Chương trình · chèn stdout"
+                             : configuration.PreserveDelimiter
+                                 ? "Văn bản · giữ Space"
+                                 : "Văn bản · nuốt Space",
+                         configuration))))
         {
             snippetsList.Controls.Add(CreateSnippetRow(snippet));
         }
         ResizeStackChildren(snippetsList);
+        FilterSnippets(snippetsSearch.Text);
+        snippetsList.ResumeLayout();
     }
 
     private FluentCard CreateSnippetRow(SnippetRow snippet)
@@ -2546,7 +2590,7 @@ public sealed partial class SettingsForm : Form
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 3,
+            ColumnCount = snippet.Configuration is null ? 3 : 6,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
@@ -2554,6 +2598,12 @@ public sealed partial class SettingsForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        if (snippet.Configuration is not null)
+        {
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+        }
         card.Controls.Add(layout);
         var trigger = CreateLabel(card.Name + "Trigger", snippet.Trigger, LabelRole.Caption);
         trigger.Dock = DockStyle.Fill;
@@ -2567,21 +2617,138 @@ public sealed partial class SettingsForm : Form
         scope.AutoSize = true;
         scope.Anchor = AnchorStyles.Right;
         layout.Controls.Add(scope, 2, 0);
+        if (snippet.Configuration is not null)
+        {
+            var duplicate = CreateButton(card.Name + "Duplicate", "Nhân bản", FluentButtonKind.Secondary, 72);
+            duplicate.Height = 30;
+            duplicate.Click += (_, _) => DuplicateSnippet(snippet);
+            layout.Controls.Add(duplicate, 3, 0);
+            var edit = CreateButton(card.Name + "Edit", "Sửa", FluentButtonKind.Secondary, 64);
+            edit.Height = 30;
+            edit.Click += (_, _) => EditCustomSnippet(snippet.Configuration);
+            layout.Controls.Add(edit, 4, 0);
+            var delete = CreateButton(card.Name + "Delete", "Xóa", FluentButtonKind.Danger, 64);
+            delete.Height = 30;
+            delete.Click += (_, _) => DeleteCustomSnippet(snippet.Configuration);
+            layout.Controls.Add(delete, 5, 0);
+        }
         return card;
+    }
+
+    private void AddCustomSnippet()
+    {
+        using var dialog = new SnippetEditorDialog(
+            null,
+            currentSnapshot.Snippets.Select(snippet => snippet.Trigger).ToArray());
+        if (dialog.ShowDialog(this) == DialogResult.OK && dialog.Result is not null)
+        {
+            ApplySnippetChanges(currentSnapshot.Snippets.Append(dialog.Result).ToArray());
+        }
+    }
+
+    private void DuplicateSnippet(SnippetRow source)
+    {
+        var baseConfiguration = source.Configuration ?? new SnippetConfiguration(
+            ";kcopy",
+            source.Expansion,
+            CaseSensitive: false,
+            PreserveDelimiter: false,
+            Delimiters: " ",
+            AllowedApplications: [],
+            ExcludedApplications: []);
+        var suggestedTrigger = CreateUniqueSnippetTrigger(baseConfiguration.Trigger + "copy");
+        var duplicate = baseConfiguration with { Trigger = suggestedTrigger };
+        using var dialog = new SnippetEditorDialog(
+            duplicate,
+            currentSnapshot.Snippets.Select(snippet => snippet.Trigger).ToArray());
+        if (dialog.ShowDialog(this) == DialogResult.OK && dialog.Result is not null)
+        {
+            ApplySnippetChanges(currentSnapshot.Snippets.Append(dialog.Result).ToArray());
+        }
+    }
+
+    private string CreateUniqueSnippetTrigger(string candidate)
+    {
+        var normalized = candidate.StartsWith(";k", StringComparison.OrdinalIgnoreCase)
+            ? candidate
+            : ";k" + candidate.TrimStart(';');
+        var existing = currentSnapshot.Snippets
+            .Select(snippet => snippet.Trigger)
+            .Concat(SnippetRow.All.Select(snippet => snippet.Trigger))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existing.Contains(normalized))
+        {
+            return normalized;
+        }
+        for (var suffix = 2; suffix < 10_000; suffix++)
+        {
+            var value = normalized + suffix.ToString(CultureInfo.InvariantCulture);
+            if (!existing.Contains(value))
+            {
+                return value;
+            }
+        }
+        return ";kcopy" + Guid.NewGuid().ToString("N")[..8];
+    }
+
+    private void EditCustomSnippet(SnippetConfiguration original)
+    {
+        using var dialog = new SnippetEditorDialog(
+            original,
+            currentSnapshot.Snippets.Select(snippet => snippet.Trigger).ToArray());
+        if (dialog.ShowDialog(this) == DialogResult.OK && dialog.Result is not null)
+        {
+            ApplySnippetChanges(currentSnapshot.Snippets
+                .Select(snippet => ReferenceEquals(snippet, original) || snippet == original ? dialog.Result : snippet)
+                .ToArray());
+        }
+    }
+
+    private void DeleteCustomSnippet(SnippetConfiguration snippet)
+    {
+        var result = MessageBox.Show(
+            this,
+            $"Xóa gõ tắt {snippet.Trigger}?",
+            "Xóa gõ tắt",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (result == DialogResult.Yes)
+        {
+            ApplySnippetChanges(currentSnapshot.Snippets.Where(item => item != snippet).ToArray());
+        }
+    }
+
+    private void ApplySnippetChanges(SnippetConfiguration[] snippets)
+    {
+        actions.SetSnippets(snippets);
+        currentSnapshot = currentSnapshot with { CustomSnippetCount = snippets.Length };
+        currentSnapshot = currentSnapshot with { Snippets = snippets };
+        snippetCount.Text = snippets.Length == 1 ? "1 gõ tắt tùy chỉnh" : $"{snippets.Length} gõ tắt tùy chỉnh";
+        AddSnippetRows();
     }
 
     private void FilterSnippets(string query)
     {
         var normalized = query.Trim();
+        var filterIndex = snippetsFilter.SelectedIndex;
         foreach (Control child in snippetsList.Controls)
         {
             if (child.Tag is not SnippetRow snippet)
             {
                 continue;
             }
-            child.Visible = normalized.Length == 0 ||
+            var textMatches = normalized.Length == 0 ||
                 snippet.Trigger.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
                 snippet.Expansion.Contains(normalized, StringComparison.OrdinalIgnoreCase);
+            var typeMatches = filterIndex switch
+            {
+                1 => snippet.Configuration is null,
+                2 => snippet.Configuration is not null,
+                3 => snippet.Configuration?.Execution is not null,
+                _ => true,
+            };
+            child.Visible = textMatches && typeMatches;
         }
     }
 
@@ -2807,42 +2974,14 @@ public sealed partial class SettingsForm : Form
         return frame;
     }
 
-    private async void SetupTsfButtonClick(object? sender, EventArgs eventArgs)
+    private void SetupTsfButtonClick(object? sender, EventArgs eventArgs)
     {
         if (currentSnapshot.Readiness == KeyinaReadiness.Ready)
         {
             ShowSection("typing");
             return;
         }
-        if (currentSnapshot.Readiness == KeyinaReadiness.Unavailable)
-        {
-            ShowSection("diagnostics");
-            return;
-        }
-
-        setupTsfButton.Enabled = false;
-        setupTsfButton.Text = "Đang thiết lập…";
-        try
-        {
-            diagnosticsResult.Text = await actions.SetupTsf(lifetime.Token).ConfigureAwait(true);
-            ShowSection("diagnostics");
-        }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
-        {
-        }
-        catch (InvalidOperationException exception)
-        {
-            diagnosticsResult.Text = $"Không thể thiết lập: {exception.Message}";
-            ShowSection("diagnostics");
-        }
-        finally
-        {
-            if (!IsDisposed)
-            {
-                setupTsfButton.Enabled = true;
-                ApplySnapshot(currentSnapshot);
-            }
-        }
+        ShowSection("diagnostics");
     }
 
     private void StartTypingDiagnosticCapture()
@@ -3401,7 +3540,9 @@ public sealed partial class SettingsForm : Form
             return;
         }
         var bounds = new Rectangle(0, 0, panel.Width - 1, panel.Height - 1);
-        using var path = FluentDrawing.CreateRoundedRectangle(bounds, 5);
+        using var path = FluentDrawing.CreateRoundedRectangle(
+            bounds,
+            FluentMetrics.ControlCornerRadius);
         using var pen = new Pen(
             panel.ContainsFocus ? palette.Focus : palette.BorderStrong,
             panel.ContainsFocus ? 1.5F : 1F);
@@ -3416,7 +3557,9 @@ public sealed partial class SettingsForm : Form
             return;
         }
         var bounds = new Rectangle(0, 0, label.Width - 1, label.Height - 1);
-        using var path = FluentDrawing.CreateRoundedRectangle(bounds, 5);
+        using var path = FluentDrawing.CreateRoundedRectangle(
+            bounds,
+            FluentMetrics.ControlCornerRadius);
         using var brush = new SolidBrush(palette.SurfaceSecondary);
         using var pen = new Pen(palette.BorderStrong);
         eventArgs.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
@@ -3435,13 +3578,15 @@ public sealed partial class SettingsForm : Form
 
     private static string LocalizeRuntimeStatus(string status)
     {
-        if (status.Contains("Focused app connected", StringComparison.OrdinalIgnoreCase))
+        if (status.Contains("Focused app connected", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("Native resident connected", StringComparison.OrdinalIgnoreCase))
         {
             return "Đã kết nối";
         }
-        if (status.Contains("Registered", StringComparison.OrdinalIgnoreCase))
+        if (status.Contains("Registered", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("Resident active", StringComparison.OrdinalIgnoreCase))
         {
-            return "Đã đăng ký";
+            return "Đang hoạt động";
         }
         if (status.Contains("Unavailable", StringComparison.OrdinalIgnoreCase))
         {
@@ -3468,7 +3613,11 @@ public sealed partial class SettingsForm : Form
         Icon,
     }
 
-    private sealed record SnippetRow(string Trigger, string Expansion, string Scope)
+    private sealed record SnippetRow(
+        string Trigger,
+        string Expansion,
+        string Scope,
+        SnippetConfiguration? Configuration = null)
     {
         public static IReadOnlyList<SnippetRow> All { get; } =
         [

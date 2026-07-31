@@ -68,10 +68,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: files; Name: "{userstartup}\Keyina.lnk"
+
 [Icons]
-Name: "{group}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; WorkingDir: "{app}"
-Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Keyina Settings"; Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; WorkingDir: "{app}"
+Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall
-Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; Description: "Open Keyina settings"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; Description: "Open Keyina settings"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

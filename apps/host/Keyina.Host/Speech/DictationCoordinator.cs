@@ -319,7 +319,8 @@ public sealed class DictationCoordinator : IAsyncDisposable
             focusGeneration: 0);
         if (update.FinalOrdinal > overlay.State.FinalSegments)
         {
-            overlay.Apply(new DictationEvent.FinalReceived());
+            overlay.Apply(new DictationEvent.FinalReceived(
+                aggregator.CommittedText));
         }
     }
 

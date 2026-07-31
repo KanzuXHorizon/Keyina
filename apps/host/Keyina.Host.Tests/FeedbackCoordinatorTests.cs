@@ -1,4 +1,5 @@
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Speech;
 using Keyina.Host.UI.Feedback;
 using Keyina.Host.Windows.Feedback;
 
@@ -39,6 +40,29 @@ internal static class FeedbackCoordinatorTests
 
         AssertEx.Equal(0, overlay.Events.Count);
         AssertEx.Equal(1, sound.Cues.Count);
+    }
+
+    [KeyinaTest("dictation start cue remains audible when fullscreen visual feedback is suppressed")]
+    private static void FullscreenDictationStartKeepsAudioCue()
+    {
+        var overlay = new RecordingOverlay();
+        var sound = new RecordingSoundPlayer();
+        using var coordinator = new FeedbackCoordinator(
+            FeedbackPreferences.Default,
+            new FixedForegroundProbe(ForegroundPresentationState.FullscreenLike),
+            overlay,
+            sound);
+
+        coordinator.Publish(
+            FeedbackEvents.ForDictation(DictationStatus.Connecting)!,
+            suppressVisual: true);
+        coordinator.Publish(
+            FeedbackEvents.ForDictation(DictationStatus.Listening)!,
+            suppressVisual: true);
+
+        AssertEx.Equal(0, overlay.Events.Count);
+        AssertEx.Equal(1, sound.Cues.Count);
+        AssertEx.Equal(FeedbackSoundCue.Start, sound.Cues[0]);
     }
 
     [KeyinaTest("feedback coordinator honors disabled mode")]

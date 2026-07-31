@@ -22,9 +22,13 @@ public sealed record KeyinaRuntimeOptions(
 
     public bool PublishRuntimeProfileOnStartup { get; init; } = true;
 
+    public bool UseNativeResidentHealth { get; init; }
+
     public Func<FocusedUnicodeEnvelopeWriter>? FocusedDictationWriterFactory { get; init; }
 
     public bool DisplayTranslationPreview { get; init; }
+
+    public bool DisplayDictationOverlay { get; init; }
 
     public Func<IForegroundPresentationProbe>? ForegroundPresentationProbeFactory { get; init; }
 
@@ -44,6 +48,7 @@ public sealed record KeyinaRuntimeOptions(
             DisplaySettingsWindows: true)
         {
             DisplayTranslationPreview = true,
+            DisplayDictationOverlay = true,
         };
 
     public static KeyinaRuntimeOptions CreateProductionCommandCompanion() =>
@@ -55,10 +60,12 @@ public sealed record KeyinaRuntimeOptions(
             EnablePipe: false,
             EnableSpeech: true,
             ShowSettingsOnStart: false,
-            DisplaySettingsWindows: false)
+            DisplaySettingsWindows: true)
         {
             PublishRuntimeProfileOnStartup = false,
+            UseNativeResidentHealth = true,
             DisplayTranslationPreview = true,
+            DisplayDictationOverlay = true,
             FocusedDictationWriterFactory = static () =>
                 new FocusedUnicodeEnvelopeWriter(),
         };
@@ -82,6 +89,7 @@ public sealed record KeyinaRuntimeOptions(
             DisplaySettingsWindows: true)
         {
             ExitWhenLastWindowCloses = true,
+            PublishRuntimeProfileOnStartup = false,
         };
 
     public static KeyinaRuntimeOptions CreateSelfTest(

@@ -12,7 +12,7 @@ public static class DictationReducer
             DictationEvent.StartRequested => Start(state),
             DictationEvent.RecognitionStarted => RecognitionStarted(state),
             DictationEvent.PartialUpdated partial => PartialUpdated(state, partial.Text),
-            DictationEvent.FinalReceived => FinalReceived(state),
+            DictationEvent.FinalReceived final => FinalReceived(state, final.CommittedText),
             DictationEvent.StopRequested => StopRequested(state),
             DictationEvent.FinalInserted => FinalInserted(state),
             DictationEvent.Failed failed => Failed(state, failed.ErrorCode),
@@ -25,7 +25,12 @@ public static class DictationReducer
     private static DictationState Start(DictationState state)
     {
         RequireStatus(state, DictationStatus.Idle);
-        return new DictationState(DictationStatus.Connecting, string.Empty, 0, null);
+        return new DictationState(
+            DictationStatus.Connecting,
+            string.Empty,
+            string.Empty,
+            0,
+            null);
     }
 
     private static DictationState RecognitionStarted(DictationState state)
@@ -45,8 +50,11 @@ public static class DictationReducer
         return state with { PartialText = text };
     }
 
-    private static DictationState FinalReceived(DictationState state)
+    private static DictationState FinalReceived(
+        DictationState state,
+        string committedText)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(committedText);
         if (state.Status is not DictationStatus.Listening and not DictationStatus.Finalizing)
         {
             throw InvalidTransition(state, nameof(DictationEvent.FinalReceived));
@@ -55,6 +63,7 @@ public static class DictationReducer
         return state with
         {
             PartialText = string.Empty,
+            CommittedText = committedText,
             FinalSegments = checked(state.FinalSegments + 1),
         };
     }
@@ -68,7 +77,12 @@ public static class DictationReducer
     private static DictationState FinalInserted(DictationState state)
     {
         RequireStatus(state, DictationStatus.Finalizing);
-        return state with { Status = DictationStatus.Inserted, PartialText = string.Empty };
+        return state with
+        {
+            Status = DictationStatus.Inserted,
+            PartialText = string.Empty,
+            CommittedText = string.Empty,
+        };
     }
 
     private static DictationState Failed(DictationState state, string errorCode)
@@ -83,6 +97,7 @@ public static class DictationReducer
         {
             Status = DictationStatus.Error,
             PartialText = string.Empty,
+            CommittedText = string.Empty,
             ErrorCode = errorCode,
         };
     }
@@ -100,6 +115,7 @@ public static class DictationReducer
         {
             Status = DictationStatus.Cancelled,
             PartialText = string.Empty,
+            CommittedText = string.Empty,
         };
     }
 

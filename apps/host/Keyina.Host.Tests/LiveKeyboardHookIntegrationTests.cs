@@ -191,6 +191,15 @@ internal static class LiveKeyboardHookIntegrationTests
                 expectedText: "register",
                 operationName: "embedded tone key in a Latin token");
 
+            TypeWithInterferenceRetry(
+                form,
+                textBox,
+                hook,
+                baselineText: string.Empty,
+                rawText: "process",
+                expectedText: "process",
+                operationName: "double s in a Latin token");
+
             EnsureForeground(form, textBox);
             textBox.Clear();
             hook.Reset();

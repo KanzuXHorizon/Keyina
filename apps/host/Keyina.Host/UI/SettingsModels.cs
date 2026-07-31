@@ -1,4 +1,5 @@
 using Keyina.Host.Core.Applications;
+using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Translation;
@@ -48,6 +49,8 @@ public sealed record SettingsSnapshot(
 
     public ApplicationPreferences Applications { get; init; } = ApplicationPreferences.Default;
 
+    public IReadOnlyList<SnippetConfiguration> Snippets { get; init; } = Array.Empty<SnippetConfiguration>();
+
     public KeyinaReadiness Readiness => ReadinessMapper.Map(Health);
     public static SettingsSnapshot Sample { get; } = new(
         VietnameseEnabled: true,
@@ -72,6 +75,12 @@ public sealed record SettingsSnapshot(
         TranslationTargetLanguage = "VI",
         Hotkeys = HotkeyPreferences.Default,
         Applications = ApplicationPreferences.Default,
+        Snippets =
+        [
+            new(";kmail", "hello@example.com", false, false, " ", [], []),
+            new(";ksig", "Trân trọng,", false, false, " ", [], []),
+            new(";kaddr", "Biên Hòa, Đồng Nai", false, false, " ", [], []),
+        ],
     };
 }
 
@@ -118,6 +127,8 @@ public sealed record SettingsActions(
     public Action<string> ImportSettings { get; init; } = _ => { };
 
     public Action<ApplicationPreferences> SetApplicationPreferences { get; init; } = _ => { };
+
+    public Action<IReadOnlyList<SnippetConfiguration>> SetSnippets { get; init; } = _ => { };
 
     public Func<string?> GetForegroundApplicationName { get; init; } = () => null;
 

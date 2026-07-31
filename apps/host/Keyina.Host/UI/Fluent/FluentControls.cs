@@ -13,6 +13,13 @@ public enum FluentButtonKind
     Danger,
 }
 
+public static class FluentMetrics
+{
+    public const int SurfaceCornerRadius = 0;
+
+    public const int ControlCornerRadius = 0;
+}
+
 public sealed class FluentCard : Panel
 {
     private FluentThemePalette palette = FluentTheme.Current;
@@ -32,7 +39,7 @@ public sealed class FluentCard : Panel
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    public int CornerRadius { get; set; } = 8;
+    public int CornerRadius { get; set; } = FluentMetrics.SurfaceCornerRadius;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool UseSecondarySurface { get; set; }
@@ -273,7 +280,9 @@ public sealed class FluentNavigationButton : Button
         if (selected || hovered || Focused)
         {
             var fill = selected ? palette.SurfacePressed : palette.SurfaceHover;
-            using var path = FluentDrawing.CreateRoundedRectangle(bounds, Scale(5));
+            using var path = FluentDrawing.CreateRoundedRectangle(
+                bounds,
+                Scale(FluentMetrics.ControlCornerRadius));
             using var brush = new SolidBrush(fill);
             eventArgs.Graphics.FillPath(brush, path);
         }
@@ -413,7 +422,9 @@ public sealed class FluentButton : Button
         var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
         var (background, foreground, border) = ResolveColors();
 
-        using (var path = FluentDrawing.CreateRoundedRectangle(bounds, Scale(5)))
+        using (var path = FluentDrawing.CreateRoundedRectangle(
+                   bounds,
+                   Scale(FluentMetrics.ControlCornerRadius)))
         using (var brush = new SolidBrush(background))
         using (var pen = new Pen(border))
         {
@@ -524,7 +535,9 @@ public sealed class FluentStatusBadge : Label
             FluentDrawing.ResolveBackground(this, palette.Surface));
         var tone = FluentTheme.ToneColor(palette, Tone);
         var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-        using (var path = FluentDrawing.CreateRoundedRectangle(bounds, Height / 2))
+        using (var path = FluentDrawing.CreateRoundedRectangle(
+                   bounds,
+                   Scale(FluentMetrics.ControlCornerRadius)))
         using (var brush = new SolidBrush(Color.FromArgb(palette.IsDark ? 38 : 24, tone)))
         using (var pen = new Pen(Color.FromArgb(palette.IsDark ? 96 : 64, tone)))
         {
@@ -543,6 +556,9 @@ public sealed class FluentStatusBadge : Label
             TextFormatFlags.EndEllipsis |
             TextFormatFlags.NoPrefix);
     }
+
+    private int Scale(int logicalPixels) =>
+        Math.Max(0, (int)Math.Round(logicalPixels * DeviceDpi / 96F));
 }
 
 #pragma warning restore CA1725
@@ -564,9 +580,17 @@ internal static class FluentDrawing
 
     public static GraphicsPath CreateRoundedRectangle(Rectangle rectangle, int radius)
     {
-        var clampedRadius = Math.Max(1, Math.Min(radius, Math.Min(rectangle.Width, rectangle.Height) / 2));
-        var diameter = clampedRadius * 2;
         var path = new GraphicsPath();
+        if (radius <= 0)
+        {
+            path.AddRectangle(rectangle);
+            return path;
+        }
+
+        var clampedRadius = Math.Min(
+            radius,
+            Math.Min(rectangle.Width, rectangle.Height) / 2);
+        var diameter = clampedRadius * 2;
         path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
         path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
         path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);

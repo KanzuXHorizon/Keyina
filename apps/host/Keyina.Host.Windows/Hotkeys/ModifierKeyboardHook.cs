@@ -45,6 +45,8 @@ public sealed class ModifierKeyboardHook : IDisposable
 
     public event EventHandler<HotkeyCommand>? CommandReceived;
 
+    public event Action<RawKeyboardEvent>? RawEventReceived;
+
     public void Configure(
         HotkeyPreference modifierGesture,
         HotkeyPreference holdGesture)
@@ -104,6 +106,8 @@ public sealed class ModifierKeyboardHook : IDisposable
         {
             return false;
         }
+
+        RawEventReceived?.Invoke(rawEvent);
 
         var state = Volatile.Read(ref gestureState);
         var keyIndex = (int)rawEvent.Key;

@@ -3,6 +3,7 @@ using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Snippets;
 using Keyina.Host.Core.Translation;
+using System.Text.Json;
 
 namespace Keyina.Host.Core.Configuration;
 
@@ -13,6 +14,39 @@ public enum KeyinaTheme
     Dark,
 }
 
+public sealed record SnippetExecutionConfiguration(
+    string ExecutablePath,
+    string Arguments,
+    string WorkingDirectory,
+    int TimeoutMilliseconds)
+{
+    public const int MinimumTimeoutMilliseconds = 250;
+    public const int MaximumTimeoutMilliseconds = 10_000;
+
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ExecutablePath) ||
+            !Path.IsPathFullyQualified(ExecutablePath) ||
+            !string.Equals(Path.GetExtension(ExecutablePath), ".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Snippet executable path must be an absolute .exe path.", nameof(ExecutablePath));
+        }
+        if (!string.IsNullOrWhiteSpace(WorkingDirectory) &&
+            !Path.IsPathFullyQualified(WorkingDirectory))
+        {
+            throw new ArgumentException("Snippet working directory must be absolute.", nameof(WorkingDirectory));
+        }
+        if (TimeoutMilliseconds is < MinimumTimeoutMilliseconds or > MaximumTimeoutMilliseconds)
+        {
+            throw new ArgumentOutOfRangeException(nameof(TimeoutMilliseconds));
+        }
+        if ((Arguments?.Length ?? 0) > 8_192 || (WorkingDirectory?.Length ?? 0) > 1_024)
+        {
+            throw new ArgumentException("Snippet command fields are too long.");
+        }
+    }
+}
+
 public sealed record SnippetConfiguration(
     string Trigger,
     string Expansion,
@@ -20,7 +54,8 @@ public sealed record SnippetConfiguration(
     bool PreserveDelimiter,
     string Delimiters,
     string[] AllowedApplications,
-    string[] ExcludedApplications)
+    string[] ExcludedApplications,
+    SnippetExecutionConfiguration? Execution = null)
 {
     public SnippetDefinition ToDefinition()
     {
@@ -29,9 +64,19 @@ public sealed record SnippetConfiguration(
             throw new ArgumentException("Snippet delimiters must not be null.", nameof(Delimiters));
         }
 
+        Execution?.Validate();
+        if (Execution is not null && PreserveDelimiter)
+        {
+            throw new ArgumentException(
+                "Command-output snippets cannot preserve the delimiter because output is inserted asynchronously.",
+                nameof(PreserveDelimiter));
+        }
+        var expansion = Execution is null
+            ? Expansion
+            : JsonSerializer.Serialize(Execution);
         return new SnippetDefinition(
             Trigger,
-            Expansion,
+            expansion,
             CaseSensitive,
             PreserveDelimiter,
             Delimiters.ToHashSet(),
@@ -40,7 +85,8 @@ public sealed record SnippetConfiguration(
                 nameof(AllowedApplications))).ToHashSet(StringComparer.OrdinalIgnoreCase),
             (ExcludedApplications ?? throw new ArgumentException(
                 "Excluded application list must not be null.",
-                nameof(ExcludedApplications))).ToHashSet(StringComparer.OrdinalIgnoreCase));
+                nameof(ExcludedApplications))).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            Execution is null ? SnippetCommand.None : SnippetCommand.ExternalOutput);
     }
 }
 

@@ -7,13 +7,14 @@ public static class NativeResidentLauncher
 {
     private const string NativeResidentMutexName = "Local\\Keyina.NativeInput";
 
-    public static bool TryEnsureRunning()
-    {
-        if (IsRunning())
-        {
-            return true;
-        }
+    public static bool TryEnsureRunning() =>
+        IsRunning() || TryLaunch("--background");
 
+    public static bool TryOpenSettings() =>
+        TryLaunch("--open-settings");
+
+    private static bool TryLaunch(string arguments)
+    {
         try
         {
             var executablePath =
@@ -32,7 +33,7 @@ public static class NativeResidentLauncher
             using var process = Process.Start(new ProcessStartInfo
             {
                 FileName = executablePath,
-                Arguments = "--background",
+                Arguments = arguments,
                 WorkingDirectory = workingDirectory,
                 UseShellExecute = true,
             });
@@ -46,7 +47,7 @@ public static class NativeResidentLauncher
         }
     }
 
-    private static bool IsRunning()
+    public static bool IsRunning()
     {
         try
         {

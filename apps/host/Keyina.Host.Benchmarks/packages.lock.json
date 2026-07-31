@@ -15,6 +15,14 @@
           "NAudio.Core": "2.3.0"
         }
       },
+      "keyina.host": {
+        "type": "Project",
+        "dependencies": {
+          "Keyina.Host.Core": "[0.1.6, )",
+          "Keyina.Host.Windows": "[0.1.6, )",
+          "Keyina.Speechmatics": "[0.1.6, )"
+        }
+      },
       "keyina.host.core": {
         "type": "Project"
       },

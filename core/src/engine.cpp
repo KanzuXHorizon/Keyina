@@ -306,6 +306,12 @@ bool HasTrailingToneKey(std::u32string_view raw) noexcept {
   return !raw.empty() && ToneFromKey(raw.back()).has_value();
 }
 
+bool HasRepeatedTrailingLiteralS(std::u32string_view raw) noexcept {
+  return raw.size() >= 2 &&
+         ToAsciiLower(raw[raw.size() - 1]) == U's' &&
+         ToAsciiLower(raw[raw.size() - 2]) == U's';
+}
+
 bool HasSeparatedVowelRuns(std::u32string_view visible) noexcept {
   bool saw_vowel = false;
   bool left_vowel_run = false;
@@ -568,7 +574,11 @@ void Engine::BuildVisibleForRaw() {
   if (guard.transform) {
     ComposeRaw(composition_buffer_);
     if (config_.restore_invalid_word &&
-        composition_buffer_ != literal_text_buffer_) {
+        HasRepeatedTrailingLiteralS(raw_keys_) &&
+        HasSeparatedVowelRuns(composition_buffer_)) {
+      composition_buffer_.assign(raw_keys_);
+    } else if (config_.restore_invalid_word &&
+               composition_buffer_ != literal_text_buffer_) {
       const auto analysis = AnalyzeVietnameseSyllable(composition_buffer_);
       const bool impossible_structure =
           analysis.status == SyllableStatus::Impossible &&

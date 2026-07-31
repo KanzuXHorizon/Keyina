@@ -25,22 +25,25 @@ public sealed class WindowsFeedbackSoundPlayer : IFeedbackSoundPlayer
                 cue => cue,
                 cue => new PinnedWave(FeedbackWaveBuilder.CreateCue(cue)));
 
-    private readonly Func<FeedbackSoundCue, bool> play;
+    private readonly Func<FeedbackSoundCue, bool> playSystemSound;
+    private readonly Func<FeedbackSoundCue, bool> playFallback;
 
     public WindowsFeedbackSoundPlayer()
-        : this(PlayPinnedWave)
+        : this(PlayWindowsSystemSound, PlayPinnedWave)
     {
     }
 
     public WindowsFeedbackSoundPlayer(Func<byte[], bool> playWave)
+        : this(_ => false, cue => playWave(Waves[cue].Bytes))
     {
-        ArgumentNullException.ThrowIfNull(playWave);
-        play = cue => playWave(Waves[cue].Bytes);
     }
 
-    private WindowsFeedbackSoundPlayer(Func<FeedbackSoundCue, bool> play)
+    public WindowsFeedbackSoundPlayer(
+        Func<FeedbackSoundCue, bool> playSystemSound,
+        Func<FeedbackSoundCue, bool> playFallback)
     {
-        this.play = play;
+        this.playSystemSound = playSystemSound ?? throw new ArgumentNullException(nameof(playSystemSound));
+        this.playFallback = playFallback ?? throw new ArgumentNullException(nameof(playFallback));
     }
 
     public void Play(FeedbackSoundCue cue)
@@ -52,7 +55,10 @@ public sealed class WindowsFeedbackSoundPlayer : IFeedbackSoundPlayer
 
         try
         {
-            _ = play(cue);
+            if (!playSystemSound(cue))
+            {
+                _ = playFallback(cue);
+            }
         }
         catch (Exception)
         {
@@ -60,8 +66,22 @@ public sealed class WindowsFeedbackSoundPlayer : IFeedbackSoundPlayer
         }
     }
 
+    private static bool PlayWindowsSystemSound(FeedbackSoundCue cue) =>
+        MessageBeep(cue switch
+        {
+            FeedbackSoundCue.Enabled or FeedbackSoundCue.Start => 0x00000040,
+            FeedbackSoundCue.Success => 0x00000040,
+            FeedbackSoundCue.Disabled or FeedbackSoundCue.Cancel => 0x00000030,
+            FeedbackSoundCue.Error => 0x00000010,
+            _ => 0xFFFFFFFF,
+        });
+
     private static bool PlayPinnedWave(FeedbackSoundCue cue) =>
         PlaySound(Waves[cue].Pointer, IntPtr.Zero, PlaybackFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MessageBeep(uint type);
 
     [DllImport("winmm.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

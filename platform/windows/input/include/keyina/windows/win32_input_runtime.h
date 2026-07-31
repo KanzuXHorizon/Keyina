@@ -45,6 +45,7 @@ class Win32InputRuntime {
   int Run() noexcept;
   void Stop() noexcept;
   void PumpMessagesFor(DWORD duration_milliseconds) noexcept;
+  void RequestOpenSettings() noexcept;
 
   [[nodiscard]] NativeRuntimeStartupStage startup_stage() const noexcept {
     return startup_stage_;
@@ -93,7 +94,15 @@ class Win32InputRuntime {
   void RequestPointerRegistration(bool active) noexcept;
   void ApplyPointerRegistration() noexcept;
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
-  void HandleSnippetCommand(RuntimeSnippetCommand command) noexcept;
+  void HandleSnippetCommand(
+      RuntimeSnippetCommand command,
+      std::u16string_view payload,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
+  [[nodiscard]] bool LaunchExternalSnippetCommand(
+      std::u16string_view payload,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
   [[nodiscard]] bool QueueManagedCommand(RuntimeCommand command) noexcept;
   [[nodiscard]] bool LaunchManagedCommand(RuntimeCommand command) noexcept;
   [[nodiscard]] bool IsCommandCompanionActive() const noexcept;

@@ -20,6 +20,46 @@ internal static class FeedbackSoundPlayerTests
         AssertEx.Equal(0, calls);
     }
 
+    [KeyinaTest("feedback sound player prefers the configured Windows system sound")]
+    private static void SystemSoundIsPreferred()
+    {
+        var systemCalls = 0;
+        var fallbackCalls = 0;
+        var player = new WindowsFeedbackSoundPlayer(
+            _ =>
+            {
+                systemCalls++;
+                return true;
+            },
+            _ =>
+            {
+                fallbackCalls++;
+                return true;
+            });
+
+        player.Play(FeedbackSoundCue.Start);
+
+        AssertEx.Equal(1, systemCalls);
+        AssertEx.Equal(0, fallbackCalls);
+    }
+
+    [KeyinaTest("feedback sound player falls back to the generated wave when Windows playback fails")]
+    private static void SystemSoundFailureUsesFallback()
+    {
+        var fallbackCalls = 0;
+        var player = new WindowsFeedbackSoundPlayer(
+            _ => false,
+            _ =>
+            {
+                fallbackCalls++;
+                return true;
+            });
+
+        player.Play(FeedbackSoundCue.Error);
+
+        AssertEx.Equal(1, fallbackCalls);
+    }
+
     [KeyinaTest("feedback sound player is best effort when native playback fails")]
     private static void NativeFailureDoesNotEscape()
     {

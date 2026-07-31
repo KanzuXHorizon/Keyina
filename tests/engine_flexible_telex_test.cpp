@@ -164,7 +164,8 @@ KEYINA_TEST(restores_tone_keys_embedded_in_latin_tokens) {
 }
 
 KEYINA_TEST(restores_common_latin_tokens_without_dictionary_autocorrection) {
-  constexpr std::array<TelexCase, 9> cases = {{
+  constexpr std::array<TelexCase, 10> cases = {{
+      {U"process", U"process"},
       {U"search", U"search"},
       {U"research", U"research"},
       {U"codex", U"codex"},

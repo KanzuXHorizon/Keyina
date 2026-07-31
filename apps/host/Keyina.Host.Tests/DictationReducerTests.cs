@@ -17,12 +17,19 @@ internal static class DictationReducerTests
         state = DictationReducer.Apply(state, new DictationEvent.PartialUpdated("xin chao"));
         AssertEx.Equal("xin chao", state.PartialText);
 
+        state = DictationReducer.Apply(
+            state,
+            new DictationEvent.FinalReceived("xin chào"));
+        AssertEx.Equal(1, state.FinalSegments);
+        AssertEx.Equal("xin chào", state.CommittedText);
+        AssertEx.Equal("", state.PartialText);
+
+        state = DictationReducer.Apply(state, new DictationEvent.PartialUpdated("thế giới"));
+        AssertEx.Equal("xin chào", state.CommittedText);
+        AssertEx.Equal("thế giới", state.PartialText);
+
         state = DictationReducer.Apply(state, new DictationEvent.StopRequested());
         AssertEx.Equal(DictationStatus.Finalizing, state.Status);
-
-        state = DictationReducer.Apply(state, new DictationEvent.FinalReceived());
-        AssertEx.Equal(1, state.FinalSegments);
-        AssertEx.Equal("", state.PartialText);
 
         state = DictationReducer.Apply(state, new DictationEvent.FinalInserted());
         AssertEx.Equal(DictationStatus.Inserted, state.Status);
@@ -54,12 +61,16 @@ internal static class DictationReducerTests
             DictationReducer.Apply(DictationState.Initial, new DictationEvent.StopRequested()));
         AssertThrows<ArgumentException>(() =>
             DictationReducer.Apply(
-                new DictationState(DictationStatus.Listening, "", 0, null),
+                new DictationState(DictationStatus.Listening, "", "", 0, null),
                 new DictationEvent.PartialUpdated("")));
         AssertThrows<ArgumentException>(() =>
             DictationReducer.Apply(
-                new DictationState(DictationStatus.Listening, "", 0, null),
+                new DictationState(DictationStatus.Listening, "", "", 0, null),
                 new DictationEvent.Failed("")));
+        AssertThrows<ArgumentException>(() =>
+            DictationReducer.Apply(
+                new DictationState(DictationStatus.Listening, "", "", 0, null),
+                new DictationEvent.FinalReceived("")));
     }
 
     private static void AssertThrows<TException>(Action action) where TException : Exception

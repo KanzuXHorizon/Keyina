@@ -38,16 +38,46 @@ internal static class ReadinessTests
         AssertEx.Equal(KeyinaReadiness.Ready, ReadinessMapper.Map(snapshot));
     }
 
-    [KeyinaTest("readiness reports attention when installation exists but runtime connection is broken")]
+    [KeyinaTest("readiness treats an untested running input backend as ready")]
+    private static void UntestedRunningBackendIsReady()
+    {
+        var snapshot = KeyinaHealthSnapshot.Healthy with
+        {
+            EndToEndTypingPassed = false,
+            LastTypingTestAt = null,
+        };
+
+        AssertEx.Equal(KeyinaReadiness.Ready, ReadinessMapper.Map(snapshot));
+    }
+
+    [KeyinaTest("readiness reports attention after an explicit typing test fails")]
     private static void BrokenRuntimeNeedsAttention()
     {
         var snapshot = KeyinaHealthSnapshot.Healthy with
         {
             EndToEndTypingPassed = false,
+            LastTypingTestAt = DateTimeOffset.UtcNow,
         };
 
         AssertEx.Equal(KeyinaReadiness.NeedsAttention, ReadinessMapper.Map(snapshot));
         AssertEx.Equal(TsfSetupState.NeedsRepair, ReadinessMapper.SetupState(snapshot));
+    }
+
+    [KeyinaTest("readiness ignores optional feature failures but keeps input failures")]
+    private static void OnlySystemFailuresAffectReadiness()
+    {
+        AssertEx.False(
+            ReadinessMapper.IsSystemFailureCode("speech_provider_error"),
+            "Speech failure incorrectly degraded input readiness.");
+        AssertEx.False(
+            ReadinessMapper.IsSystemFailureCode("translation_auth_failed"),
+            "Translation failure incorrectly degraded input readiness.");
+        AssertEx.True(
+            ReadinessMapper.IsSystemFailureCode("typing_hook_start_failed"),
+            "Typing hook failure was omitted from input readiness.");
+        AssertEx.True(
+            ReadinessMapper.IsSystemFailureCode("hotkey_start_failed"),
+            "Hotkey failure was omitted from input readiness.");
     }
 
     [KeyinaTest("readiness reports unavailable on unsupported operating systems")]

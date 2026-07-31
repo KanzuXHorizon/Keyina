@@ -20,6 +20,7 @@ enum class RuntimeSnippetCommand : std::uint8_t {
   None = 0,
   ToggleVietnamese = 1,
   ToggleDictation = 2,
+  ExternalOutput = 3,
 };
 
 struct RuntimeSnippetDefinition {

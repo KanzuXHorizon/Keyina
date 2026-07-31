@@ -4,11 +4,10 @@
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <RootNamespace>Keyina.Host.Benchmarks</RootNamespace>
     <AssemblyName>Keyina.Host.Benchmarks</AssemblyName>
-    <Description>Reproducible allocation and latency benchmarks for Keyina host hot paths.</Description>
+    <Description>Deterministic performance benchmarks for Keyina host paths.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
-    <ProjectReference Include="..\Keyina.Host.Windows\Keyina.Host.Windows.csproj" />
-    <ProjectReference Include="..\Keyina.Speechmatics\Keyina.Speechmatics.csproj" />
+    <ProjectReference Include="..\Keyina.Host\Keyina.Host.csproj" />
   </ItemGroup>
 </Project>

@@ -21,6 +21,9 @@ $nativeInput = Join-Path $nativeBuildRoot "platform/windows/input/$Configuration
 $nativeEngine = Join-Path $nativeBuildRoot "platform/windows/hook/$Configuration/KeyinaEngine.dll"
 $managedProject = Join-Path $repositoryRoot 'apps/host/Keyina.Host/Keyina.Host.csproj'
 
+if (Test-Path -LiteralPath $outputPath) {
+    Remove-Item -LiteralPath $outputPath -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 Set-Location $repositoryRoot
 
@@ -29,7 +32,7 @@ $publishArguments = @(
     $managedProject,
     '-c', $Configuration,
     '-r', 'win-x64',
-    '--self-contained', 'false',
+    '--self-contained', 'true',
     '-o', $outputPath
 )
 & dotnet @publishArguments
@@ -63,6 +66,12 @@ foreach ($file in $requiredFiles) {
     $path = Join-Path $outputPath $file
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Publish bundle is missing required file: $file"
+    }
+}
+
+foreach ($requiredRuntimeFile in @('hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $outputPath $requiredRuntimeFile) -PathType Leaf)) {
+        throw "Self-contained publish is missing runtime file: $requiredRuntimeFile"
     }
 }
 

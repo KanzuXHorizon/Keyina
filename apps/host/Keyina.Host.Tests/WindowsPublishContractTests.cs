@@ -27,7 +27,7 @@ internal static class WindowsPublishContractTests
                      "keyina-tray-active.ico",
                      "keyina-tray-inactive.ico",
                      "--self-contained",
-                     "false",
+                     "true",
                  })
         {
             AssertEx.True(
@@ -137,7 +137,7 @@ internal static class WindowsPublishContractTests
                      "KeyinaInput.exe",
                      "Keyina.Host.exe",
                      "Local\\Keyina.NativeInput",
-                     "--companion-settings",
+                     "--open-settings",
                  })
         {
             AssertEx.True(
@@ -151,10 +151,63 @@ internal static class WindowsPublishContractTests
                 line.StartsWith("Filename:", StringComparison.Ordinal) &&
                 line.Contains(
                     "{#MyAppResidentExeName}",
-                    StringComparison.Ordinal));
+                    StringComparison.Ordinal) &&
+                !line.Contains("--open-settings", StringComparison.Ordinal));
         AssertEx.True(
             !residentRunLine.Contains("skipifsilent", StringComparison.OrdinalIgnoreCase),
             "Silent install and upgrade must start the native resident.");
+
+        var settingsLaunchLines = script
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("--open-settings", StringComparison.Ordinal))
+            .ToArray();
+        AssertEx.True(
+            settingsLaunchLines.Length >= 2 && settingsLaunchLines.All(line =>
+                line.Contains("{#MyAppResidentExeName}", StringComparison.Ordinal)),
+            "Installer settings entry points must forward through the native resident.");
+    }
+
+    [KeyinaTest("duplicate native launch forwards settings without creating another resident")]
+    private static void NativeResidentForwardsSettingsToExistingInstance()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "platform",
+            "windows",
+            "input",
+            "native_resident.cpp"));
+
+        foreach (var required in new[]
+                 {
+                     "Local\\\\Keyina.NativeInput",
+                     "--open-settings",
+                     "FindWindowW(kWindowClassName",
+                     "SendMessageTimeoutW(",
+                     "runtime.RequestOpenSettings()",
+                     "kSettingsMenuCommand",
+                 })
+        {
+            AssertEx.True(
+                source.Contains(required, StringComparison.Ordinal),
+                $"Native resident omitted singleton forwarding token: {required}.");
+        }
+    }
+
+    [KeyinaTest("opening the managed executable delegates to the native resident")]
+    private static void ManagedExecutableDelegatesToNativeResident()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "apps",
+            "host",
+            "Keyina.Host",
+            "Program.cs"));
+
+        AssertEx.True(
+            source.Contains(
+                "return NativeResidentLauncher.TryOpenSettings() ? 0 : 1;",
+                StringComparison.Ordinal),
+            "Opening Keyina.Host directly can still create a competing managed resident.");
     }
 
     [KeyinaTest("settings companion restores a missing native resident")]

@@ -8,7 +8,7 @@ public static class FeedbackWaveBuilder
 {
     private const int SampleRate = 22_050;
     private const int HeaderSize = 44;
-    private const double PeakAmplitude = short.MaxValue * 0.16;
+    private const double PeakAmplitude = short.MaxValue * 0.28;
 
     public static byte[] CreateCue(FeedbackSoundCue cue)
     {

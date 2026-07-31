@@ -7,6 +7,7 @@ public enum SnippetCommand
     None,
     ToggleVietnamese,
     ToggleDictation,
+    ExternalOutput,
 }
 
 public sealed record SnippetDefinition(
@@ -67,16 +68,20 @@ public sealed record SnippetDefinition(
         {
             throw new ArgumentException("Snippet application identifiers must not be empty.");
         }
-        if (Command != SnippetCommand.None && Expansion.Length != 0)
+        if (Command is SnippetCommand.ToggleVietnamese or SnippetCommand.ToggleDictation &&
+            Expansion.Length != 0)
         {
-            throw new ArgumentException("Command snippets must not also insert text.", nameof(Expansion));
+            throw new ArgumentException("Built-in command snippets must not also insert text.", nameof(Expansion));
         }
-        if (Command == SnippetCommand.None && Expansion.Length == 0)
+        if (Command is SnippetCommand.None or SnippetCommand.ExternalOutput && Expansion.Length == 0)
         {
-            throw new ArgumentException("Text snippets must provide an expansion.", nameof(Expansion));
+            throw new ArgumentException("Text and external-output snippets must provide a payload.", nameof(Expansion));
         }
 
-        SnippetVariableExpander.Validate(Expansion);
+        if (Command == SnippetCommand.None)
+        {
+            SnippetVariableExpander.Validate(Expansion);
+        }
         return triggerCodePoints;
     }
 }

@@ -219,6 +219,10 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   if (event.virtual_key == kBackspace) {
+    if (boundary_backspace_recovery_available_) {
+      RestoreCommittedCompositionAfterBoundaryBackspace();
+      return {};
+    }
     if (snippet_matcher_.active()) {
       snippet_matcher_.ProcessBackspace();
       engine_.Reset();
@@ -228,6 +232,8 @@ InputDecision ResidentInputController::ProcessKeyDown(
     }
     return {};
   }
+
+  ClearCommittedComposition();
 
   const char32_t delimiter = DelimiterForEvent(event);
   if (delimiter != U'\0' && snippet_matcher_.active()) {
@@ -268,6 +274,7 @@ InputDecision ResidentInputController::ProcessKeyDown(
   TextEditView edit{};
   if (event.virtual_key == kSpace ||
       IsCommitBoundaryCharacter(event.character)) {
+    RememberCommittedComposition();
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::CommitBoundary,
         event.virtual_key == kSpace ? U' ' : event.character,
@@ -314,6 +321,10 @@ InputDecision ResidentInputController::BuildSnippetDecision(
           snippet_insert_buffer_)) {
     return {};
   }
+  if (match.definition->command == RuntimeSnippetCommand::ExternalOutput &&
+      match.definition->preserve_delimiter) {
+    return {};
+  }
   if (match.definition->preserve_delimiter) {
     if (delimiter > 0xFFFF) {
       return {};
@@ -325,7 +336,13 @@ InputDecision ResidentInputController::BuildSnippetDecision(
   decision.suppress = true;
   decision.backspace_count = match.erase_codepoints;
   decision.extended_insert = snippet_insert_buffer_;
+  decision.snippet_command_payload =
+      match.definition->command == RuntimeSnippetCommand::ExternalOutput
+          ? std::u16string_view(match.definition->expansion)
+          : std::u16string_view{};
   decision.snippet_command = match.definition->command;
+  decision.snippet_target_process_id = context_.foreground_process_id;
+  decision.snippet_target_focus_window = context_.focus_window;
   return decision;
 }
 
@@ -350,12 +367,41 @@ InputDecision ResidentInputController::BuildDecision(
   return decision;
 }
 
+void ResidentInputController::RememberCommittedComposition() {
+  committed_raw_keys_.assign(engine_.RawKeys());
+  committed_visible_text_.assign(engine_.VisibleText());
+  boundary_backspace_recovery_available_ = !committed_raw_keys_.empty();
+}
+
+void ResidentInputController::RestoreCommittedCompositionAfterBoundaryBackspace() {
+  boundary_backspace_recovery_available_ = false;
+  engine_.Reset();
+  for (const char32_t character : committed_raw_keys_) {
+    static_cast<void>(engine_.ProcessView(KeyEvent{
+        KeyKind::Character, character, false, false, false}));
+  }
+  if (engine_.VisibleText() != committed_visible_text_) {
+    engine_.Reset();
+  }
+  committed_raw_keys_.clear();
+  committed_visible_text_.clear();
+  snippet_matcher_.Reset();
+  pointer_observation_required_ = !engine_.RawKeys().empty();
+}
+
+void ResidentInputController::ClearCommittedComposition() noexcept {
+  boundary_backspace_recovery_available_ = false;
+  committed_raw_keys_.clear();
+  committed_visible_text_.clear();
+}
+
 void ResidentInputController::ResetEngineState() noexcept {
   engine_.Reset();
   snippet_matcher_.Reset();
   snippet_insert_buffer_.clear();
   suppressed_keys_.Clear();
   pointer_observation_required_ = false;
+  ClearCommittedComposition();
 }
 
 }  // namespace keyina::windows

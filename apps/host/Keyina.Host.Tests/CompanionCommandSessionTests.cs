@@ -136,6 +136,19 @@ internal static class CompanionCommandSessionTests
             "Credential settings companion exited while its window was visible.");
     }
 
+    [KeyinaTest("settings activation uses the same managed companion namespace")]
+    private static void SettingsActivationSharesManagedCompanion()
+    {
+        AssertEx.Equal(
+            CompanionCommandProtocol.MutexName,
+            SettingsCompanionProtocol.MutexName);
+        AssertEx.True(
+            SettingsCompanionProtocol.EventName.StartsWith(
+                "Local\\Keyina.",
+                StringComparison.Ordinal),
+            "Settings activation escaped the current user session namespace.");
+    }
+
     [KeyinaTest("production command companion enables speech without resident hooks tray or pipe")]
     private static void ProductionOptionsAreOnDemand()
     {
@@ -146,7 +159,7 @@ internal static class CompanionCommandSessionTests
         AssertEx.False(options.EnablePipe, "Command companion enabled resident IPC.");
         AssertEx.True(options.EnableSpeech, "Command companion disabled speech support.");
         AssertEx.False(options.ShowSettingsOnStart, "Command companion opened settings.");
-        AssertEx.False(options.DisplaySettingsWindows, "Command companion displayed settings UI.");
+        AssertEx.True(options.DisplaySettingsWindows, "Managed companion could not display settings UI on demand.");
         AssertEx.True(
             options.DisplayTranslationPreview,
             "Command companion hid the translation preview window.");

@@ -40,6 +40,18 @@ internal static class FeedbackWaveBuilderTests
             AssertEx.True(
                 duration <= TimeSpan.FromMilliseconds(180),
                 $"{cue} was too long: {duration.TotalMilliseconds:F1} ms.");
+
+            var peak = Enumerable.Range(0, dataBytes / sizeof(short))
+                .Select(index => Math.Abs((int)BitConverter.ToInt16(
+                    wave,
+                    44 + (index * sizeof(short)))))
+                .Max();
+            AssertEx.True(
+                peak >= 8_500,
+                $"{cue} feedback was too quiet: peak {peak}.");
+            AssertEx.True(
+                peak <= 12_000,
+                $"{cue} feedback was too loud or at clipping risk: peak {peak}.");
         }
     }
 

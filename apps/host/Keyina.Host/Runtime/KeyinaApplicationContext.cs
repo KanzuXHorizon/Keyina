@@ -8,6 +8,7 @@ using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Ipc;
+using Keyina.Host.Core.Snippets;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Core.Translation;
 using Keyina.Host.Speech;
@@ -81,6 +82,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private FocusedUnicodeEnvelopeWriter? focusedDictationWriter;
     private DictationCoordinator? dictationCoordinator;
     private DictationOverlayModel? dictationOverlay;
+    private DictationOverlayForm? dictationOverlayForm;
+    private readonly SnippetSuggestionSession snippetSuggestionSession = new();
+    private SnippetSuggestionOverlayForm? snippetSuggestionOverlayForm;
     private FeedbackCoordinator? feedbackCoordinator;
     private SettingsForm? settingsForm;
     private FirstRunForm? firstRunForm;
@@ -635,7 +639,21 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                             CreateTranslationRegisteredBinding(configuration.Hotkeys),
                             out _);
                 });
+                hotkeysReady = true;
+            }
+            catch (Exception)
+            {
+                hotkeyManager?.Dispose();
+                hotkeyManager = null;
+                hotkeyWindow?.Dispose();
+                hotkeyWindow = null;
+                hotkeysReady = false;
+                translationHotkeyReady = false;
+                ReportFailure("hotkey_start_failed");
+            }
 
+            try
+            {
                 typingHook = new VietnameseKeyboardHook(
                     shouldBypassApplication: processId =>
                         this.applicationExclusions.IsDisabled(
@@ -647,10 +665,12 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     configuration.Hotkeys.ToggleVietnamese,
                     configuration.Hotkeys.PushToTalk);
                 modifierHook.CommandReceived += (_, command) => PostCommand(command);
+                modifierHook.RawEventReceived += rawEvent =>
+                    PostSignal(() => HandleSnippetRawEvent(rawEvent));
+                UpdateSnippetSuggestions();
                 modifierHook.Start();
                 typingHook.Start(configuration.VietnameseEnabled);
                 typingReady = true;
-                hotkeysReady = true;
             }
             catch (Exception)
             {
@@ -659,9 +679,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 typingHook?.Dispose();
                 typingHook = null;
                 typingReady = false;
-                hotkeysReady = false;
-                translationHotkeyReady = false;
-                ReportFailure("hotkey_start_failed");
+                ReportFailure("typing_hook_start_failed");
             }
         }
 
@@ -1121,6 +1139,82 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         RefreshVisualState();
     }
 
+    private void SetSnippets(IReadOnlyList<SnippetConfiguration> snippets)
+    {
+        try
+        {
+            ArgumentNullException.ThrowIfNull(snippets);
+            var candidate = snippets.ToArray();
+            var updated = configuration with { Snippets = candidate };
+            _ = updated.ValidateAndCreateSnippets();
+            configuration = updated;
+            UpdateSnippetSuggestions();
+            _ = SaveConfigurationSafelyAsync();
+            RecoverHost();
+            PublishFeedback(FeedbackEvents.Success("Đã cập nhật gõ tắt"));
+        }
+        catch (ConfigurationValidationException)
+        {
+            ReportFailure("snippet_configuration_invalid");
+            PublishFeedback(FeedbackEvents.Error("Gõ tắt không hợp lệ hoặc bị trùng"));
+        }
+        catch (Exception)
+        {
+            ReportFailure("snippet_configuration_update_failed");
+            PublishFeedback(FeedbackEvents.Error("Không thể cập nhật gõ tắt"));
+        }
+        RefreshVisualState();
+    }
+
+    private void UpdateSnippetSuggestions()
+    {
+        snippetSuggestionSession.UpdateDefinitions(
+            BuiltInSnippets.Create().Concat(configuration.ValidateAndCreateSnippets()));
+    }
+
+    private void HandleSnippetRawEvent(RawKeyboardEvent rawEvent)
+    {
+        if (!rawEvent.IsKeyDown || rawEvent.IsInjected ||
+            applicationExclusions.IsForegroundDisabled(ApplicationFeature.VietnameseTyping))
+        {
+            return;
+        }
+
+        var character = RawKeyToSnippetCharacter(rawEvent.Key);
+        if (character is null)
+        {
+            if (!rawEvent.Key.IsModifier())
+            {
+                snippetSuggestionSession.Reset();
+                snippetSuggestionOverlayForm?.HideOverlay();
+            }
+            return;
+        }
+
+        var suggestions = snippetSuggestionSession.Push(character.Value);
+        if (suggestions.Count == 0)
+        {
+            snippetSuggestionOverlayForm?.HideOverlay();
+            return;
+        }
+
+        snippetSuggestionOverlayForm ??= new SnippetSuggestionOverlayForm();
+        snippetSuggestionOverlayForm.Present(snippetSuggestionSession.Prefix, suggestions);
+    }
+
+    private static char? RawKeyToSnippetCharacter(VirtualKey key) => key switch
+    {
+        VirtualKey.Semicolon => ';',
+        VirtualKey.Backspace => '\b',
+        VirtualKey.Escape => '\u001b',
+        VirtualKey.Space or VirtualKey.Enter or VirtualKey.Tab => ' ',
+        >= VirtualKey.A and <= VirtualKey.Z =>
+            (char)('a' + ((int)key - (int)VirtualKey.A)),
+        >= VirtualKey.D0 and <= VirtualKey.D9 =>
+            (char)('0' + ((int)key - (int)VirtualKey.D0)),
+        _ => null,
+    };
+
     private void SetStartupEnabled(bool enabled)
     {
         try
@@ -1530,7 +1624,23 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             return;
         }
 
-        var status = dictationOverlay.State.Status;
+        var dictationState = dictationOverlay.State;
+        var status = dictationState.Status;
+        if (options.DisplayDictationOverlay)
+        {
+            if (status is DictationStatus.Connecting or
+                DictationStatus.Listening or
+                DictationStatus.Finalizing)
+            {
+                dictationOverlayForm ??= new DictationOverlayForm();
+                dictationOverlayForm.Present(dictationState);
+            }
+            else
+            {
+                dictationOverlayForm?.HideOverlay();
+            }
+        }
+
         if (lastFeedbackDictationStatus == status)
         {
             return;
@@ -1540,18 +1650,25 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         var feedbackEvent = FeedbackEvents.ForDictation(status);
         if (feedbackEvent is not null)
         {
-            PublishFeedback(feedbackEvent);
+            var dedicatedOverlayVisible = options.DisplayDictationOverlay &&
+                status is DictationStatus.Connecting or
+                    DictationStatus.Listening or
+                    DictationStatus.Finalizing;
+            PublishFeedback(feedbackEvent, dedicatedOverlayVisible);
         }
     }
 
-    private void PublishFeedback(FeedbackEvent feedbackEvent)
+    private void PublishFeedback(
+        FeedbackEvent feedbackEvent,
+        bool suppressVisual = false)
     {
         try
         {
             feedbackCoordinator?.Publish(
                 feedbackEvent,
-                suppressVisual: applicationExclusions.IsForegroundDisabled(
-                    ApplicationFeature.VisualFeedback));
+                suppressVisual: suppressVisual ||
+                    applicationExclusions.IsForegroundDisabled(
+                        ApplicationFeature.VisualFeedback));
         }
         catch (Exception)
         {
@@ -1780,6 +1897,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ExportSettings = ExportPortableSettings,
         ImportSettings = ImportPortableSettings,
         SetApplicationPreferences = SetApplicationPreferences,
+        SetSnippets = SetSnippets,
         GetForegroundApplicationName = () =>
             lastExternalApplicationName ??
             applicationExclusions.GetForegroundExecutableName(),
@@ -1841,18 +1959,33 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         libreTranslateCredentialConfigured = !string.IsNullOrWhiteSpace(
             ReadLibreTranslateApiKeySafely());
 
-        var ipcConnected = pipeReady && pipeServer?.ActiveTarget is not null;
+        var nativeResidentRunning = NativeResidentLauncher.IsRunning();
+        var companionMode = options.UseNativeResidentHealth;
+        var ipcConnected = companionMode
+            ? nativeResidentRunning
+            : pipeReady && pipeServer?.ActiveTarget is not null;
+        var effectiveTypingReady = companionMode
+            ? nativeResidentRunning
+            : typingReady;
+        var effectiveHotkeysReady = companionMode
+            ? nativeResidentRunning
+            : hotkeysReady;
+        var nativeBackendPresent = File.Exists(
+            Path.Combine(AppContext.BaseDirectory, "KeyinaEngine.dll"));
+        var systemFailureCode = ReadinessMapper.IsSystemFailureCode(state.ErrorCode)
+            ? state.ErrorCode
+            : null;
         var health = new KeyinaHealthSnapshot(
             OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041),
-            typingReady,
+            nativeBackendPresent,
             ComRegistered: true,
-            TsfProfileRegistered: true,
-            state.ErrorCode is null,
+            TsfProfileRegistered: effectiveTypingReady,
+            HostHealthy: effectiveTypingReady && effectiveHotkeysReady && systemFailureCode is null,
             IpcConnected: ipcConnected,
             EndToEndTypingPassed: endToEndTypingPassed,
             lastTypingTestAt,
             FocusedApplication: null,
-            state.ErrorCode);
+            systemFailureCode);
         var statusMessage = ReadinessMapper.Map(health) == KeyinaReadiness.NeedsAttention &&
             health.FailureCode is not null
                 ? $"{ReadinessMapper.Title(health)} · {health.FailureCode}"
@@ -1867,15 +2000,17 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             configuration.Snippets.Length,
             statusMessage,
             BuildInfo.ProductVersion,
-            ipcConnected
-                ? "Đã kết nối ứng dụng đang nhập"
-                : pipeReady
-                    ? "Đang chờ ứng dụng tương thích"
-                    : "IPC chưa hoạt động",
-            typingReady && hotkeysReady
-                ? "Hook bàn phím đang hoạt động"
-                : "Hook bàn phím chưa khả dụng",
-            typingReady,
+            companionMode
+                ? nativeResidentRunning
+                    ? "Native resident connected"
+                    : "Native resident unavailable"
+                : ipcConnected
+                    ? "Focused app connected"
+                    : pipeReady
+                        ? "Waiting for compatible app"
+                        : "IPC unavailable",
+            effectiveHotkeysReady ? "Resident active" : "Unavailable",
+            effectiveTypingReady,
             configuration.Feedback?.Mode ?? FeedbackMode.Automatic)
         {
             Health = health,
@@ -1888,6 +2023,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
             Hotkeys = configuration.Hotkeys,
             Applications = configuration.Applications,
+            Snippets = configuration.Snippets,
         };
     }
 
@@ -1902,7 +2038,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private void RecordTypingTest(bool passed)
     {
         endToEndTypingPassed = passed;
-        lastTypingTestAt = passed ? DateTimeOffset.UtcNow : null;
+        lastTypingTestAt = DateTimeOffset.UtcNow;
         RefreshVisualState();
     }
 
@@ -2201,6 +2337,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
         CloseSettings();
         CloseTranslationPreview();
+        dictationOverlayForm?.HideOverlay();
+        dictationOverlayForm?.Close();
+        dictationOverlayForm?.Dispose();
+        dictationOverlayForm = null;
+        snippetSuggestionOverlayForm?.HideOverlay();
+        snippetSuggestionOverlayForm?.Close();
+        snippetSuggestionOverlayForm?.Dispose();
+        snippetSuggestionOverlayForm = null;
         firstRunForm?.Close();
         firstRunForm?.Dispose();
         firstRunForm = null;

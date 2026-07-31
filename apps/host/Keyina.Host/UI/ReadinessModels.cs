@@ -43,6 +43,22 @@ public sealed record KeyinaHealthSnapshot(
 
 public static class ReadinessMapper
 {
+    public static bool IsSystemFailureCode(string? errorCode)
+    {
+        if (string.IsNullOrWhiteSpace(errorCode))
+        {
+            return false;
+        }
+
+        return errorCode.StartsWith("input_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("typing_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("hotkey_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("ipc_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("tsf_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("runtime_profile_", StringComparison.Ordinal) ||
+            errorCode.StartsWith("native_", StringComparison.Ordinal);
+    }
+
     public static KeyinaReadiness Map(KeyinaHealthSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -54,8 +70,11 @@ public static class ReadinessMapper
         {
             return KeyinaReadiness.NeedsSetup;
         }
+        var explicitTypingTestFailed =
+            snapshot.LastTypingTestAt is not null &&
+            !snapshot.EndToEndTypingPassed;
         if (!snapshot.HostHealthy ||
-            !snapshot.EndToEndTypingPassed ||
+            explicitTypingTestFailed ||
             snapshot.FailureCode is not null)
         {
             return KeyinaReadiness.NeedsAttention;

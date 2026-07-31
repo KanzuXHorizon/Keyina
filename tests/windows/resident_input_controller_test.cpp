@@ -129,8 +129,12 @@ KEYINA_TEST(resident_input_controller_keeps_embedded_tone_keys_literal_in_latin_
   std::u16string visible;
 
   Type(controller, visible, U"register");
-
   KEYINA_EXPECT_EQ(visible, std::u16string{u"register"});
+
+  controller.Reset();
+  visible.clear();
+  Type(controller, visible, U"process");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"process"});
 }
 
 KEYINA_TEST(resident_input_controller_resets_on_pointer_focus_and_secure_context) {
@@ -193,6 +197,26 @@ KEYINA_TEST(resident_input_controller_disarms_pointer_observation_on_boundary) {
   KEYINA_EXPECT_TRUE(!controller.pointer_observation_required());
 }
 
+KEYINA_TEST(resident_input_controller_restores_word_after_deleting_boundary) {
+  ResidentInputController controller(RuntimeInputProfile{});
+  std::u16string visible;
+
+  Type(controller, visible, U"ba ");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"ba "});
+
+  PhysicalKeyEvent backspace{};
+  backspace.virtual_key = 0x08;
+  backspace.key_down = true;
+  const auto backspace_decision =
+      controller.Process(backspace, kOrdinaryContext);
+  KEYINA_EXPECT_TRUE(!backspace_decision.suppress);
+  visible.pop_back();
+
+  Type(controller, visible, U"or");
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"bảo"});
+}
+
 KEYINA_TEST(resident_input_controller_expands_raw_telex_sensitive_snippet_on_space) {
   RuntimeSnippetProfile snippets{};
   RuntimeSnippetDefinition definition{};
@@ -223,6 +247,34 @@ KEYINA_TEST(resident_input_controller_runs_builtin_commands_even_when_telex_is_o
   KEYINA_EXPECT_TRUE(decision.suppress);
   KEYINA_EXPECT_EQ(decision.snippet_command,
                    RuntimeSnippetCommand::ToggleVietnamese);
+  KEYINA_EXPECT_EQ(visible, std::u16string{});
+}
+
+KEYINA_TEST(resident_input_controller_routes_external_output_payload_without_blocking_hook) {
+  RuntimeSnippetProfile snippets{};
+  RuntimeSnippetDefinition definition{};
+  definition.trigger = U";kcmd";
+  definition.expansion = u"{\"ExecutablePath\":\"C:\\\\Windows\\\\System32\\\\cmd.exe\",\"Arguments\":\"/d /c echo hi\",\"WorkingDirectory\":\"\",\"TimeoutMilliseconds\":1000}";
+  definition.delimiters = U" ";
+  definition.case_sensitive = false;
+  definition.preserve_delimiter = false;
+  definition.command = RuntimeSnippetCommand::ExternalOutput;
+  snippets.entries.push_back(std::move(definition));
+  ResidentInputController controller(RuntimeInputProfile{}, std::move(snippets));
+  std::u16string visible;
+
+  Type(controller, visible, U";kcmd");
+  const auto decision = controller.Process(KeyEvent(U' '), kOrdinaryContext);
+  ApplyDecision(visible, U' ', decision);
+
+  KEYINA_EXPECT_TRUE(decision.suppress);
+  KEYINA_EXPECT_EQ(decision.snippet_command,
+                   RuntimeSnippetCommand::ExternalOutput);
+  KEYINA_EXPECT_TRUE(!decision.snippet_command_payload.empty());
+  KEYINA_EXPECT_EQ(decision.snippet_target_process_id,
+                   kOrdinaryContext.foreground_process_id);
+  KEYINA_EXPECT_EQ(decision.snippet_target_focus_window,
+                   kOrdinaryContext.focus_window);
   KEYINA_EXPECT_EQ(visible, std::u16string{});
 }
 

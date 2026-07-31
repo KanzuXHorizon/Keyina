@@ -40,7 +40,10 @@ struct InputDecision {
   std::uint16_t insert_units{};
   std::array<wchar_t, kMaximumInputInsertUnits> insert{};
   std::u16string_view extended_insert{};
+  std::u16string_view snippet_command_payload{};
   RuntimeSnippetCommand snippet_command{RuntimeSnippetCommand::None};
+  std::uint32_t snippet_target_process_id{};
+  std::uintptr_t snippet_target_focus_window{};
 };
 
 class ResidentInputController {
@@ -88,6 +91,9 @@ class ResidentInputController {
   [[nodiscard]] InputDecision BuildSnippetDecision(
       const RuntimeSnippetMatch& match,
       char32_t delimiter);
+  void RememberCommittedComposition();
+  void RestoreCommittedCompositionAfterBoundaryBackspace();
+  void ClearCommittedComposition() noexcept;
   void ResetEngineState() noexcept;
 
   RuntimeInputProfile profile_{};
@@ -95,10 +101,13 @@ class ResidentInputController {
   RuntimeSnippetProfile snippet_profile_{};
   RuntimeSnippetMatcher snippet_matcher_;
   std::u16string snippet_insert_buffer_;
+  std::u32string committed_raw_keys_;
+  std::u32string committed_visible_text_;
   TypingContext context_{};
   KeyStateSet suppressed_keys_{};
   bool has_context_{false};
   bool pointer_observation_required_{false};
+  bool boundary_backspace_recovery_available_{false};
 };
 
 }  // namespace keyina::windows

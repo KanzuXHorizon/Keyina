@@ -14,11 +14,18 @@ public enum DictationStatus
 public sealed record DictationState(
     DictationStatus Status,
     string PartialText,
+    string CommittedText,
     int FinalSegments,
     string? ErrorCode)
 {
     public static DictationState Initial { get; } =
-        new(DictationStatus.Idle, string.Empty, 0, null);
+        new(DictationStatus.Idle, string.Empty, string.Empty, 0, null);
+
+    public string DisplayText => string.IsNullOrWhiteSpace(PartialText)
+        ? CommittedText
+        : string.IsNullOrWhiteSpace(CommittedText)
+            ? PartialText
+            : $"{CommittedText} {PartialText}";
 }
 
 public abstract record DictationEvent
@@ -33,7 +40,7 @@ public abstract record DictationEvent
 
     public sealed record PartialUpdated(string Text) : DictationEvent;
 
-    public sealed record FinalReceived : DictationEvent;
+    public sealed record FinalReceived(string CommittedText) : DictationEvent;
 
     public sealed record StopRequested : DictationEvent;
 

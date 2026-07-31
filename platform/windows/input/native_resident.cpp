@@ -12,6 +12,30 @@ namespace {
 
 constexpr int kAlreadyRunningExitCode = 17;
 constexpr wchar_t kMutexName[] = L"Local\\Keyina.NativeInput";
+constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
+constexpr UINT kSettingsMenuCommand = 1002;
+constexpr DWORD kCommandForwardTimeoutMilliseconds = 2'000;
+
+bool ForwardSettingsToExistingResident() noexcept {
+  const ULONGLONG deadline =
+      GetTickCount64() + kCommandForwardTimeoutMilliseconds;
+  do {
+    if (HWND existing = FindWindowW(kWindowClassName, nullptr);
+        existing != nullptr) {
+      DWORD_PTR ignored = 0;
+      return SendMessageTimeoutW(
+                 existing,
+                 WM_COMMAND,
+                 static_cast<WPARAM>(kSettingsMenuCommand),
+                 0,
+                 SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                 500,
+                 &ignored) != 0;
+    }
+    Sleep(25);
+  } while (GetTickCount64() < deadline);
+  return false;
+}
 
 std::uint32_t ComputeProfileChecksum(
     const std::array<std::uint8_t, 36>& bytes) noexcept {
@@ -520,6 +544,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--tray-resource-self-test");
   const bool profile_reload_self_test = HasArgument(
       __argc, __wargv, L"--profile-reload-self-test");
+  const bool open_settings = HasArgument(
+      __argc, __wargv, L"--open-settings");
 
   if (self_test) {
     WriteStandardOutput("keyina_input_ready\n");
@@ -540,8 +566,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     return 1;
   }
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    const bool forwarded =
+        !open_settings || ForwardSettingsToExistingResident();
     CloseHandle(mutex);
-    return kAlreadyRunningExitCode;
+    return forwarded ? kAlreadyRunningExitCode : 1;
   }
 
   auto profile = keyina::windows::LoadRuntimeInputProfileOrDefault();
@@ -549,6 +577,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   if (!runtime.Start()) {
     CloseHandle(mutex);
     return 1;
+  }
+  if (open_settings) {
+    runtime.RequestOpenSettings();
   }
   const int exit_code = runtime.Run();
   runtime.Stop();

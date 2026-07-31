@@ -5,8 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <new>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <new>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +58,69 @@ struct Result {
   double allocation_budget;
   bool budget_pass;
 };
+
+struct Options {
+  std::size_t warmup = 20'000;
+  std::size_t iterations = 100'000;
+  std::optional<std::filesystem::path> output_json;
+  std::optional<std::filesystem::path> output_csv;
+};
+
+std::optional<std::size_t> ParseCount(std::string_view value) {
+  try {
+    const auto parsed = std::stoull(std::string{value});
+    if (parsed == 0) {
+      return std::nullopt;
+    }
+    return static_cast<std::size_t>(parsed);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::optional<Options> ParseOptions(int argc, char** argv) {
+  Options options;
+  for (int index = 1; index < argc; ++index) {
+    const std::string_view argument{argv[index]};
+    const auto next_value = [&]() -> std::optional<std::string_view> {
+      if (index + 1 >= argc) {
+        return std::nullopt;
+      }
+      return std::string_view{argv[++index]};
+    };
+
+    if (argument == "--warmup") {
+      const auto value = next_value();
+      const auto parsed = value ? ParseCount(*value) : std::nullopt;
+      if (!parsed) {
+        return std::nullopt;
+      }
+      options.warmup = *parsed;
+    } else if (argument == "--iterations") {
+      const auto value = next_value();
+      const auto parsed = value ? ParseCount(*value) : std::nullopt;
+      if (!parsed) {
+        return std::nullopt;
+      }
+      options.iterations = *parsed;
+    } else if (argument == "--output-json") {
+      const auto value = next_value();
+      if (!value || value->empty()) {
+        return std::nullopt;
+      }
+      options.output_json = std::filesystem::path{*value};
+    } else if (argument == "--output-csv") {
+      const auto value = next_value();
+      if (!value || value->empty()) {
+        return std::nullopt;
+      }
+      options.output_csv = std::filesystem::path{*value};
+    } else {
+      return std::nullopt;
+    }
+  }
+  return options;
+}
 
 std::string JsonEscape(std::string_view value) {
   std::string escaped;
@@ -198,9 +265,16 @@ void TypePrefix(keyina::Engine& engine, std::u32string_view prefix) {
 
 }  // namespace
 
-int main() {
-  constexpr std::size_t kWarmup = 20'000;
-  constexpr std::size_t kIterations = 100'000;
+int main(int argc, char** argv) {
+  const auto options = ParseOptions(argc, argv);
+  if (!options) {
+    std::cerr << "Usage: keyina_bench [--warmup N] [--iterations N] "
+                 "[--output-json PATH] [--output-csv PATH]\n";
+    return 2;
+  }
+
+  const std::size_t kWarmup = options->warmup;
+  const std::size_t kIterations = options->iterations;
   std::uint64_t checksum = 0;
   std::vector<Result> results;
   results.reserve(12);
@@ -337,35 +411,69 @@ int main() {
       },
       kWarmup, kIterations, checksum));
 
-  std::cout << "{\n"
-            << "  \"schema_version\": 2,\n"
-            << "  \"environment\": {\n"
-            << "    \"os\": \"" << JsonEscape(OperatingSystem()) << "\",\n"
-            << "    \"processor\": \"" << JsonEscape(Processor()) << "\",\n"
-            << "    \"compiler\": \"" << JsonEscape(CompilerName()) << "\",\n"
-            << "    \"build_type\": \"" << JsonEscape(BuildType()) << "\",\n"
-            << "    \"warmup_iterations\": " << kWarmup << ",\n"
-            << "    \"measured_iterations\": " << kIterations << "\n"
-            << "  },\n"
-            << "  \"cases\": [\n";
+  std::ostringstream json;
+  json << "{\n"
+       << "  \"schema_version\": 3,\n"
+       << "  \"environment\": {\n"
+       << "    \"os\": \"" << JsonEscape(OperatingSystem()) << "\",\n"
+       << "    \"processor\": \"" << JsonEscape(Processor()) << "\",\n"
+       << "    \"compiler\": \"" << JsonEscape(CompilerName()) << "\",\n"
+       << "    \"build_type\": \"" << JsonEscape(BuildType()) << "\",\n"
+       << "    \"warmup_iterations\": " << kWarmup << ",\n"
+       << "    \"measured_iterations\": " << kIterations << "\n"
+       << "  },\n"
+       << "  \"cases\": [\n";
 
   for (std::size_t index = 0; index < results.size(); ++index) {
     const auto& result = results[index];
-    std::cout << "    {\"name\": \"" << JsonEscape(result.name)
-              << "\", \"median_ns\": " << result.median_ns
-              << ", \"p95_ns\": " << result.p95_ns
-              << ", \"p99_ns\": " << result.p99_ns
-              << ", \"max_ns\": " << result.maximum_ns
-              << ", \"allocations_per_operation\": "
-              << result.allocations_per_operation
-              << ", \"allocation_budget\": " << result.allocation_budget
-              << ", \"budget_pass\": "
-              << (result.budget_pass ? "true" : "false") << "}";
-    std::cout << (index + 1 == results.size() ? "\n" : ",\n");
+    json << "    {\"name\": \"" << JsonEscape(result.name)
+         << "\", \"median_ns\": " << result.median_ns
+         << ", \"p95_ns\": " << result.p95_ns
+         << ", \"p99_ns\": " << result.p99_ns
+         << ", \"max_ns\": " << result.maximum_ns
+         << ", \"allocations_per_operation\": "
+         << result.allocations_per_operation
+         << ", \"allocation_budget\": " << result.allocation_budget
+         << ", \"budget_pass\": "
+         << (result.budget_pass ? "true" : "false") << "}";
+    json << (index + 1 == results.size() ? "\n" : ",\n");
   }
-  std::cout << "  ],\n"
-            << "  \"checksum\": " << checksum << "\n"
-            << "}\n";
+  json << "  ],\n"
+       << "  \"checksum\": " << checksum << "\n"
+       << "}\n";
+
+  std::ostringstream csv;
+  csv << "name,median_ns,p95_ns,p99_ns,max_ns,allocations_per_operation,"
+         "allocation_budget,budget_pass\n";
+  for (const auto& result : results) {
+    csv << result.name << ',' << result.median_ns << ',' << result.p95_ns << ','
+        << result.p99_ns << ',' << result.maximum_ns << ','
+        << result.allocations_per_operation << ',' << result.allocation_budget
+        << ',' << (result.budget_pass ? "true" : "false") << '\n';
+  }
+
+  std::cout << json.str();
+  const auto write_file = [](const std::filesystem::path& path,
+                             const std::string& contents) {
+    if (path.has_parent_path()) {
+      std::filesystem::create_directories(path.parent_path());
+    }
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output << contents;
+  };
+
+  try {
+    if (options->output_json) {
+      write_file(*options->output_json, json.str());
+    }
+    if (options->output_csv) {
+      write_file(*options->output_csv, csv.str());
+    }
+  } catch (const std::exception& error) {
+    std::cerr << "Failed to write benchmark report: " << error.what() << '\n';
+    return 3;
+  }
   return std::all_of(results.begin(), results.end(),
                      [](const Result& result) { return result.budget_pass; })
              ? 0

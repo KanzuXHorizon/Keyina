@@ -81,6 +81,7 @@ public sealed class WindowsStartupRegistration
 
     public void SetEnabled(bool enabled)
     {
+        RemoveLegacyStartupShortcut();
         if (enabled)
         {
             using var key = Registry.CurrentUser.CreateSubKey(
@@ -96,5 +97,37 @@ public sealed class WindowsStartupRegistration
             StartupRegistrationDefaults.RegistryPath,
             writable: true);
         existing?.DeleteValue(valueName, throwOnMissingValue: false);
+    }
+
+    private void RemoveLegacyStartupShortcut()
+    {
+        if (!string.Equals(
+                valueName,
+                StartupRegistrationDefaults.ValueName,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var startupDirectory = Environment.GetFolderPath(
+            Environment.SpecialFolder.Startup);
+        if (string.IsNullOrWhiteSpace(startupDirectory))
+        {
+            return;
+        }
+
+        var legacyShortcut = Path.Combine(startupDirectory, "Keyina.lnk");
+        try
+        {
+            File.Delete(legacyShortcut);
+        }
+        catch (IOException)
+        {
+            // The current-user Run registration remains authoritative.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Startup cleanup must never prevent the option from being changed.
+        }
     }
 }
