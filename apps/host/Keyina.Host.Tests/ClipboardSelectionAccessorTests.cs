@@ -53,6 +53,28 @@ internal static class ClipboardSelectionAccessorTests
         AssertEx.Equal("Đoạn đã chọn", capture.Text);
     }
 
+    [KeyinaTest("clipboard selection capture retries a swallowed copy shortcut while focus stays stable")]
+    private static void CaptureRetriesSwallowedCopyShortcut()
+    {
+        var platform = new FakeClipboardPlatform
+        {
+            ForegroundWindow = (nint)42,
+            FocusedWindow = (nint)420,
+            ClipboardSequence = 10,
+            SelectedText = "Xin chào",
+            CopyAttemptsBeforeClipboardChange = 1,
+        };
+        var accessor = new ClipboardSelectionAccessor(platform);
+
+        var capture = accessor.CaptureAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        AssertEx.NotNull(capture, "Selection was lost after the first copy shortcut was swallowed.");
+        AssertEx.Equal("Xin chào", capture!.Text);
+        AssertEx.Equal(2, platform.CopyShortcutCount);
+        AssertEx.Equal(1, platform.RestoreCount);
+    }
+
     [KeyinaTest("clipboard selection capture returns no selection when copy produces no Unicode text")]
     private static void EmptyCopyReturnsNoSelection()
     {
@@ -91,6 +113,54 @@ internal static class ClipboardSelectionAccessorTests
         AssertEx.NotNull(capture, "Transient clipboard read was not retried.");
         AssertEx.True(platform.DelayCount > 0, "Clipboard retry did not wait between attempts.");
         AssertEx.Equal(1, platform.RestoreCount);
+    }
+
+    [KeyinaTest("live clipboard selection capture remains reliable in a real focused textbox")]
+    private static void LiveCaptureRemainsReliableInFocusedTextbox()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("KEYINA_RUN_LIVE_CLIPBOARD_TEST"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        using var form = new Form
+        {
+            Text = "Keyina live clipboard target",
+            Width = 640,
+            Height = 240,
+            StartPosition = FormStartPosition.CenterScreen,
+            TopMost = true,
+        };
+        using var textBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            Text = "Xin chào",
+        };
+        form.Controls.Add(textBox);
+        form.Show();
+        var accessor = new ClipboardSelectionAccessor();
+
+        for (var attempt = 1; attempt <= 10; attempt++)
+        {
+            form.Activate();
+            textBox.Focus();
+            textBox.SelectAll();
+            Application.DoEvents();
+            Thread.Sleep(100);
+
+            var capture = accessor.CaptureAsync(CancellationToken.None)
+                .GetAwaiter().GetResult();
+            AssertEx.NotNull(
+                capture,
+                $"Real textbox selection was not captured on attempt {attempt}.");
+            AssertEx.Equal("Xin chào", capture!.Text);
+            AssertEx.Equal(form.Handle, capture.ForegroundWindow);
+            AssertEx.Equal(textBox.Handle, capture.FocusedWindow);
+        }
     }
 
     [KeyinaTest("clipboard replacement is blocked after foreground window or focused control changes")]
@@ -208,6 +278,8 @@ internal static class ClipboardSelectionAccessorTests
 
         public int CopyShortcutCount { get; private set; }
 
+        public int CopyAttemptsBeforeClipboardChange { get; init; }
+
         public int RestoreCount { get; private set; }
 
         public object? RestoredClipboard { get; private set; }
@@ -251,7 +323,10 @@ internal static class ClipboardSelectionAccessorTests
         public void SendCopyShortcut()
         {
             CopyShortcutCount++;
-            ClipboardSequence++;
+            if (CopyShortcutCount > CopyAttemptsBeforeClipboardChange)
+            {
+                ClipboardSequence++;
+            }
         }
 
         public void SelectPreviousText(int textElementCount) =>

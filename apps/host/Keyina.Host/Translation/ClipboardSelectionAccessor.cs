@@ -37,6 +37,7 @@ public interface IClipboardSelectionPlatform
 public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
 {
     private const int ClipboardRetryAttempts = 6;
+    private const int CopyShortcutAttempts = 3;
     private const int CopyPollAttempts = 20;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan HotkeyReleaseDelay = TimeSpan.FromMilliseconds(60);
@@ -75,33 +76,45 @@ public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
             await platform.DelayAsync(HotkeyReleaseDelay, cancellationToken)
                 .ConfigureAwait(true);
 
-            if (platform.GetForegroundWindow() != foregroundWindow)
+            for (var copyAttempt = 0;
+                 copyAttempt < CopyShortcutAttempts;
+                 copyAttempt++)
             {
-                return null;
-            }
-
-            var sequenceBeforeCopy = platform.GetClipboardSequenceNumber();
-            platform.SendCopyShortcut();
-
-            for (var attempt = 0; attempt < CopyPollAttempts; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (platform.GetClipboardSequenceNumber() != sequenceBeforeCopy)
+                if (!HasCapturedFocus(foregroundWindow, focusedWindow))
                 {
-                    var text = await RetryClipboardAsync(
-                            platform.ReadUnicodeText,
-                            cancellationToken)
-                        .ConfigureAwait(true);
-                    return string.IsNullOrWhiteSpace(text)
-                        ? null
-                        : new SelectedTextCapture(
-                            text,
-                            foregroundWindow,
-                            focusedWindow);
+                    return null;
                 }
 
-                await platform.DelayAsync(RetryDelay, cancellationToken)
-                    .ConfigureAwait(true);
+                var sequenceBeforeCopy = platform.GetClipboardSequenceNumber();
+                platform.SendCopyShortcut();
+
+                for (var pollAttempt = 0;
+                     pollAttempt < CopyPollAttempts;
+                     pollAttempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (platform.GetClipboardSequenceNumber() != sequenceBeforeCopy)
+                    {
+                        if (!HasCapturedFocus(foregroundWindow, focusedWindow))
+                        {
+                            return null;
+                        }
+
+                        var text = await RetryClipboardAsync(
+                                platform.ReadUnicodeText,
+                                cancellationToken)
+                            .ConfigureAwait(true);
+                        return string.IsNullOrWhiteSpace(text)
+                            ? null
+                            : new SelectedTextCapture(
+                                text,
+                                foregroundWindow,
+                                focusedWindow);
+                    }
+
+                    await platform.DelayAsync(RetryDelay, cancellationToken)
+                        .ConfigureAwait(true);
+                }
             }
 
             return null;
@@ -233,8 +246,27 @@ public sealed class ClipboardSelectionAccessor : ISelectedTextAccessor
     }
 
     private bool HasCapturedFocus(SelectedTextCapture selectedText) =>
-        platform.GetForegroundWindow() == selectedText.ForegroundWindow &&
-        platform.GetFocusedWindow() == selectedText.FocusedWindow;
+        HasCapturedFocus(
+            selectedText.ForegroundWindow,
+            selectedText.FocusedWindow);
+
+    private bool HasCapturedFocus(
+        nint foregroundWindow,
+        nint focusedWindow)
+    {
+        var currentForeground = platform.GetForegroundWindow();
+        if (currentForeground != foregroundWindow)
+        {
+            return false;
+        }
+
+        var currentFocus = platform.GetFocusedWindow();
+        if (currentFocus == nint.Zero)
+        {
+            currentFocus = currentForeground;
+        }
+        return currentFocus == focusedWindow;
+    }
 
     private async Task<T> RetryClipboardAsync<T>(
         Func<T> action,

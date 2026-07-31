@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Runtime;
 
@@ -76,6 +77,36 @@ internal static class CompanionCommandSessionTests
                 CompanionCommand.CancelActiveCommand));
     }
 
+    [KeyinaTest("command companion starts without a WinForms bootstrap crash")]
+    private static void StartsWithoutWinFormsBootstrapCrash()
+    {
+        var executable = Path.Combine(AppContext.BaseDirectory, "Keyina.Host.exe");
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = executable,
+            Arguments = CompanionCommandProtocol.ToArgument(
+                CompanionCommand.CancelActiveCommand),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+        });
+        AssertEx.NotNull(process, "Command companion process did not start.");
+
+        var exited = process!.WaitForExit(milliseconds: 10_000);
+        if (!exited)
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        AssertEx.True(exited, "Command companion did not exit after an idle command.");
+
+        var standardError = process.StandardError.ReadToEnd();
+        AssertEx.Equal(
+            0,
+            process.ExitCode,
+            $"Command companion crashed during WinForms startup: {standardError}");
+    }
+
     [KeyinaTest("command companion exits only when no transient work remains")]
     private static void ExitPolicyRetainsOnlyActiveWork()
     {
@@ -107,6 +138,9 @@ internal static class CompanionCommandSessionTests
         AssertEx.True(options.EnableSpeech, "Command companion disabled speech support.");
         AssertEx.False(options.ShowSettingsOnStart, "Command companion opened settings.");
         AssertEx.False(options.DisplaySettingsWindows, "Command companion displayed settings UI.");
+        AssertEx.True(
+            options.DisplayTranslationPreview,
+            "Command companion hid the translation preview window.");
         AssertEx.False(
             options.PublishRuntimeProfileOnStartup,
             "Command companion could overwrite the native toggle before applying it.");

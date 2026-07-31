@@ -24,6 +24,8 @@ public sealed record KeyinaRuntimeOptions(
 
     public Func<FocusedUnicodeEnvelopeWriter>? FocusedDictationWriterFactory { get; init; }
 
+    public bool DisplayTranslationPreview { get; init; }
+
     public Func<IForegroundPresentationProbe>? ForegroundPresentationProbeFactory { get; init; }
 
     public Func<IFeedbackOverlay>? FeedbackOverlayFactory { get; init; }
@@ -39,7 +41,10 @@ public sealed record KeyinaRuntimeOptions(
             EnablePipe: true,
             EnableSpeech: true,
             ShowSettingsOnStart: showSettingsOnStart,
-            DisplaySettingsWindows: true);
+            DisplaySettingsWindows: true)
+        {
+            DisplayTranslationPreview = true,
+        };
 
     public static KeyinaRuntimeOptions CreateProductionCommandCompanion() =>
         new(
@@ -53,6 +58,7 @@ public sealed record KeyinaRuntimeOptions(
             DisplaySettingsWindows: false)
         {
             PublishRuntimeProfileOnStartup = false,
+            DisplayTranslationPreview = true,
             FocusedDictationWriterFactory = static () =>
                 new FocusedUnicodeEnvelopeWriter(),
         };

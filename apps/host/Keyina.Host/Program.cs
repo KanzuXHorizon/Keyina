@@ -184,6 +184,7 @@ internal static class Program
             return passed ? 0 : 1;
         }
 
+        ApplicationConfiguration.Initialize();
         FluentTheme.InitializeApplicationColorMode();
 
         var companionCommandArgument = args.FirstOrDefault(argument =>
@@ -205,7 +206,6 @@ internal static class Program
 
             try
             {
-                ApplicationConfiguration.Initialize();
                 using var context = new KeyinaApplicationContext(
                     KeyinaRuntimeOptions.CreateProductionCommandCompanion());
                 using var session = new CompanionCommandSession(context);
@@ -229,7 +229,6 @@ internal static class Program
                 Console.Error.WriteLine("--render-settings-gallery requires an output directory.");
                 return 2;
             }
-            ApplicationConfiguration.Initialize();
             var outputDirectory = Path.GetFullPath(args[galleryIndex + 1]);
             var paths = SettingsScreenshotRenderer.RenderGallery(
                 outputDirectory,
@@ -252,7 +251,6 @@ internal static class Program
 
             using (settingsGuard)
             {
-                ApplicationConfiguration.Initialize();
                 using var context = new KeyinaApplicationContext(
                     KeyinaRuntimeOptions.CreateProductionSettingsCompanion());
                 Application.Run(context);
@@ -267,7 +265,6 @@ internal static class Program
 
         using (guard)
         {
-            ApplicationConfiguration.Initialize();
             using var context = new KeyinaApplicationContext(
                 KeyinaRuntimeOptions.CreateProduction(
                     showSettingsOnStart: args.Contains("--show-settings", StringComparer.Ordinal)));

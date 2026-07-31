@@ -1337,7 +1337,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             CopyTranslationPreview,
             () => PublishFeedback(FeedbackEvents.TranslationCancelled()));
         translationPreviewForm.FormClosed += (_, _) => translationPreviewForm = null;
-        if (options.DisplaySettingsWindows)
+        if (options.DisplayTranslationPreview)
         {
             translationPreviewForm.Show();
             translationPreviewForm.Activate();
