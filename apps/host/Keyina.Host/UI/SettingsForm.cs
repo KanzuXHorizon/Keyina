@@ -1690,7 +1690,7 @@ public sealed partial class SettingsForm : Form
         var stack = CreateVerticalStack("snippetsStack");
         page.Controls.Add(stack);
 
-        var library = CreateCard("snippetsLibraryCard", 420);
+        var library = CreateCard("snippetsLibraryCard", 490);
         var libraryLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -1735,7 +1735,7 @@ public sealed partial class SettingsForm : Form
         snippetFooter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var snippetNote = CreateLabel(
             "snippetPrivacyNote",
-            "Tự động bỏ qua trường bảo mật và kiểm tra Unicode trước khi mở rộng.",
+            "Gõ trigger rồi nhấn Space. Mỗi snippet có thể giữ hoặc nuốt phím kích hoạt; trường bảo mật luôn được bỏ qua.",
             LabelRole.Tertiary);
         snippetNote.Dock = DockStyle.Fill;
         snippetNote.TextAlign = ContentAlignment.MiddleLeft;
@@ -3431,10 +3431,11 @@ public sealed partial class SettingsForm : Form
     {
         public static IReadOnlyList<SnippetRow> All { get; } =
         [
-            new(";kvi", "Bật hoặc tắt bộ gõ tiếng Việt", "Lệnh"),
-            new(";kvoice", "Bắt đầu hoặc dừng nhập bằng giọng nói", "Lệnh"),
-            new(";kdate", "Ngày hiện tại", "Biến"),
-            new(";ktime", "Giờ hiện tại", "Biến"),
+            new(";kvi", "Bật hoặc tắt bộ gõ tiếng Việt", "Lệnh · nuốt Space"),
+            new(";kvoice", "Bắt đầu hoặc dừng nhập bằng giọng nói", "Lệnh · nuốt Space"),
+            new(";kdate", "${date} → ngày hiện tại", "Biến · giữ Space"),
+            new(";ktime", "${time} → giờ hiện tại", "Biến · giữ Space"),
+            new(";kdatetime", "${datetime} → ngày và giờ", "Biến · giữ Space"),
         ];
     }
 }

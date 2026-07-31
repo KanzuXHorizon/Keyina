@@ -89,7 +89,8 @@ The older Windows Text Services Framework implementation remains optional behind
 - Familiar, fully configurable global shortcuts with transactional conflict rollback; command work is posted off the hook callback.
 - Settings and onboarding run in an on-demand .NET 10 WinForms companion with Fluent-inspired light, dark, and high-contrast UI.
 - Settings publish a checksummed 36-byte runtime profile atomically; the native resident reloads it without restarting.
-- Deterministic snippets, secure-input bypass, onboarding, credential-free settings import/export, and per-application exclusions for typing, speech, translation, and visual feedback.
+- Deterministic native snippets match raw triggers before Telex and activate on an explicit delimiter such as Space. Each snippet can keep or consume that delimiter; `${date}`, `${time}`, and `${datetime}` expand locally at activation time.
+- Secure-input snippet bypass, onboarding, credential-free settings import/export, and per-application exclusions for typing, speech, translation, and visual feedback.
 - Optional Speechmatics Vietnamese dictation uses focus-locked direct Unicode delivery and Windows Credential Manager storage.
 - Provider-neutral selection translation uses DeepL with an optional user-configured LibreTranslate fallback, preview, one-shot undo, exact protection for code/URLs/placeholders, focus guarding, bounded requests, and separate Credential Manager storage.
 - Deterministic generated icons, lockups, screenshot gallery, resource gates, live typing self-tests, portable ZIP, and a per-user Windows installer pipeline.

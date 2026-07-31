@@ -9,7 +9,9 @@ function(keyina_configure_target target)
       /W4
       /permissive-
       /utf-8
+      /FS
       /EHsc
+      /FS
       /Zc:__cplusplus
       $<$<BOOL:${KEYINA_WARNINGS_AS_ERRORS}>:/WX>
       $<$<BOOL:${KEYINA_ENABLE_SANITIZERS}>:/fsanitize=address>

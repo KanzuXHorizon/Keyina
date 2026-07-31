@@ -11,6 +11,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace keyina::windows {
 namespace {
@@ -204,7 +207,8 @@ bool IsFullscreenWindow(HWND window) noexcept {
          window_rect.bottom >= monitor_info.rcMonitor.bottom - tolerance;
 }
 
-bool ResolveRuntimeInputProfilePath(
+bool ResolveRuntimeProfilePath(
+    const wchar_t* file_name,
     std::array<wchar_t, 32768>& path) noexcept {
   std::array<wchar_t, 32768> local_app_data{};
   const DWORD length = GetEnvironmentVariableW(
@@ -217,8 +221,19 @@ bool ResolveRuntimeInputProfilePath(
   return swprintf_s(
              path.data(),
              path.size(),
-             L"%ls\\Keyina\\runtime-input.bin",
-             local_app_data.data()) > 0;
+             L"%ls\\Keyina\\%ls",
+             local_app_data.data(),
+             file_name) > 0;
+}
+
+bool ResolveRuntimeInputProfilePath(
+    std::array<wchar_t, 32768>& path) noexcept {
+  return ResolveRuntimeProfilePath(L"runtime-input.bin", path);
+}
+
+bool ResolveRuntimeSnippetProfilePath(
+    std::array<wchar_t, 32768>& path) noexcept {
+  return ResolveRuntimeProfilePath(L"runtime-snippets.bin", path);
 }
 
 bool TryReadRuntimeInputProfile(
@@ -256,6 +271,120 @@ bool TryReadRuntimeInputProfile(
   return true;
 }
 
+bool TryReadRuntimeSnippetProfile(
+    const wchar_t* path,
+    RuntimeSnippetProfile& profile) noexcept {
+  HANDLE file = CreateFileW(
+      path,
+      GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  LARGE_INTEGER size{};
+  if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 ||
+      size.QuadPart > static_cast<LONGLONG>(
+                          kMaximumRuntimeSnippetProfileBytes)) {
+    CloseHandle(file);
+    return false;
+  }
+
+  std::vector<std::byte> bytes(static_cast<std::size_t>(size.QuadPart));
+  DWORD read = 0;
+  const BOOL success = ReadFile(
+      file,
+      bytes.data(),
+      static_cast<DWORD>(bytes.size()),
+      &read,
+      nullptr);
+  CloseHandle(file);
+  if (!success || read != bytes.size()) {
+    return false;
+  }
+
+  auto decoded = DecodeRuntimeSnippetProfile(bytes);
+  if (!decoded) {
+    return false;
+  }
+  profile = std::move(decoded.profile);
+  return true;
+}
+
+RuntimeSnippetProfile LoadRuntimeSnippetProfileOrDefault() noexcept {
+  RuntimeSnippetProfile profile = DefaultRuntimeSnippetProfile();
+  std::array<wchar_t, 32768> path{};
+  if (ResolveRuntimeSnippetProfilePath(path)) {
+    static_cast<void>(TryReadRuntimeSnippetProfile(path.data(), profile));
+  }
+  return profile;
+}
+
+std::uint64_t HashApplicationIdForProcess(DWORD process_id) noexcept {
+  HANDLE process = OpenProcess(
+      PROCESS_QUERY_LIMITED_INFORMATION,
+      FALSE,
+      process_id);
+  if (process == nullptr) {
+    return 0;
+  }
+
+  std::array<wchar_t, 32768> path{};
+  DWORD length = static_cast<DWORD>(path.size());
+  const BOOL queried = QueryFullProcessImageNameW(
+      process,
+      0,
+      path.data(),
+      &length);
+  CloseHandle(process);
+  if (!queried || length == 0 || length >= path.size()) {
+    return 0;
+  }
+
+  std::wstring_view full_path(path.data(), length);
+  const std::size_t separator = full_path.find_last_of(L"\\/");
+  const std::wstring_view file_name = separator == std::wstring_view::npos
+                                          ? full_path
+                                          : full_path.substr(separator + 1);
+  if (file_name.empty()) {
+    return 0;
+  }
+
+  std::array<wchar_t, 32768> upper{};
+  if (file_name.size() >= upper.size()) {
+    return 0;
+  }
+  std::copy(file_name.begin(), file_name.end(), upper.begin());
+  if (CharUpperBuffW(upper.data(), static_cast<DWORD>(file_name.size())) == 0) {
+    return 0;
+  }
+
+  std::array<char, 65536> utf8{};
+  const int utf8_length = WideCharToMultiByte(
+      CP_UTF8,
+      WC_ERR_INVALID_CHARS,
+      upper.data(),
+      static_cast<int>(file_name.size()),
+      utf8.data(),
+      static_cast<int>(utf8.size()),
+      nullptr,
+      nullptr);
+  if (utf8_length <= 0) {
+    return 0;
+  }
+
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (int index = 0; index < utf8_length; ++index) {
+    hash ^= static_cast<std::uint8_t>(utf8[index]);
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
 bool TryGetRuntimeInputProfileWriteTime(
     const wchar_t* path,
     FILETIME& write_time) noexcept {
@@ -276,7 +405,9 @@ Win32InputRuntime* Win32InputRuntime::active_runtime_ = nullptr;
 
 Win32InputRuntime::Win32InputRuntime(RuntimeInputProfile profile,
                                      bool enable_tray) noexcept
-    : profile_(profile), controller_(profile), enable_tray_(enable_tray) {}
+    : profile_(profile),
+      controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
+      enable_tray_(enable_tray) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
@@ -632,6 +763,9 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       RequestPointerRegistration(false);
       return CallNextHookEx(nullptr, code, message, data);
     }
+    if (key_down) {
+      HandleSnippetCommand(decision.snippet_command);
+    }
     return 1;
   } catch (...) {
     controller_.Reset();
@@ -655,10 +789,12 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
     if (GetWindowThreadProcessId(active, &process_id) == 0) {
       cached_active_window_ = nullptr;
       cached_process_id_ = 0;
+      cached_application_hash_ = 0;
       return {};
     }
     cached_active_window_ = active;
     cached_process_id_ = process_id;
+    cached_application_hash_ = HashApplicationIdForProcess(process_id);
   }
 
   SetLastError(ERROR_SUCCESS);
@@ -671,19 +807,51 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
       cached_process_id_,
       reinterpret_cast<std::uintptr_t>(info.hwndFocus),
       password || fullscreen,
+      cached_application_hash_,
   };
 }
 
 bool Win32InputRuntime::Inject(const InputDecision& decision) noexcept {
   constexpr std::size_t kMaximumInputEvents =
       ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
-  std::array<INPUT, kMaximumInputEvents> inputs;
-  const std::size_t count = BuildKeyboardInputSequence(decision, inputs);
-  if (count == 0) {
-    return decision.backspace_count == 0 && decision.insert_units == 0;
+  auto send = [](const InputDecision& part) noexcept {
+    std::array<INPUT, kMaximumInputEvents> inputs{};
+    const std::size_t count = BuildKeyboardInputSequence(part, inputs);
+    if (count == 0) {
+      return part.backspace_count == 0 && part.insert_units == 0;
+    }
+    const UINT expected = static_cast<UINT>(count);
+    return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  };
+
+  if (decision.extended_insert.empty()) {
+    return send(decision);
   }
-  const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+
+  InputDecision erase{};
+  erase.suppress = true;
+  erase.backspace_count = decision.backspace_count;
+  if (!send(erase)) {
+    return false;
+  }
+
+  std::size_t offset = 0;
+  while (offset < decision.extended_insert.size()) {
+    InputDecision part{};
+    part.suppress = true;
+    const std::size_t remaining = decision.extended_insert.size() - offset;
+    part.insert_units = static_cast<std::uint16_t>(
+        std::min<std::size_t>(remaining, part.insert.size()));
+    for (std::size_t index = 0; index < part.insert_units; ++index) {
+      part.insert[index] = static_cast<wchar_t>(
+          decision.extended_insert[offset + index]);
+    }
+    if (!send(part)) {
+      return false;
+    }
+    offset += part.insert_units;
+  }
+  return true;
 }
 
 bool Win32InputRuntime::IsPointerResetPacket(HRAWINPUT input) noexcept {
@@ -766,6 +934,28 @@ void Win32InputRuntime::ProcessToggleGesture(
   }
 }
 
+void Win32InputRuntime::HandleSnippetCommand(
+    RuntimeSnippetCommand command) noexcept {
+  switch (command) {
+    case RuntimeSnippetCommand::ToggleVietnamese:
+      profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+      controller_.ApplyProfile(profile_);
+      RequestPointerRegistration(false);
+      UpdateTray();
+      static_cast<void>(QueueManagedCommand(
+          profile_.vietnamese_enabled
+              ? RuntimeCommand::SetVietnameseEnabled
+              : RuntimeCommand::SetVietnameseDisabled));
+      break;
+    case RuntimeSnippetCommand::ToggleDictation:
+      static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+      break;
+    case RuntimeSnippetCommand::None:
+    default:
+      break;
+  }
+}
+
 bool Win32InputRuntime::QueueManagedCommand(
     RuntimeCommand command) noexcept {
   return command != RuntimeCommand::None && window_ != nullptr &&
@@ -827,26 +1017,44 @@ bool Win32InputRuntime::IsCommandCompanionActive() const noexcept {
 }
 
 void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
-  std::array<wchar_t, 32768> path{};
-  FILETIME write_time{};
-  if (!ResolveRuntimeInputProfilePath(path) ||
-      !TryGetRuntimeInputProfileWriteTime(path.data(), write_time)) {
-    return;
-  }
-  if (profile_write_time_known_ &&
-      CompareFileTime(&profile_write_time_, &write_time) == 0) {
-    return;
+  bool input_profile_changed = false;
+  std::array<wchar_t, 32768> input_path{};
+  FILETIME input_write_time{};
+  if (ResolveRuntimeInputProfilePath(input_path) &&
+      TryGetRuntimeInputProfileWriteTime(
+          input_path.data(), input_write_time) &&
+      (!profile_write_time_known_ ||
+       CompareFileTime(&profile_write_time_, &input_write_time) != 0)) {
+    RuntimeInputProfile profile{};
+    if (TryReadRuntimeInputProfile(input_path.data(), profile)) {
+      profile_write_time_ = input_write_time;
+      profile_write_time_known_ = true;
+      profile_ = profile;
+      controller_.ApplyProfile(profile_);
+      input_profile_changed = true;
+    }
   }
 
-  RuntimeInputProfile profile{};
-  if (!TryReadRuntimeInputProfile(path.data(), profile)) {
-    return;
+  std::array<wchar_t, 32768> snippet_path{};
+  FILETIME snippet_write_time{};
+  if (ResolveRuntimeSnippetProfilePath(snippet_path) &&
+      TryGetRuntimeInputProfileWriteTime(
+          snippet_path.data(), snippet_write_time) &&
+      (!snippet_profile_write_time_known_ ||
+       CompareFileTime(
+           &snippet_profile_write_time_, &snippet_write_time) != 0)) {
+    RuntimeSnippetProfile snippets{};
+    if (TryReadRuntimeSnippetProfile(snippet_path.data(), snippets)) {
+      snippet_profile_write_time_ = snippet_write_time;
+      snippet_profile_write_time_known_ = true;
+      controller_.ApplySnippets(std::move(snippets));
+      RequestPointerRegistration(false);
+    }
   }
 
-  profile_write_time_ = write_time;
-  profile_write_time_known_ = true;
-  profile_ = profile;
-  controller_.ApplyProfile(profile_);
+  if (!input_profile_changed) {
+    return;
+  }
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;

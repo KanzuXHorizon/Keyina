@@ -4,6 +4,8 @@ add_library(keyina_windows_input STATIC
   resident_input_controller.cpp
   runtime_hotkeys.cpp
   runtime_profile.cpp
+  runtime_snippet_matcher.cpp
+  runtime_snippet_profile.cpp
 )
 add_library(keyina::windows_input ALIAS keyina_windows_input)
 

@@ -119,6 +119,15 @@ public sealed record KeyinaRuntimeOptions(
         return Path.Combine(directory, "runtime-input.bin");
     }
 
+    public string ResolveRuntimeSnippetProfilePath()
+    {
+        var directory = Path.GetDirectoryName(ResolveRuntimeInputProfilePath())
+            ?? throw new ArgumentException(
+                "Runtime input profile path has no parent directory.",
+                nameof(RuntimeInputProfilePath));
+        return Path.Combine(directory, "runtime-snippets.bin");
+    }
+
     public void Validate()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ConfigurationPath);

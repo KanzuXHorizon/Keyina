@@ -33,6 +33,14 @@ public sealed record SnippetDefinition(
             throw new ArgumentException("Snippet trigger must not contain whitespace.", nameof(Trigger));
         }
 
+        var firstRune = Trigger.EnumerateRunes().First();
+        if (Rune.IsLetterOrDigit(firstRune))
+        {
+            throw new ArgumentException(
+                "Snippet trigger must begin with a non-alphanumeric prefix such as ';'.",
+                nameof(Trigger));
+        }
+
         var triggerCodePoints = Trigger.EnumerateRunes().Count();
         if (triggerCodePoints > MaximumTriggerCodePoints)
         {

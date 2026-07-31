@@ -10,6 +10,7 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
 std::atomic<std::uint64_t> g_controller_allocation_count{0};
@@ -42,6 +43,9 @@ using keyina::windows::InputDecision;
 using keyina::windows::PhysicalKeyEvent;
 using keyina::windows::ResidentInputController;
 using keyina::windows::RuntimeInputProfile;
+using keyina::windows::RuntimeSnippetCommand;
+using keyina::windows::RuntimeSnippetDefinition;
+using keyina::windows::RuntimeSnippetProfile;
 using keyina::windows::TypingContext;
 
 constexpr TypingContext kOrdinaryContext{
@@ -83,6 +87,7 @@ void ApplyDecision(std::u16string& text, char32_t physical_character,
   for (std::uint16_t index = 0; index < decision.insert_units; ++index) {
     text.push_back(static_cast<char16_t>(decision.insert[index]));
   }
+  text.append(decision.extended_insert);
 }
 
 void Type(ResidentInputController& controller, std::u16string& visible,
@@ -176,6 +181,62 @@ KEYINA_TEST(resident_input_controller_disarms_pointer_observation_on_boundary) {
   Type(controller, visible, U" ");
   KEYINA_EXPECT_EQ(visible, std::u16string{u"á "});
   KEYINA_EXPECT_TRUE(!controller.pointer_observation_required());
+}
+
+KEYINA_TEST(resident_input_controller_expands_raw_telex_sensitive_snippet_on_space) {
+  RuntimeSnippetProfile snippets{};
+  RuntimeSnippetDefinition definition{};
+  definition.trigger = U";aws";
+  definition.expansion = u"literal";
+  definition.delimiters = U" ";
+  definition.case_sensitive = true;
+  definition.preserve_delimiter = false;
+  snippets.entries.push_back(std::move(definition));
+  ResidentInputController controller(RuntimeInputProfile{}, std::move(snippets));
+  std::u16string visible;
+
+  Type(controller, visible, U";aws ");
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"literal"});
+}
+
+KEYINA_TEST(resident_input_controller_runs_builtin_commands_even_when_telex_is_off) {
+  RuntimeInputProfile profile{};
+  profile.vietnamese_enabled = false;
+  ResidentInputController controller(profile);
+  std::u16string visible;
+  Type(controller, visible, U";kvi");
+
+  const auto decision = controller.Process(KeyEvent(U' '), kOrdinaryContext);
+  ApplyDecision(visible, U' ', decision);
+
+  KEYINA_EXPECT_TRUE(decision.suppress);
+  KEYINA_EXPECT_EQ(decision.snippet_command,
+                   RuntimeSnippetCommand::ToggleVietnamese);
+  KEYINA_EXPECT_EQ(visible, std::u16string{});
+}
+
+KEYINA_TEST(resident_input_controller_preserves_variable_snippet_delimiter) {
+  ResidentInputController controller(RuntimeInputProfile{});
+  std::u16string visible;
+
+  Type(controller, visible, U";kdate ");
+
+  KEYINA_EXPECT_EQ(visible.size(), std::size_t{11});
+  KEYINA_EXPECT_EQ(visible[4], u'-');
+  KEYINA_EXPECT_EQ(visible[7], u'-');
+  KEYINA_EXPECT_EQ(visible[10], u' ');
+}
+
+KEYINA_TEST(resident_input_controller_bypasses_snippets_in_secure_context) {
+  ResidentInputController controller(RuntimeInputProfile{});
+  std::u16string visible;
+  auto secure = kOrdinaryContext;
+  secure.bypass_typing = true;
+
+  Type(controller, visible, U";kvi ", secure);
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u";kvi "});
 }
 
 KEYINA_TEST(resident_input_controller_allocates_zero_on_ordinary_hot_path) {

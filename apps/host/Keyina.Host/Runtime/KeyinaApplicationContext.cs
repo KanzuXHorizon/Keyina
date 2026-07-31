@@ -39,6 +39,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private readonly KeyinaRuntimeOptions options;
     private readonly AtomicConfigurationStore configurationStore;
     private readonly RuntimeInputProfileStore runtimeInputProfileStore;
+    private readonly RuntimeSnippetProfileStore runtimeSnippetProfileStore;
     private readonly WindowsStartupRegistration startupRegistration;
     private readonly ICredentialVault credentialVault;
     private readonly IApplicationExclusionService applicationExclusions;
@@ -116,6 +117,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         configurationStore = new AtomicConfigurationStore(options.ConfigurationPath);
         runtimeInputProfileStore = new RuntimeInputProfileStore(
             options.ResolveRuntimeInputProfilePath());
+        runtimeSnippetProfileStore = new RuntimeSnippetProfileStore(
+            options.ResolveRuntimeSnippetProfilePath());
         configuration = LoadConfiguration();
         this.applicationExclusions.Update(configuration.Applications);
         if (translationProvider is null)
@@ -2020,9 +2023,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             await runtimeInputProfileStore.PublishAsync(snapshot, cancellationToken)
                 .ConfigureAwait(false);
+            await runtimeSnippetProfileStore.PublishAsync(snapshot, cancellationToken)
+                .ConfigureAwait(false);
             runtimeInputProfileReady = true;
         }
         catch (RuntimeInputProfileException)
+        {
+            runtimeInputProfileReady = false;
+        }
+        catch (RuntimeSnippetProfileException)
         {
             runtimeInputProfileReady = false;
         }
@@ -2036,9 +2045,17 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     configuration,
                     CancellationToken.None)
                 .GetAwaiter().GetResult();
+            runtimeSnippetProfileStore.PublishAsync(
+                    configuration,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult();
             runtimeInputProfileReady = true;
         }
         catch (RuntimeInputProfileException)
+        {
+            runtimeInputProfileReady = false;
+        }
+        catch (RuntimeSnippetProfileException)
         {
             runtimeInputProfileReady = false;
         }

@@ -77,6 +77,11 @@ internal static class SnippetMatcherTests
 
         AssertThrows<ArgumentException>(() => _ = new SnippetMatcher(
         [
+            Definition("mail", "missing prefix"),
+        ]));
+
+        AssertThrows<ArgumentException>(() => _ = new SnippetMatcher(
+        [
             Definition(new string('a', 65), "too long"),
         ]));
 

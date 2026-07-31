@@ -18,6 +18,10 @@ public static class ConfigurationPaths
     public static string GetRuntimeInputProfilePath() => Path.Combine(
         GetProductionDirectory(),
         "runtime-input.bin");
+
+    public static string GetRuntimeSnippetProfilePath() => Path.Combine(
+        GetProductionDirectory(),
+        "runtime-snippets.bin");
 }
 
 public sealed class ConfigurationException : Exception

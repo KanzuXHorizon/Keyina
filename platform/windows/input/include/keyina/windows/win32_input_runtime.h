@@ -93,6 +93,7 @@ class Win32InputRuntime {
   void RequestPointerRegistration(bool active) noexcept;
   void ApplyPointerRegistration() noexcept;
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
+  void HandleSnippetCommand(RuntimeSnippetCommand command) noexcept;
   [[nodiscard]] bool QueueManagedCommand(RuntimeCommand command) noexcept;
   [[nodiscard]] bool LaunchManagedCommand(RuntimeCommand command) noexcept;
   [[nodiscard]] bool IsCommandCompanionActive() const noexcept;
@@ -119,6 +120,7 @@ class Win32InputRuntime {
   KeyStateSet pressed_keys_{};
   HWND cached_active_window_{nullptr};
   std::uint32_t cached_process_id_{};
+  std::uint64_t cached_application_hash_{};
   std::uint8_t modifier_state_{};
   bool caps_lock_{false};
   bool pointer_registration_desired_{false};
@@ -129,6 +131,8 @@ class Win32InputRuntime {
   bool stopping_{false};
   FILETIME profile_write_time_{};
   bool profile_write_time_known_{false};
+  FILETIME snippet_profile_write_time_{};
+  bool snippet_profile_write_time_known_{false};
   UINT_PTR profile_timer_{};
   NativeRuntimeStartupStage startup_stage_{NativeRuntimeStartupStage::None};
   DWORD startup_error_{};
