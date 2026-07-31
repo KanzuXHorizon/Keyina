@@ -97,6 +97,7 @@ public sealed class CompanionCommandSession : IDisposable
     };
     private readonly List<EventWaitHandle> events = [];
     private readonly List<RegisteredWaitHandle> registrations = [];
+    private int pendingCommands;
     private bool disposed;
 
     public CompanionCommandSession(KeyinaApplicationContext context)
@@ -128,16 +129,17 @@ public sealed class CompanionCommandSession : IDisposable
         {
             return;
         }
+        Interlocked.Increment(ref pendingCommands);
         try
         {
             dispatcher.BeginInvoke(async () =>
             {
-                if (disposed)
-                {
-                    return;
-                }
                 try
                 {
+                    if (disposed)
+                    {
+                        return;
+                    }
                     if (command is CompanionCommand.SetVietnameseEnabled or
                         CompanionCommand.SetVietnameseDisabled)
                     {
@@ -161,29 +163,37 @@ public sealed class CompanionCommandSession : IDisposable
                 }
                 finally
                 {
+                    Interlocked.Decrement(ref pendingCommands);
                     ExitIfIdle();
                 }
             });
         }
         catch (InvalidOperationException)
         {
+            Interlocked.Decrement(ref pendingCommands);
         }
     }
 
     public static bool ShouldExit(
+        bool commandInFlight,
         bool dictationActive,
         bool canUndoTranslation,
-        bool translationPreviewCreated) =>
+        bool translationPreviewCreated,
+        bool interactiveWindowCreated) =>
+        !commandInFlight &&
         !dictationActive &&
         !canUndoTranslation &&
-        !translationPreviewCreated;
+        !translationPreviewCreated &&
+        !interactiveWindowCreated;
 
     private void ExitIfIdle()
     {
         if (!disposed && ShouldExit(
+                commandInFlight: Volatile.Read(ref pendingCommands) != 0,
                 context.IsDictationActive,
                 context.CanUndoTranslation,
-                context.TranslationPreviewCreated))
+                context.TranslationPreviewCreated,
+                context.SettingsCreated || context.FirstRunCreated))
         {
             context.ExitThread();
         }

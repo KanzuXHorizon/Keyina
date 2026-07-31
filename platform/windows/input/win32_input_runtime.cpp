@@ -1164,26 +1164,6 @@ void Win32InputRuntime::RequestExit() noexcept {
   PostQuitMessage(0);
 }
 
-RuntimeInputProfile DefaultRuntimeInputProfile() noexcept {
-  RuntimeInputProfile profile{};
-  profile.vietnamese_enabled = true;
-  profile.hotkeys = {
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::ModifierGesture, 0x03, 0x00},
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::Hold, 0x05, 0x20},
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::Press, 0x05, 0x56},
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::Press, 0x05, 0x54},
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::Press, 0x05, 0x5A},
-      RuntimeHotkeyBinding{
-          RuntimeHotkeyGesture::Press, 0x00, 0x1B},
-  };
-  return profile;
-}
-
 RuntimeInputProfile LoadRuntimeInputProfileOrDefault() noexcept {
   RuntimeInputProfile profile = DefaultRuntimeInputProfile();
   std::array<wchar_t, 32768> path{};

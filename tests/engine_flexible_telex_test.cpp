@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -30,7 +31,7 @@ struct TelexCase {
 }  // namespace
 
 KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
-  constexpr std::array<TelexCase, 21> cases = {{
+  constexpr std::array<TelexCase, 25> cases = {{
       {U"dduocwj", U"được"},
       {U"dduowcj", U"được"},
       {U"dduwocj", U"được"},
@@ -44,6 +45,10 @@ KEYINA_TEST(accepts_common_flexible_telex_key_orders) {
       {U"vieetj", U"việt"},
       {U"vieejt", U"việt"},
       {U"truocws", U"trước"},
+      {U"truowcs", U"trước"},
+      {U"truwocs", U"trước"},
+      {U"truowsc", U"trước"},
+      {U"truocsw", U"trước"},
       {U"uuw", U"ưu"},
       {U"dosd", U"đó"},
       {U"tranhs", U"tránh"},
@@ -105,6 +110,95 @@ KEYINA_TEST(valid_flexible_telex_survives_word_boundaries) {
 KEYINA_TEST(repeated_tone_key_escapes_back_to_literal_telex) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(TypeSequence(engine, U"uxx"), std::u32string{U"ux"});
+}
+
+KEYINA_TEST(composes_vietnamese_names_without_spelling_autocorrection) {
+  constexpr std::array<TelexCase, 3> cases = {{
+      {U"nguyeenx", U"nguyễn"},
+      {U"nguyeexn", U"nguyễn"},
+      {U"ngueenx", U"nguễn"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(keeps_final_tone_key_composition_editable) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"nguyenx"),
+                   std::u32string{U"nguyẽn"});
+}
+
+KEYINA_TEST(restores_tone_keys_embedded_in_latin_tokens) {
+  constexpr std::array<TelexCase, 7> cases = {{
+      {U"regist", U"regist"},
+      {U"registry", U"registry"},
+      {U"register", U"register"},
+      {U"regift", U"regift"},
+      {U"regirt", U"regirt"},
+      {U"regixt", U"regixt"},
+      {U"regijt", U"regijt"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    const auto actual = TypeSequence(engine, test.raw);
+    if (actual != test.expected) {
+      std::string raw;
+      raw.reserve(test.raw.size());
+      for (const char32_t value : test.raw) {
+        raw.push_back(static_cast<char>(value));
+      }
+      throw std::runtime_error("embedded Latin tone-key restore failed for " + raw);
+    }
+  }
+}
+
+KEYINA_TEST(restores_common_latin_tokens_without_dictionary_autocorrection) {
+  constexpr std::array<TelexCase, 9> cases = {{
+      {U"search", U"search"},
+      {U"research", U"research"},
+      {U"codex", U"codex"},
+      {U"clear", U"clear"},
+      {U"review", U"review"},
+      {U"powershell", U"powershell"},
+      {U"browser", U"browser"},
+      {U"source", U"source"},
+      {U"windows", U"windows"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    const auto actual = TypeSequence(engine, test.raw);
+    if (actual != test.expected) {
+      std::string raw;
+      raw.reserve(test.raw.size());
+      for (const char32_t value : test.raw) {
+        raw.push_back(static_cast<char>(value));
+      }
+      std::string actual_codepoints;
+      for (const char32_t value : actual) {
+        if (!actual_codepoints.empty()) {
+          actual_codepoints.push_back(',');
+        }
+        actual_codepoints.append(std::to_string(static_cast<std::uint32_t>(value)));
+      }
+      throw std::runtime_error(
+          "failed literal Latin case: " + raw +
+          "; actual code points: " + actual_codepoints);
+    }
+  }
 }
 
 KEYINA_TEST(restores_structurally_impossible_latin_tokens_without_word_lists) {

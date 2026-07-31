@@ -213,6 +213,9 @@ public sealed partial class SettingsForm : Form
             "Dán khóa API Speechmatics",
             "Khóa API Speechmatics");
         speechApiKey.UseSystemPasswordChar = true;
+        speechApiKey.MaxLength = 256;
+        speechApiKey.AccessibleDescription =
+            "Khóa được che khi nhập và chỉ lưu trong Windows Credential Manager.";
         saveSpeechKey = CreateButton(
             "saveSpeechKey",
             "Lưu khóa",
@@ -475,6 +478,17 @@ public sealed partial class SettingsForm : Form
         previewFeedback.Click += (_, _) => actions.PreviewFeedback();
         speechApiKey.TextChanged += (_, _) => saveSpeechKey.Enabled =
             !string.IsNullOrWhiteSpace(speechApiKey.Text);
+        speechApiKey.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.KeyCode != Keys.Enter || !saveSpeechKey.Enabled)
+            {
+                return;
+            }
+
+            SaveSpeechCredential();
+            eventArgs.SuppressKeyPress = true;
+            eventArgs.Handled = true;
+        };
         saveSpeechKey.Click += (_, _) => SaveSpeechCredential();
         removeSpeechKey.Click += (_, _) => actions.DeleteSpeechApiKey();
         deepLApiKey.TextChanged += (_, _) => saveDeepLKey.Enabled =
@@ -509,6 +523,17 @@ public sealed partial class SettingsForm : Form
         libreTranslateEndpoint.Leave += (_, _) => SaveTranslationProviderPreferences();
         libreTranslateApiKey.TextChanged += (_, _) => saveLibreTranslateKey.Enabled =
             !string.IsNullOrWhiteSpace(libreTranslateApiKey.Text);
+        libreTranslateApiKey.KeyDown += (_, eventArgs) =>
+        {
+            if (eventArgs.KeyCode != Keys.Enter || !saveLibreTranslateKey.Enabled)
+            {
+                return;
+            }
+
+            SaveLibreTranslateCredential();
+            eventArgs.SuppressKeyPress = true;
+            eventArgs.Handled = true;
+        };
         saveLibreTranslateKey.Click += (_, _) => SaveLibreTranslateCredential();
         removeLibreTranslateKey.Click += (_, _) => actions.DeleteLibreTranslateApiKey();
         snippetsSearch.TextChanged += (_, _) => FilterSnippets(snippetsSearch.Text);
@@ -874,6 +899,22 @@ public sealed partial class SettingsForm : Form
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pageKey);
         ShowSection(pageKey);
+    }
+
+    public void OpenCredentialSetup(CredentialSetupTarget target)
+    {
+        var (section, input) = target switch
+        {
+            CredentialSetupTarget.Speechmatics => ("speech", speechApiKey),
+            CredentialSetupTarget.Translation => ("translation", deepLApiKey),
+            CredentialSetupTarget.LibreTranslate =>
+                ("translation", libreTranslateApiKey),
+            _ => throw new ArgumentOutOfRangeException(nameof(target)),
+        };
+
+        ShowSection(section);
+        input.Select();
+        _ = input.Focus();
     }
 
     private void ShowSection(string pageKey)
@@ -3138,8 +3179,8 @@ public sealed partial class SettingsForm : Form
 
     private void SaveSpeechCredential()
     {
-        var secret = speechApiKey.Text;
-        if (string.IsNullOrWhiteSpace(secret))
+        var secret = speechApiKey.Text.Trim();
+        if (secret.Length == 0)
         {
             return;
         }

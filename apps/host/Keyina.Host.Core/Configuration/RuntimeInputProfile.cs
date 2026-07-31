@@ -148,6 +148,7 @@ public static class RuntimeInputProfileCodec
         {
             flags |= TranslationEnabledFlag;
         }
+        flags |= RestoreInvalidWordFlag;
         return flags;
     }
 

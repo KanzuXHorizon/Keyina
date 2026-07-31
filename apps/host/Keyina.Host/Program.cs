@@ -9,6 +9,7 @@ using Keyina.Host.Speech;
 using Keyina.Host.UI;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Hotkeys;
+using Keyina.Host.Windows.Startup;
 using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host;
@@ -211,6 +212,14 @@ internal static class Program
                 using var session = new CompanionCommandSession(context);
                 session.Post(companionCommand);
                 Application.Run(context);
+                if (string.Equals(
+                        Environment.GetEnvironmentVariable("KEYINA_COMMAND_DIAGNOSTICS"),
+                        "1",
+                        StringComparison.Ordinal))
+                {
+                    Console.Error.WriteLine(
+                        $"command_error={context.CurrentState.ErrorCode ?? "none"}");
+                }
                 return 0;
             }
             finally
@@ -242,6 +251,7 @@ internal static class Program
 
         if (args.Contains("--companion-settings", StringComparer.Ordinal))
         {
+            _ = NativeResidentLauncher.TryEnsureRunning();
             if (!SingleInstanceGuard.TryAcquire(
                     SettingsCompanionMutexName,
                     out var settingsGuard))

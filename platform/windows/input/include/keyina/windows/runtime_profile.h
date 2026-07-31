@@ -55,6 +55,7 @@ struct RuntimeInputProfileResult {
   }
 };
 
+[[nodiscard]] RuntimeInputProfile DefaultRuntimeInputProfile() noexcept;
 [[nodiscard]] RuntimeInputProfileResult DecodeRuntimeInputProfile(
     std::span<const std::byte> bytes) noexcept;
 

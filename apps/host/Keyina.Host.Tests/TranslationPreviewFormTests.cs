@@ -6,7 +6,7 @@ namespace Keyina.Host.Tests;
 
 internal static class TranslationPreviewFormTests
 {
-    [KeyinaTest("translation overlay exposes translated text without replacement controls")]
+    [KeyinaTest("translation overlay exposes an adaptive reader and complete actions")]
     private static void PreviewStructureIsComplete()
     {
         var replaced = 0;
@@ -26,16 +26,25 @@ internal static class TranslationPreviewFormTests
         AssertEx.True(
             form.AccessibleDescription?.Contains("không thay đổi", StringComparison.OrdinalIgnoreCase) == true,
             "Overlay accessibility copy did not explain that original text remains unchanged.");
+        AssertEx.Equal(FormBorderStyle.Sizable, form.FormBorderStyle);
+        AssertEx.True(form.MinimumSize.Width >= 460,
+            "Translation reader minimum width is too narrow for readable text.");
         AssertEx.Equal(0, form.Controls.Find("translationPreviewOriginal", true).Length);
-        AssertEx.Equal(0, form.Controls.Find("replaceTranslationPreview", true).Length);
-        AssertEx.Equal(
-            "Hello",
-            ((TextBox)form.Controls.Find("translationPreviewTranslated", true).Single()).Text);
+        var reader = (RichTextBox)form.Controls
+            .Find("translationPreviewTranslated", true).Single();
+        AssertEx.Equal("Hello", reader.Text);
+        AssertEx.True(reader.ReadOnly, "Translation reader must be read-only.");
+        AssertEx.True(reader.WordWrap, "Translation reader must wrap long lines.");
+        AssertEx.Equal(RichTextBoxScrollBars.Vertical, reader.ScrollBars);
+        AssertEx.Equal(0, reader.SelectionLength);
 
         InvokeClick((Button)form.Controls.Find("copyTranslationPreview", true).Single());
         AssertEx.Equal("Hello", copied);
         AssertEx.Equal(0, replaced);
         AssertEx.Equal(0, cancelled);
+
+        InvokeClick((Button)form.Controls.Find("replaceTranslationPreview", true).Single());
+        AssertEx.Equal(1, replaced);
     }
 
     [KeyinaTest("translation overlay cancel action fires once without replacing")]

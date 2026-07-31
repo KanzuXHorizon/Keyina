@@ -302,6 +302,45 @@ bool IsAsciiVowel(char32_t value) noexcept {
          lower == U'o' || lower == U'u' || lower == U'y';
 }
 
+bool HasTrailingToneKey(std::u32string_view raw) noexcept {
+  return !raw.empty() && ToneFromKey(raw.back()).has_value();
+}
+
+bool HasSeparatedVowelRuns(std::u32string_view visible) noexcept {
+  bool saw_vowel = false;
+  bool left_vowel_run = false;
+  for (const char32_t value : visible) {
+    if (IsVietnameseVowel(value)) {
+      if (left_vowel_run) {
+        return true;
+      }
+      saw_vowel = true;
+    } else if (saw_vowel) {
+      left_vowel_run = true;
+    }
+  }
+  return false;
+}
+
+bool HasLetterModifierBeforeTrailingTone(std::u32string_view raw) noexcept {
+  if (!HasTrailingToneKey(raw) || raw.size() < 3) {
+    return false;
+  }
+
+  const auto prefix = raw.substr(0, raw.size() - 1);
+  for (std::size_t index = 1; index < prefix.size(); ++index) {
+    const char32_t previous = ToAsciiLower(prefix[index - 1]);
+    const char32_t current = ToAsciiLower(prefix[index]);
+    if ((previous == U'a' && current == U'a') ||
+        (previous == U'e' && current == U'e') ||
+        (previous == U'o' && current == U'o') ||
+        (previous == U'd' && current == U'd')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool HasSuspiciousToneBeforeNewVowel(std::u32string_view raw) noexcept {
   for (std::size_t tone_index = 0; tone_index < raw.size(); ++tone_index) {
     if (!ToneFromKey(raw[tone_index]).has_value()) {
@@ -514,6 +553,7 @@ void Engine::ResetCompositionState() noexcept {
   composition_buffer_.clear();
   previous_key_buffer_.clear();
   literal_text_buffer_.clear();
+  has_tone_key_before_trailing_character_ = false;
 }
 
 std::u32string_view Engine::VisibleText() const noexcept {
@@ -533,10 +573,23 @@ void Engine::BuildVisibleForRaw() {
       const bool impossible_structure =
           analysis.status == SyllableStatus::Impossible &&
           IsIrrecoverablyInvalid(analysis.error);
+      const bool invalid_tone_modified_nucleus =
+          (analysis.status == SyllableStatus::Impossible &&
+           analysis.error == SyllableError::InvalidNucleus &&
+           has_tone_key_before_trailing_character_) ||
+          (HasTrailingToneKey(raw_keys_) &&
+           HasSeparatedVowelRuns(composition_buffer_) &&
+           !HasLetterModifierBeforeTrailingTone(raw_keys_));
+      const bool ambiguous_embedded_tone =
+          analysis.status == SyllableStatus::Ambiguous &&
+          analysis.error == SyllableError::InvalidCoda &&
+          has_tone_key_before_trailing_character_ &&
+          HasSeparatedVowelRuns(composition_buffer_);
       const bool suspicious_tone_order =
           analysis.status != SyllableStatus::Valid &&
           HasSuspiciousToneBeforeNewVowel(raw_keys_);
-      if (impossible_structure || suspicious_tone_order) {
+      if (impossible_structure || invalid_tone_modified_nucleus ||
+          ambiguous_embedded_tone || suspicious_tone_order) {
         composition_buffer_.assign(literal_text_buffer_);
       }
     }
@@ -557,13 +610,18 @@ void Engine::ComposeRaw(std::u32string& visible) {
   visible.clear();
   previous_key_buffer_.clear();
   literal_text_buffer_.clear();
+  has_tone_key_before_trailing_character_ = false;
 
   char32_t previous_key = U'\0';
   bool previous_key_transformed = false;
+  bool saw_tone_key = false;
   std::optional<Tone> pending_tone;
   char32_t pending_tone_key = U'\0';
 
   for (const char32_t key : raw_keys_) {
+    has_tone_key_before_trailing_character_ |= saw_tone_key;
+    const auto tone = ToneFromKey(key);
+    saw_tone_key |= tone.has_value();
     const bool repeated_escape =
         ToAsciiLower(key) == ToAsciiLower(previous_key) &&
         previous_key_transformed;
@@ -594,7 +652,6 @@ void Engine::ComposeRaw(std::u32string& visible) {
         transformed = ClearTone(visible);
       }
     } else {
-      const auto tone = ToneFromKey(key);
       if (tone.has_value()) {
         std::array<std::size_t, 64> indices{};
         if (CollectNucleus(visible, indices) != 0) {

@@ -3,6 +3,7 @@ using Keyina.Host.Speech;
 using Keyina.Host.Translation;
 using Keyina.Host.Windows.Audio;
 using Keyina.Host.Windows.Credentials;
+using Keyina.Speechmatics;
 
 namespace Keyina.Host.Tests;
 
@@ -87,6 +88,16 @@ internal static class LiveExternalServiceTests
             {
                 enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
+
+            session.StopAsync(
+                    TimeSpan.FromSeconds(10),
+                    CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            AssertEx.Equal(
+                SpeechmaticsSessionState.Stopped,
+                session.State,
+                "The live Speechmatics session did not finalize after manual stop.");
         }
         finally
         {

@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and the project intends to use Semantic
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-31
+
 ### Added
 
 - Native C++20 Vietnamese Telex engine with reversible composition and Context Guard.
@@ -28,6 +30,7 @@ The format is based on Keep a Changelog, and the project intends to use Semantic
 - Translation configuration is provider-neutral and stores DeepL and LibreTranslate credentials separately in Windows Credential Manager.
 - Configuration reads retry short-lived file locks caused by an overlapping atomic save.
 - Product and file versions now come from the shared `KeyinaVersion` release property.
+- Silent install or upgrade starts the native resident, and opening Settings repairs a missing resident so built-in commands such as `;kvi` and `;kvoice` remain available.
 
 ### Security
 

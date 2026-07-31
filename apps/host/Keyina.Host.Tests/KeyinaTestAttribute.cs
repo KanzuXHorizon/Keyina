@@ -12,3 +12,9 @@ internal sealed class KeyinaTestAttribute : Attribute
 
     public string Name { get; }
 }
+
+[AttributeUsage(
+    AttributeTargets.Class | AttributeTargets.Method,
+    AllowMultiple = false,
+    Inherited = false)]
+internal sealed class KeyinaInteractiveTestAttribute : Attribute;

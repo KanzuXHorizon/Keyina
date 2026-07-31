@@ -5,6 +5,7 @@ using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Tests;
 
+[KeyinaInteractiveTest]
 internal static class LiveCommandCompanionTests
 {
     private const uint WindowMessageClose = 0x0010;
@@ -29,7 +30,8 @@ internal static class LiveCommandCompanionTests
         AssertEx.True(
             previewWindow != nint.Zero,
             companion.HasExited
-                ? $"Translation companion exited before showing a preview: {companion.ExitCode}."
+                ? $"Translation companion exited before showing a preview: {companion.ExitCode}. " +
+                  ReadDiagnostics(companion)
                 : "Translation companion did not show its preview window.");
 
         _ = PostMessageW(
@@ -60,7 +62,8 @@ internal static class LiveCommandCompanionTests
         AssertEx.False(
             companion.HasExited,
             companion.HasExited
-                ? $"Speech companion exited during startup: {companion.ExitCode}."
+                ? $"Speech companion exited during startup: {companion.ExitCode}. " +
+                  ReadDiagnostics(companion)
                 : "Speech companion exited during startup.");
 
         using var cancel = StartCompanion(CompanionCommand.CancelActiveCommand);
@@ -83,7 +86,25 @@ internal static class LiveCommandCompanionTests
             Arguments = CompanionCommandProtocol.ToArgument(command),
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            Environment =
+            {
+                ["KEYINA_COMMAND_DIAGNOSTICS"] = "1",
+            },
         }) ?? throw new InvalidOperationException("Command companion process did not start.");
+    }
+
+    private static string ReadDiagnostics(Process process)
+    {
+        if (!process.HasExited)
+        {
+            return "No exit diagnostics were available.";
+        }
+        var standardError = process.StandardError.ReadToEnd().Trim();
+        return standardError.Length == 0
+            ? "No command diagnostics were emitted."
+            : standardError;
     }
 
     private static void AssertFocusedTarget(LiveInputTarget target)
@@ -204,27 +225,48 @@ internal static class LiveCommandCompanionTests
         {
             var currentForm = form ?? throw new InvalidOperationException(
                 "The live input form is unavailable.");
-            currentForm.Invoke(() =>
+            for (var attempt = 0; attempt < 50; attempt++)
             {
-                currentForm.Show();
-                currentForm.Activate();
-                _ = SetForegroundWindow(currentForm.Handle);
-                textBox!.Focus();
-                textBox.SelectAll();
-            });
+                currentForm.Invoke(() =>
+                {
+                    var currentThread = GetCurrentThreadId();
+                    var foregroundThread = GetWindowThreadProcessId(
+                        GetForegroundWindow(),
+                        out _);
+                    var attached = foregroundThread != 0 &&
+                        foregroundThread != currentThread &&
+                        AttachThreadInput(currentThread, foregroundThread, attach: true);
+                    try
+                    {
+                        currentForm.TopMost = true;
+                        currentForm.Show();
+                        _ = ShowWindow(currentForm.Handle, showCommand: 9);
+                        _ = BringWindowToTop(currentForm.Handle);
+                        currentForm.Activate();
+                        _ = SetForegroundWindow(currentForm.Handle);
+                        _ = SetActiveWindow(currentForm.Handle);
+                        _ = SetFocus(textBox!.Handle);
+                        textBox.SelectAll();
+                        currentForm.TopMost = false;
+                        Application.DoEvents();
+                    }
+                    finally
+                    {
+                        if (attached)
+                        {
+                            _ = AttachThreadInput(currentThread, foregroundThread, attach: false);
+                        }
+                    }
+                });
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-            do
-            {
                 var context = WindowsTypingContextProbe.Capture();
                 if (context.ForegroundProcessId == Environment.ProcessId &&
                     context.FocusWindow == TextBoxHandle)
                 {
                     return;
                 }
-                Thread.Sleep(25);
+                Thread.Sleep(20);
             }
-            while (DateTime.UtcNow < deadline);
         }
 
         public void Dispose()
@@ -316,4 +358,31 @@ internal static class LiveCommandCompanionTests
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetActiveWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint window, int showCommand);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(
+        uint idAttach,
+        uint idAttachTo,
+        [MarshalAs(UnmanagedType.Bool)] bool attach);
 }

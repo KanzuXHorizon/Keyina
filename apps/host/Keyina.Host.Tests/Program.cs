@@ -20,18 +20,25 @@ internal static class Program
                 Attribute = method.GetCustomAttribute<KeyinaTestAttribute>(),
             })
             .Where(item => item.Attribute is not null)
+            .Where(item => !IsInteractive(item.Method))
             .Select(item => new TestCase(item.Attribute!.Name, item.Method))
             .OrderBy(test => test.Name, StringComparer.Ordinal)
             .ToArray();
 
-        if (args.Length > 0)
+        var filters = args
+            .Where(argument => !string.Equals(
+                argument,
+                "--interactive",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (filters.Length > 0)
         {
-            var exclusions = args
+            var exclusions = filters
                 .Where(filter => filter.StartsWith('!'))
                 .Select(filter => filter[1..])
                 .Where(filter => filter.Length > 0)
                 .ToArray();
-            var inclusions = args
+            var inclusions = filters
                 .Where(filter => !filter.StartsWith('!'))
                 .ToArray();
 
@@ -85,6 +92,12 @@ internal static class Program
             Version.TryParse(numericVersion, out var version) && version.Major >= 0,
             "Build version does not start with a valid numeric semantic version.");
     }
+
+    private static bool IsInteractive(MethodInfo method) =>
+        method.IsDefined(typeof(KeyinaInteractiveTestAttribute), inherit: false) ||
+        method.DeclaringType?.IsDefined(
+            typeof(KeyinaInteractiveTestAttribute),
+            inherit: false) == true;
 
     private static void ValidateSignature(MethodInfo method)
     {

@@ -1,5 +1,6 @@
 using System.Reflection;
 using Keyina.Host.Configuration;
+using Keyina.Host.Core;
 using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
@@ -62,6 +63,7 @@ internal static class KeyinaApplicationContextTests
     }
 
     [KeyinaTest("settings companion opens without resident hooks and exits after close")]
+    [KeyinaInteractiveTest]
     private static void SettingsCompanionLifecycleIsBounded()
     {
         using var directory = new TemporaryDirectory();
@@ -534,8 +536,8 @@ internal static class KeyinaApplicationContextTests
         }
     }
 
-    [KeyinaTest("translation tray command stays unavailable until a DeepL credential exists")]
-    private static void TranslationTrayRequiresCredential()
+    [KeyinaTest("translation tray command remains available to configure a missing provider")]
+    private static void TranslationTrayOffersProviderSetup()
     {
         using var directory = new TemporaryDirectory();
         var configurationPath = Path.Combine(directory.Path, "settings.json");
@@ -560,13 +562,278 @@ internal static class KeyinaApplicationContextTests
         var menuItem = (ToolStripMenuItem?)menuItemField.GetValue(context)
             ?? throw new InvalidOperationException("Translation tray item was not created.");
 
-        AssertEx.False(menuItem.Enabled,
-            "Translation tray command should not run without a configured credential.");
-        AssertEx.Equal("Cần khóa DeepL", menuItem.ShortcutKeyDisplayString);
+        AssertEx.True(menuItem.Enabled,
+            "Translation tray command should remain clickable to open provider setup.");
+        AssertEx.Equal("Cần provider dịch", menuItem.ShortcutKeyDisplayString);
         AssertEx.True(context.CurrentSettingsSnapshot.TranslationEnabled,
             "The user's translation preference should remain visible while setup is incomplete.");
         AssertEx.False(context.CurrentSettingsSnapshot.TranslationCredentialConfigured,
             "Missing credentials were incorrectly reported as configured.");
+    }
+
+    [KeyinaTest("LibreTranslate-only configuration keeps the translation tray command available")]
+    private static void TranslationTrayAcceptsLibreTranslateOnly()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    TranslationProviders = new TranslationProviderPreferences(
+                        LibreTranslateEnabled: true,
+                        LibreTranslateEndpoint: "https://translate.example",
+                        AllowLocalEndpoint: false),
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault(null),
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        var menuItemField = typeof(KeyinaApplicationContext).GetField(
+            "translateSelectionMenuItem",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Translation tray item field was not found.");
+        var menuItem = (ToolStripMenuItem?)menuItemField.GetValue(context)
+            ?? throw new InvalidOperationException("Translation tray item was not created.");
+
+        AssertEx.True(menuItem.Enabled,
+            "Translation tray command stayed disabled with a configured LibreTranslate provider.");
+        AssertEx.False(
+            string.Equals(menuItem.ShortcutKeyDisplayString, "Cần khóa DeepL", StringComparison.Ordinal),
+            "LibreTranslate-only setup was still presented as missing a DeepL key.");
+    }
+
+    [KeyinaTest("missing Speechmatics credential opens the secure credential setup")]
+    [KeyinaInteractiveTest]
+    private static void MissingSpeechCredentialOpensCredentialSetup()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}") with
+        {
+            EnableSpeech = true,
+            FocusedDictationWriterFactory = static () =>
+                new FocusedUnicodeEnvelopeWriter(
+                    static () => new Keyina.Host.Windows.Typing.VietnameseTypingContext(
+                        Environment.ProcessId,
+                        (nint)123,
+                        ShouldBypassTyping: false),
+                    static _ => { }),
+        };
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    SpeechEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault(null),
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        context.DispatchCommandAsync(
+                HotkeyCommand.ToggleDictation,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Application.DoEvents();
+
+        AssertEx.True(context.SettingsCreated,
+            "Missing Speechmatics credential did not open credential setup.");
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        var form = (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Credential settings form was not created.");
+        var input = (TextBox)form.Controls.Find("speechApiKey", true).Single();
+        AssertEx.True(input.Focused,
+            "Missing Speechmatics credential did not focus the secure key input.");
+        context.CloseSettings();
+    }
+
+    [KeyinaTest("asynchronous Speechmatics authentication failure opens credential setup")]
+    [KeyinaInteractiveTest]
+    private static void AsyncSpeechAuthenticationFailureOpensCredentialSetup()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with { FirstRunCompleted = true },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault("expired-speech-key"),
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        var applyHostEvent = typeof(KeyinaApplicationContext).GetMethod(
+            "ApplyHostEvent",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Host event handler was not found.");
+        _ = applyHostEvent.Invoke(
+            context,
+            [new HostFailed("speech_credential_invalid")]);
+        Application.DoEvents();
+
+        var form = GetSettingsForm(context);
+        var input = (TextBox)form.Controls.Find("speechApiKey", true).Single();
+        AssertEx.True(input.Focused,
+            "Asynchronous Speechmatics authentication failure did not focus the key input.");
+        context.CloseSettings();
+    }
+
+    [KeyinaTest("missing translation provider opens the secure credential setup")]
+    [KeyinaInteractiveTest]
+    private static void MissingTranslationProviderOpensCredentialSetup()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        using var context = new KeyinaApplicationContext(
+            options,
+            new FakeCredentialVault(null),
+            new FakeTranslationProvider(),
+            new FakeSelectionAccessor());
+        context.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Application.DoEvents();
+
+        AssertEx.True(context.SettingsCreated,
+            "Missing translation provider did not open credential setup.");
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        var form = (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Credential settings form was not created.");
+        var input = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
+        AssertEx.True(input.Focused,
+            "Missing translation provider did not focus the DeepL credential input.");
+        context.CloseSettings();
+    }
+
+    [KeyinaTest("translation authentication failure opens the active provider credential input")]
+    [KeyinaInteractiveTest]
+    private static void TranslationAuthenticationFailureOpensProviderCredential()
+    {
+        using var directory = new TemporaryDirectory();
+
+        var deepLPath = Path.Combine(directory.Path, "deepl-settings.json");
+        var deepLOptions = KeyinaRuntimeOptions.CreateSelfTest(
+            deepLPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(deepLPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        using (var deepLContext = new KeyinaApplicationContext(
+                   deepLOptions,
+                   new FakeCredentialVault("invalid-deepl-key"),
+                   new FakeTranslationProvider
+                   {
+                       FailureCode = TranslationFailureCode.AuthenticationFailed,
+                   },
+                   new FakeSelectionAccessor()))
+        {
+            deepLContext.DispatchCommandAsync(
+                    HotkeyCommand.TranslateSelection,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult();
+            Application.DoEvents();
+            AssertEx.Equal(
+                "translation_auth_failed",
+                deepLContext.CurrentState.ErrorCode);
+            AssertEx.True(
+                deepLContext.SettingsCreated,
+                "DeepL authentication failure did not create credential settings.");
+            var form = GetSettingsForm(deepLContext);
+            var input = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
+            AssertEx.True(input.Focused,
+                "DeepL authentication failure did not focus the DeepL key input.");
+            deepLContext.CloseSettings();
+        }
+
+        var librePath = Path.Combine(directory.Path, "libre-settings.json");
+        var libreOptions = KeyinaRuntimeOptions.CreateSelfTest(
+            librePath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+        new AtomicConfigurationStore(librePath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    TranslationEnabled = true,
+                    FirstRunCompleted = true,
+                    TranslationProviders = new TranslationProviderPreferences(
+                        LibreTranslateEnabled: true,
+                        LibreTranslateEndpoint: "https://translate.example",
+                        AllowLocalEndpoint: false),
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        using var libreContext = new KeyinaApplicationContext(
+            libreOptions,
+            new FakeCredentialVault(null),
+            new FakeTranslationProvider
+            {
+                FailureCode = TranslationFailureCode.AuthenticationFailed,
+            },
+            new FakeSelectionAccessor());
+        libreContext.DispatchCommandAsync(
+                HotkeyCommand.TranslateSelection,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Application.DoEvents();
+        AssertEx.Equal(
+            "translation_auth_failed",
+            libreContext.CurrentState.ErrorCode);
+        AssertEx.True(
+            libreContext.SettingsCreated,
+            "LibreTranslate authentication failure did not create credential settings.");
+        var libreForm = GetSettingsForm(libreContext);
+        var libreInput = (TextBox)libreForm.Controls.Find(
+            "libreTranslateApiKey",
+            true).Single();
+        AssertEx.True(libreInput.Focused,
+            "LibreTranslate authentication failure did not focus its key input.");
+        libreContext.CloseSettings();
     }
 
     [KeyinaTest("removing the DeepL credential disables translation and persists the safe state")]
@@ -725,10 +992,10 @@ internal static class KeyinaApplicationContextTests
             ?? throw new InvalidOperationException("Translation preview field was not found.");
         var form = (TranslationPreviewForm?)formField.GetValue(context)
             ?? throw new InvalidOperationException("Translation preview form was not created.");
-        AssertEx.Equal(0, form.Controls.Find("replaceTranslationPreview", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("replaceTranslationPreview", true).Length);
         AssertEx.Equal(
             "Hello",
-            ((TextBox)form.Controls.Find(
+            ((RichTextBox)form.Controls.Find(
                 "translationPreviewTranslated",
                 true).Single()).Text);
         AssertEx.Equal(0, accessor.PreviewReplaceCount);
@@ -831,6 +1098,16 @@ internal static class KeyinaApplicationContextTests
         AssertEx.Equal(2, sound.Cues.Count);
         AssertEx.Equal(FeedbackSoundCue.Start, sound.Cues[0]);
         AssertEx.Equal(FeedbackSoundCue.Success, sound.Cues[1]);
+    }
+
+    private static SettingsForm GetSettingsForm(KeyinaApplicationContext context)
+    {
+        var formField = typeof(KeyinaApplicationContext).GetField(
+            "settingsForm",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings form field was not found.");
+        return (SettingsForm?)formField.GetValue(context)
+            ?? throw new InvalidOperationException("Credential settings form was not created.");
     }
 
     private static void InvokeClick(Button button)
@@ -952,6 +1229,8 @@ internal static class KeyinaApplicationContextTests
 
     private sealed class FakeTranslationProvider : ITranslationProvider
     {
+        public TranslationFailureCode? FailureCode { get; init; }
+
         public int CallCount { get; private set; }
 
         public string? LastApiKey { get; private set; }
@@ -966,6 +1245,12 @@ internal static class KeyinaApplicationContextTests
             CallCount++;
             LastApiKey = apiKey;
             LastRequest = request;
+            if (FailureCode is { } failureCode)
+            {
+                throw new TranslationException(
+                    failureCode,
+                    "Synthetic provider failure without user content.");
+            }
             return Task.FromResult(new TranslationResult("Hello", "VI", "Fake"));
         }
     }

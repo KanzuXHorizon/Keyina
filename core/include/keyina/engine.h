@@ -78,6 +78,7 @@ class Engine {
   std::u32string previous_key_buffer_;
   std::u32string edit_buffer_;
   std::u32string literal_text_buffer_;
+  bool has_tone_key_before_trailing_character_{false};
 };
 
 }  // namespace keyina

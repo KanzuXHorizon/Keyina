@@ -23,6 +23,7 @@ public sealed class DictationCoordinator : IAsyncDisposable
     private CancellationTokenSource? eventCancellation;
     private Task? audioPump;
     private Task? eventPump;
+    private TaskCompletionSource? transcriptCompleted;
     private IpcSessionId sessionId;
     private bool active;
     private bool disposed;
@@ -65,16 +66,23 @@ public sealed class DictationCoordinator : IAsyncDisposable
             {
                 throw new InvalidOperationException("Dictation is already active.");
             }
+            if (overlay.State.Status is DictationStatus.Error or
+                DictationStatus.Cancelled or DictationStatus.Inserted)
+            {
+                overlay.Apply(new DictationEvent.Reset());
+            }
 
             aggregator.Reset();
             overlay.Apply(new DictationEvent.StartRequested());
             this.sessionId = sessionId;
-            session = sessionFactory.Create(apiKey);
-            audioCancellation = new CancellationTokenSource();
-            eventCancellation = new CancellationTokenSource();
 
             try
             {
+                session = sessionFactory.Create(apiKey);
+                audioCancellation = new CancellationTokenSource();
+                eventCancellation = new CancellationTokenSource();
+                transcriptCompleted = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
                 await session.StartAsync(cancellationToken).ConfigureAwait(false);
                 overlay.Apply(new DictationEvent.RecognitionStarted());
                 publishHostEvent(new ListeningStarted());
@@ -118,8 +126,23 @@ public sealed class DictationCoordinator : IAsyncDisposable
             await session.StopAsync(finalizationTimeout, cancellationToken)
                 .ConfigureAwait(false);
 
-            eventCancellation?.Cancel();
+            var completion = transcriptCompleted ??
+                throw new InvalidOperationException(
+                    "Dictation transcript completion signal is unavailable.");
+            await completion.Task.WaitAsync(finalizationTimeout, cancellationToken)
+                .ConfigureAwait(false);
             await AwaitCancellationAsync(eventPump).ConfigureAwait(false);
+
+            var finalEnvelope = aggregator.Complete(
+                sessionId,
+                focusGenerationProvider());
+            if (finalEnvelope is not null)
+            {
+                await envelopeWriter.WriteAsync(finalEnvelope, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            eventCancellation?.Cancel();
             overlay.Apply(new DictationEvent.FinalInserted());
             publishHostEvent(new ListeningStopped());
             await CleanupActiveSessionAsync(cancelled: false).ConfigureAwait(false);
@@ -210,11 +233,13 @@ public sealed class DictationCoordinator : IAsyncDisposable
         {
             PublishFailure($"audio_{exception.Error.ToString().ToLowerInvariant()}");
             eventCancellation?.Cancel();
+            ScheduleFailureCleanup();
         }
         catch (Exception)
         {
             PublishFailure("audio_unexpected");
             eventCancellation?.Cancel();
+            ScheduleFailureCleanup();
         }
     }
 
@@ -231,17 +256,31 @@ public sealed class DictationCoordinator : IAsyncDisposable
                 switch (speechEvent.Kind)
                 {
                     case SpeechEventKind.PartialTranscript:
-                        HandlePartial(speechEvent);
+                        if (!string.IsNullOrWhiteSpace(speechEvent.Text))
+                        {
+                            HandlePartial(speechEvent);
+                        }
                         break;
 
                     case SpeechEventKind.FinalTranscript:
-                        await HandleFinalAsync(speechEvent, cancellationToken)
-                            .ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(speechEvent.Text))
+                        {
+                            HandleFinal(speechEvent);
+                        }
                         break;
 
+                    case SpeechEventKind.EndOfTranscript:
+                        transcriptCompleted?.TrySetResult();
+                        return;
+
                     case SpeechEventKind.ProviderError:
-                        PublishFailure("speech_provider_error");
+                        PublishFailure(
+                            SpeechmaticsSessionException.IsAuthenticationProviderType(
+                                speechEvent.ProviderType)
+                                ? "speech_credential_invalid"
+                                : "speech_provider_error");
                         audioCancellation?.Cancel();
+                        ScheduleFailureCleanup();
                         return;
 
                     case SpeechEventKind.ProviderWarning:
@@ -262,6 +301,7 @@ public sealed class DictationCoordinator : IAsyncDisposable
         {
             PublishFailure("speech_receive_failed");
             audioCancellation?.Cancel();
+            ScheduleFailureCleanup();
         }
     }
 
@@ -271,22 +311,16 @@ public sealed class DictationCoordinator : IAsyncDisposable
         overlay.Apply(new DictationEvent.PartialUpdated(update.PartialText));
     }
 
-    private async ValueTask HandleFinalAsync(
-        SpeechEvent speechEvent,
-        CancellationToken cancellationToken)
+    private void HandleFinal(SpeechEvent speechEvent)
     {
         var update = aggregator.Apply(
             ToTranscriptEvent(speechEvent),
             sessionId,
-            focusGenerationProvider());
-        if (update.FinalEnvelope is null)
+            focusGeneration: 0);
+        if (update.FinalOrdinal > overlay.State.FinalSegments)
         {
-            return;
+            overlay.Apply(new DictationEvent.FinalReceived());
         }
-
-        await envelopeWriter.WriteAsync(update.FinalEnvelope, cancellationToken)
-            .ConfigureAwait(false);
-        overlay.Apply(new DictationEvent.FinalReceived());
     }
 
     private static TranscriptEvent ToTranscriptEvent(SpeechEvent speechEvent) =>
@@ -318,32 +352,91 @@ public sealed class DictationCoordinator : IAsyncDisposable
         {
             AudioCaptureException audio =>
                 $"audio_{audio.Error.ToString().ToLowerInvariant()}",
+            SpeechmaticsSessionException speech when
+                speech.IsAuthenticationFailure =>
+                "speech_credential_invalid",
             _ => "speech_start_failed",
         };
         PublishFailure(code);
         await CleanupActiveSessionAsync(cancelled: false).ConfigureAwait(false);
     }
 
+    private void ScheduleFailureCleanup() => _ = CleanupFailedSessionAsync();
+
+    private async Task CleanupFailedSessionAsync()
+    {
+        try
+        {
+            await lifecycleGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!disposed && active && overlay.State.Status == DictationStatus.Error)
+                {
+                    await CleanupActiveSessionAsync(cancelled: false)
+                        .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                lifecycleGate.Release();
+            }
+        }
+        catch (Exception)
+        {
+            // Failure cleanup is best effort and must not fault a background pump.
+        }
+    }
+
     private async Task CleanupActiveSessionAsync(bool cancelled)
     {
-        audioCancellation?.Cancel();
-        eventCancellation?.Cancel();
-        await AwaitCancellationAsync(audioPump).ConfigureAwait(false);
-        await AwaitCancellationAsync(eventPump).ConfigureAwait(false);
+        var currentAudioCancellation = audioCancellation;
+        var currentEventCancellation = eventCancellation;
+        var currentAudioPump = audioPump;
+        var currentEventPump = eventPump;
+        var currentTranscriptCompleted = transcriptCompleted;
+        var currentSession = session;
 
-        if (session is not null)
+        currentAudioCancellation?.Cancel();
+        currentEventCancellation?.Cancel();
+        try
         {
-            await session.DisposeAsync().ConfigureAwait(false);
+            await AwaitCancellationAsync(currentAudioPump).ConfigureAwait(false);
+            await AwaitCancellationAsync(currentEventPump).ConfigureAwait(false);
+            if (currentSession is not null)
+            {
+                await currentSession.DisposeAsync().ConfigureAwait(false);
+            }
         }
-
-        audioCancellation?.Dispose();
-        eventCancellation?.Dispose();
-        audioCancellation = null;
-        eventCancellation = null;
-        audioPump = null;
-        eventPump = null;
-        session = null;
-        active = false;
+        finally
+        {
+            currentAudioCancellation?.Dispose();
+            currentEventCancellation?.Dispose();
+            if (ReferenceEquals(audioCancellation, currentAudioCancellation))
+            {
+                audioCancellation = null;
+            }
+            if (ReferenceEquals(eventCancellation, currentEventCancellation))
+            {
+                eventCancellation = null;
+            }
+            if (ReferenceEquals(audioPump, currentAudioPump))
+            {
+                audioPump = null;
+            }
+            if (ReferenceEquals(eventPump, currentEventPump))
+            {
+                eventPump = null;
+            }
+            if (ReferenceEquals(transcriptCompleted, currentTranscriptCompleted))
+            {
+                transcriptCompleted = null;
+            }
+            if (ReferenceEquals(session, currentSession))
+            {
+                session = null;
+                active = false;
+            }
+        }
 
         if (cancelled && overlay.State.Status is DictationStatus.Listening or DictationStatus.Finalizing)
         {

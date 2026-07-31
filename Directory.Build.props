@@ -1,9 +1,9 @@
 <Project>
   <PropertyGroup>
-    <KeyinaVersion>0.1.2</KeyinaVersion>
+    <KeyinaVersion>0.1.6</KeyinaVersion>
     <Version Condition="'$(Version)' == ''">$(KeyinaVersion)</Version>
-    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">0.1.2.0</AssemblyVersion>
-    <FileVersion Condition="'$(FileVersion)' == ''">0.1.2.0</FileVersion>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">0.1.6.0</AssemblyVersion>
+    <FileVersion Condition="'$(FileVersion)' == ''">0.1.6.0</FileVersion>
     <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
     <Product>Keyina</Product>
     <Company>Keyina contributors</Company>

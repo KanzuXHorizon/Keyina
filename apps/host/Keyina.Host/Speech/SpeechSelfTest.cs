@@ -45,15 +45,19 @@ public static class SpeechSelfTest
             }
 
             var aggregator = new TranscriptAggregator();
-            var update = aggregator.Apply(
+            var selfTestSessionId = new IpcSessionId(1, 2);
+            aggregator.Apply(
                 new TranscriptEvent(
                     TranscriptEventKind.Final,
                     speechEvent.Text,
                     speechEvent.StartTimeSeconds,
                     speechEvent.EndTimeSeconds),
-                new IpcSessionId(1, 2),
+                selfTestSessionId,
                 focusGeneration: 3);
-            if (update.FinalEnvelope is null)
+            var finalEnvelope = aggregator.Complete(
+                selfTestSessionId,
+                focusGeneration: 3);
+            if (finalEnvelope is null)
             {
                 return new SpeechSelfTestResult(
                     false,
@@ -62,7 +66,7 @@ public static class SpeechSelfTest
                     transport.Closed);
             }
 
-            var frame = IpcFrameCodec.Encode(update.FinalEnvelope);
+            var frame = IpcFrameCodec.Encode(finalEnvelope);
             var decodeStatus = IpcFrameCodec.TryDecode(
                 frame,
                 out var decoded,
@@ -70,7 +74,7 @@ public static class SpeechSelfTest
                 out _);
             var success = decodeStatus == IpcDecodeStatus.Success &&
                 consumed == frame.Length &&
-                decoded == update.FinalEnvelope;
+                decoded == finalEnvelope;
             return new SpeechSelfTestResult(
                 success,
                 success ? "speech_self_test_ok" : "speech_self_test_ipc_failed",

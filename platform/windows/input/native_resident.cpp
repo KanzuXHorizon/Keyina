@@ -27,7 +27,7 @@ bool WriteRuntimeProfileVector(
     const wchar_t* path,
     bool vietnamese_enabled) noexcept {
   std::array<std::uint8_t, 36> bytes{
-      0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x01, 0x06,
+      0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x11, 0x06,
       0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
       0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
       0x00, 0x1B, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -94,6 +94,31 @@ std::uint32_t CountProcessThreads() noexcept {
   }
   CloseHandle(snapshot);
   return count;
+}
+
+std::uint32_t MeasureSettledProcessThreadBaseline() noexcept {
+  constexpr ULONGLONG kMinimumProcessAgeMilliseconds = 1000;
+  constexpr ULONGLONG kStableWindowMilliseconds = 250;
+  constexpr ULONGLONG kMaximumWaitMilliseconds = 2000;
+
+  const ULONGLONG started_at = GetTickCount64();
+  ULONGLONG stable_since = started_at;
+  std::uint32_t current = CountProcessThreads();
+  while (GetTickCount64() - started_at < kMaximumWaitMilliseconds) {
+    Sleep(25);
+    const auto next = CountProcessThreads();
+    const ULONGLONG now = GetTickCount64();
+    if (next != current) {
+      current = next;
+      stable_since = now;
+      continue;
+    }
+    if (now - started_at >= kMinimumProcessAgeMilliseconds &&
+        now - stable_since >= kStableWindowMilliseconds) {
+      break;
+    }
+  }
+  return current;
 }
 
 std::uint64_t CurrentWorkingSet() noexcept {
@@ -397,11 +422,13 @@ int RunProfileReloadSelfTest() noexcept {
   {
     auto profile = keyina::windows::LoadRuntimeInputProfileOrDefault();
     keyina::windows::Win32InputRuntime runtime(profile, false);
-    if (profile.vietnamese_enabled && runtime.Start()) {
+    if (profile.vietnamese_enabled && profile.restore_invalid_word &&
+        runtime.Start()) {
       Sleep(20);
       if (WriteRuntimeProfileVector(profile_path.data(), false)) {
         runtime.PumpMessagesFor(2200);
-        success = !runtime.profile().vietnamese_enabled;
+        success = !runtime.profile().vietnamese_enabled &&
+            runtime.profile().restore_invalid_word;
       }
       runtime.Stop();
     }
@@ -424,8 +451,6 @@ int RunProfileReloadSelfTest() noexcept {
 }
 
 int RunResourceSelfTest(bool enable_tray) noexcept {
-  const auto baseline_threads = CountProcessThreads();
-  const auto baseline_working_set = CurrentWorkingSet();
   auto profile = keyina::windows::DefaultRuntimeInputProfile();
   profile.vietnamese_enabled = false;
   keyina::windows::Win32InputRuntime runtime(profile, enable_tray);
@@ -445,6 +470,8 @@ int RunResourceSelfTest(bool enable_tray) noexcept {
   }
 
   runtime.PumpMessagesFor(500);
+  const auto baseline_threads = MeasureSettledProcessThreadBaseline();
+  const auto baseline_working_set = CurrentWorkingSet();
   const auto snapshot = keyina::windows::MeasureNativeResidentResources(
       runtime, 5000, baseline_threads);
   std::array<char, 1024> json{};

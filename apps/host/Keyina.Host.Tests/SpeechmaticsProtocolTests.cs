@@ -6,7 +6,7 @@ namespace Keyina.Host.Tests;
 internal static class SpeechmaticsProtocolTests
 {
     private const string ExpectedStartJson =
-        "{\"message\":\"StartRecognition\",\"audio_format\":{\"type\":\"raw\",\"encoding\":\"pcm_s16le\",\"sample_rate\":16000},\"transcription_config\":{\"language\":\"vi\",\"model\":\"enhanced\",\"max_delay\":0.7,\"enable_partials\":true}}";
+        "{\"message\":\"StartRecognition\",\"audio_format\":{\"type\":\"raw\",\"encoding\":\"pcm_s16le\",\"sample_rate\":16000},\"transcription_config\":{\"language\":\"vi\",\"model\":\"enhanced\",\"max_delay\":2,\"max_delay_mode\":\"flexible\",\"enable_partials\":true,\"conversation_config\":{\"end_of_utterance_silence_trigger\":0}}}";
 
     [KeyinaTest("Speechmatics Vietnamese defaults match the production realtime contract")]
     private static void DefaultsAreVietnameseAndLowLatency()
@@ -15,7 +15,9 @@ internal static class SpeechmaticsProtocolTests
         AssertEx.Equal(new Uri("wss://global.rt.speechmatics.com/v2"), options.Endpoint);
         AssertEx.Equal("vi", options.Language);
         AssertEx.Equal("enhanced", options.Model);
-        AssertEx.Equal(0.7, options.MaxDelaySeconds);
+        AssertEx.Equal(2.0, options.MaxDelaySeconds);
+        AssertEx.Equal("flexible", options.MaxDelayMode);
+        AssertEx.Equal(0.0, options.EndOfUtteranceSilenceTriggerSeconds);
         AssertEx.True(options.EnablePartials, "Partials should be enabled for overlay feedback.");
         AssertEx.Equal(16_000, options.SampleRate);
         AssertEx.Equal(4_096, options.ChunkSizeBytes);
@@ -51,6 +53,13 @@ internal static class SpeechmaticsProtocolTests
             (SpeechmaticsOptions.VietnameseDefault with { Language = "" }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
             (SpeechmaticsOptions.VietnameseDefault with { MaxDelaySeconds = 0 }).Validate());
+        AssertThrows<ArgumentException>(() =>
+            (SpeechmaticsOptions.VietnameseDefault with { MaxDelayMode = "fast" }).Validate());
+        AssertThrows<ArgumentOutOfRangeException>(() =>
+            (SpeechmaticsOptions.VietnameseDefault with
+            {
+                EndOfUtteranceSilenceTriggerSeconds = 2.1,
+            }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
             (SpeechmaticsOptions.VietnameseDefault with { SampleRate = 0 }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
@@ -74,8 +83,8 @@ internal static class SpeechmaticsProtocolTests
         AssertEx.Equal(0.8, final.EndTimeSeconds);
     }
 
-    [KeyinaTest("Speechmatics parser accepts empty partial transcripts while recognition is warming up")]
-    private static void EmptyPartialTranscriptIsAccepted()
+    [KeyinaTest("Speechmatics parser accepts empty transcript fragments during warm-up and final flush")]
+    private static void EmptyTranscriptFragmentsAreAccepted()
     {
         var partial = SpeechmaticsProtocol.ParseServerMessage(
             "{\"message\":\"AddPartialTranscript\",\"metadata\":{\"transcript\":\"\",\"start_time\":0.0,\"end_time\":0.62}}"u8);
@@ -84,6 +93,11 @@ internal static class SpeechmaticsProtocolTests
         AssertEx.Equal(string.Empty, partial.Text);
         AssertEx.Equal(0.0, partial.StartTimeSeconds);
         AssertEx.Equal(0.62, partial.EndTimeSeconds);
+
+        var final = SpeechmaticsProtocol.ParseServerMessage(
+            "{\"message\":\"AddTranscript\",\"metadata\":{\"transcript\":\"\",\"start_time\":0.0,\"end_time\":0.62}}"u8);
+        AssertEx.Equal(SpeechEventKind.FinalTranscript, final.Kind);
+        AssertEx.Equal(string.Empty, final.Text);
     }
 
     [KeyinaTest("Speechmatics parser handles session acknowledgement audio acknowledgement and end")]

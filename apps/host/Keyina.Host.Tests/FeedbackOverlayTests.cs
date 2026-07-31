@@ -4,6 +4,7 @@ using Keyina.Host.UI.Feedback;
 
 namespace Keyina.Host.Tests;
 
+[KeyinaInteractiveTest]
 internal static class FeedbackOverlayTests
 {
     private const int ExtendedStyleIndex = -20;

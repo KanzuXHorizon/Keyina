@@ -3,6 +3,7 @@ using Keyina.Host.UI;
 
 namespace Keyina.Host.Tests;
 
+[KeyinaInteractiveTest]
 internal static class FirstRunFormTests
 {
     [KeyinaTest("first-run form exposes optional setup paths and completion controls")]

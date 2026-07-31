@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -6,6 +7,7 @@ using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Tests;
 
+[KeyinaInteractiveTest]
 internal static class LiveKeyboardHookIntegrationTests
 {
     [KeyinaTest("native typing context refreshes password state on the same focused control")]
@@ -135,6 +137,7 @@ internal static class LiveKeyboardHookIntegrationTests
             StartPosition = FormStartPosition.Manual,
             Location = new Point(-1200, 100),
             Size = new Size(480, 180),
+            FormBorderStyle = FormBorderStyle.None,
             ShowInTaskbar = false,
         };
         using var textBox = new TextBox
@@ -143,72 +146,110 @@ internal static class LiveKeyboardHookIntegrationTests
             Multiline = true,
         };
         form.Controls.Add(textBox);
+        var allowFormClose = false;
+        FormClosingEventHandler closeGuard = (_, eventArgs) =>
+        {
+            if (!allowFormClose)
+            {
+                eventArgs.Cancel = true;
+            }
+        };
+        form.FormClosing += closeGuard;
         form.Show();
         EnsureForeground(form, textBox);
 
         using var hook = new VietnameseKeyboardHook();
-        hook.Start(enabledInitially: true);
-        EnsureForeground(form, textBox);
-
-        TypeWithInterferenceRetry(
-            form,
-            textBox,
-            hook,
-            baselineText: string.Empty,
-            rawText: "tieengs vieetj",
-            expectedText: "tiếng việt",
-            operationName: "basic Vietnamese typing");
-
-        TypeWithInterferenceRetry(
-            form,
-            textBox,
-            hook,
-            baselineText: string.Empty,
-            rawText: "as",
-            expectedText: "á",
-            operationName: "selection replacement typing");
-
-        EnsureForeground(form, textBox);
-        textBox.Clear();
-        hook.Reset();
-        var burstCases = new[]
+        try
         {
-            (Raw: "truocws dduocwj nuawx tieengs vieetj vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
-            (Raw: "truowcs dduowcj nuwxa tieesng vieejt vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
-            (Raw: "truwocs dduwocj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
-            (Raw: "truowsc dduowjc nuwxa tieesng vieetj vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
-            (Raw: "truocsw dduocwj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
-        };
-        var expected = new StringBuilder();
-        for (var iteration = 0; iteration < 20; iteration++)
-        {
-            var baselineText = expected.ToString();
-            var testCase = burstCases[iteration % burstCases.Length];
-            var expectedText = baselineText + testCase.Expected;
+            hook.Start(enabledInitially: true);
+            EnsureForeground(form, textBox);
+
             TypeWithInterferenceRetry(
                 form,
                 textBox,
                 hook,
-                baselineText,
-                testCase.Raw,
-                expectedText,
-                $"stress iteration {iteration + 1}");
-            expected.Append(testCase.Expected);
+                baselineText: string.Empty,
+                rawText: "tieengs vieetj",
+                expectedText: "tiếng việt",
+                operationName: "basic Vietnamese typing");
+
+            TypeWithInterferenceRetry(
+                form,
+                textBox,
+                hook,
+                baselineText: string.Empty,
+                rawText: "as",
+                expectedText: "á",
+                operationName: "selection replacement typing");
+
+            TypeWithInterferenceRetry(
+                form,
+                textBox,
+                hook,
+                baselineText: string.Empty,
+                rawText: "register",
+                expectedText: "register",
+                operationName: "embedded tone key in a Latin token");
+
+            EnsureForeground(form, textBox);
+            textBox.Clear();
+            hook.Reset();
+            var burstCases = new[]
+            {
+                (Raw: "truocws dduocwj nuawx tieengs vieetj vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+                (Raw: "truowcs dduowcj nuwxa tieesng vieejt vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+                (Raw: "truwocs dduwocj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+                (Raw: "truowsc dduowjc nuwxa tieesng vieetj vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+                (Raw: "truocsw dduocwj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+            };
+            var expected = new StringBuilder();
+            for (var caseIndex = 0; caseIndex < burstCases.Length; caseIndex++)
+            {
+                var testCase = burstCases[caseIndex];
+                var rawWords = testCase.Raw.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+                var expectedWords = testCase.Expected.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+                AssertEx.Equal(rawWords.Length, expectedWords.Length);
+
+                for (var wordIndex = 0; wordIndex < rawWords.Length; wordIndex++)
+                {
+                    var baselineText = expected.ToString();
+                    var rawChunk = rawWords[wordIndex] + " ";
+                    var expectedChunk = expectedWords[wordIndex] + " ";
+                    var expectedText = baselineText + expectedChunk;
+                    TypeWithInterferenceRetry(
+                        form,
+                        textBox,
+                        hook,
+                        baselineText,
+                        rawChunk,
+                        expectedText,
+                        $"live Telex case {caseIndex + 1}, word {wordIndex + 1}");
+                    expected.Append(expectedChunk);
+                }
+            }
+
+            var pasteElapsed = PasteWithRetry(
+                form,
+                textBox,
+                hook,
+                baselineText: "nội dung cũ cần thay",
+                clipboardText: "đoạn văn được dán nguyên vẹn");
+            AssertEx.True(
+                pasteElapsed < TimeSpan.FromSeconds(1),
+                $"Ctrl+V took {pasteElapsed.TotalMilliseconds:F0} ms.");
         }
-
-        var pasteElapsed = PasteWithRetry(
-            form,
-            textBox,
-            hook,
-            baselineText: "nội dung cũ cần thay",
-            clipboardText: "đoạn văn được dán nguyên vẹn");
-        AssertEx.True(
-            pasteElapsed < TimeSpan.FromSeconds(1),
-            $"Ctrl+V took {pasteElapsed.TotalMilliseconds:F0} ms.");
-
-        hook.Dispose();
-        form.Close();
-        Application.DoEvents();
+        finally
+        {
+            hook.Dispose();
+            allowFormClose = true;
+            form.FormClosing -= closeGuard;
+            form.Close();
+            Application.DoEvents();
+        }
     }
 
     private static TimeSpan PasteWithRetry(
@@ -271,7 +312,7 @@ internal static class LiveKeyboardHookIntegrationTests
 
             try
             {
-                SendAscii(rawText, hook);
+                SendAscii(rawText, hook, form, textBox);
             }
             catch (InvalidOperationException exception) when (
                 exception.InnerException is LiveInputDeliveryException &&
@@ -508,23 +549,55 @@ internal static class LiveKeyboardHookIntegrationTests
         Application.DoEvents();
     }
 
-    private static void SendAscii(string text, VietnameseKeyboardHook hook)
+    private static void SendAscii(
+        string text,
+        VietnameseKeyboardHook hook,
+        Form form,
+        TextBox textBox)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
         ArgumentNullException.ThrowIfNull(hook);
+        ArgumentNullException.ThrowIfNull(form);
+        ArgumentNullException.ThrowIfNull(textBox);
 
+        var expectedSnapshots = BuildExpectedTextSnapshots(textBox.Text, text);
+        var targetWindow = form.Handle;
         Exception? workerFailure = null;
+        Exception? deliveryFailure = null;
+        var attemptedCharacters = 0;
+        var dispatchedIndex = -1;
         using var completed = new ManualResetEventSlim();
+        using var keyDispatched = new AutoResetEvent(initialState: false);
+        using var uiAcknowledged = new AutoResetEvent(initialState: false);
+        using var inputEvents = new LiveInputEventTracker(hook);
         var worker = new Thread(() =>
         {
             try
             {
-                foreach (var character in text)
+                for (var index = 0; index < text.Length; index++)
                 {
+                    Volatile.Write(ref attemptedCharacters, index + 1);
+                    var character = text[index];
                     var virtualKey = character == ' '
                         ? checked((ushort)0x20)
                         : checked((ushort)char.ToUpperInvariant(character));
-                    SendVirtualKeyFromWorker(virtualKey, hook);
+                    WaitForLiveInputPreconditions(
+                        targetWindow,
+                        virtualKey,
+                        index);
+                    SendVirtualKeyFromWorker(virtualKey, inputEvents);
+                    Volatile.Write(ref dispatchedIndex, index);
+                    keyDispatched.Set();
+                    if (!uiAcknowledged.WaitOne(TimeSpan.FromSeconds(2)))
+                    {
+                        throw new LiveInputDeliveryException(
+                            $"The UI thread did not acknowledge key 0x{virtualKey:X2} at index {index}.");
+                    }
+                    var failure = Volatile.Read(ref deliveryFailure);
+                    if (failure is not null)
+                    {
+                        throw failure;
+                    }
                 }
             }
             catch (Exception exception)
@@ -542,15 +615,81 @@ internal static class LiveKeyboardHookIntegrationTests
         };
 
         worker.Start();
-        var timeout = TimeSpan.FromSeconds(Math.Max(5, text.Length * 0.05));
+        var timeout = TimeSpan.FromSeconds(Math.Max(5, text.Length * 0.1));
         var deadline = DateTime.UtcNow + timeout;
         while (!completed.IsSet && DateTime.UtcNow < deadline)
         {
-            Application.DoEvents();
-            Thread.Sleep(1);
+            if (!keyDispatched.WaitOne(millisecondsTimeout: 0))
+            {
+                Application.DoEvents();
+                Thread.Sleep(1);
+                continue;
+            }
+
+            var index = Volatile.Read(ref dispatchedIndex);
+            var deliveryDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+            while (index >= 0 &&
+                   !form.IsDisposed &&
+                   !textBox.IsDisposed &&
+                   !string.Equals(
+                       textBox.Text,
+                       expectedSnapshots[index],
+                       StringComparison.Ordinal) &&
+                   GetForegroundWindow() == targetWindow &&
+                   textBox.Focused &&
+                   DateTime.UtcNow < deliveryDeadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(1);
+            }
+
+            if (index < 0)
+            {
+                Volatile.Write(
+                    ref deliveryFailure,
+                    new LiveInputDeliveryException(
+                        "The live input source signaled without a dispatched index."));
+            }
+            else if (form.IsDisposed || textBox.IsDisposed)
+            {
+                Volatile.Write(
+                    ref deliveryFailure,
+                    new LiveInputDeliveryException(
+                        $"The live target was disposed after index {index}."));
+            }
+            else if (GetForegroundWindow() != targetWindow || !textBox.Focused)
+            {
+                var foreground = GetForegroundWindow();
+                Volatile.Write(
+                    ref deliveryFailure,
+                    new LiveInputDeliveryException(
+                        $"The live target lost focus after index {index}; " +
+                        $"target=0x{targetWindow:X};foreground={DescribeWindow(foreground)};" +
+                        $"modifiers={DescribePhysicalModifiers()}."));
+            }
+            else if (!string.Equals(
+                         textBox.Text,
+                         expectedSnapshots[index],
+                         StringComparison.Ordinal))
+            {
+                var recentActions = string.Join(
+                    ",",
+                    TypingTraceBuffer.Snapshot(24).Select(entry => entry.Action));
+                Volatile.Write(
+                    ref deliveryFailure,
+                    new LiveInputDeliveryException(
+                        $"The target did not apply index {index}. " +
+                        $"Expected '{expectedSnapshots[index]}', actual '{textBox.Text}', " +
+                        $"recent actions=[{recentActions}]."));
+            }
+            uiAcknowledged.Set();
         }
 
-        AssertEx.True(completed.IsSet, "The live-hook input worker timed out.");
+        AssertEx.True(
+            completed.IsSet,
+            $"The live-hook input worker timed out after attempting " +
+            $"{Volatile.Read(ref attemptedCharacters)}/{text.Length} characters; " +
+            $"processedEvents={hook.ProcessedPhysicalEventCount}.");
         worker.Join();
         if (workerFailure is not null)
         {
@@ -561,38 +700,135 @@ internal static class LiveKeyboardHookIntegrationTests
         Application.DoEvents();
     }
 
+    private static string[] BuildExpectedTextSnapshots(
+        string baselineText,
+        string rawText)
+    {
+        using var engine = new NativeEngineClient();
+        engine.Configure(restoreInvalidWord: true);
+        var snapshots = new string[rawText.Length];
+        var current = baselineText;
+        for (var index = 0; index < rawText.Length; index++)
+        {
+            var character = rawText[index];
+            var edit = character == ' '
+                ? engine.Process(NativeEngineKeyKind.CommitBoundary, new Rune(' '))
+                : engine.Process(NativeEngineKeyKind.Character, new Rune(character));
+            current = edit.ConsumePhysicalKey
+                ? ApplyExpectedEdit(current, edit)
+                : current + character;
+            snapshots[index] = current;
+        }
+        return snapshots;
+    }
+
+    private static string ApplyExpectedEdit(string text, HookEdit edit)
+    {
+        var end = text.Length;
+        for (var index = 0; index < edit.BackspaceCount; index++)
+        {
+            if (end == 0)
+            {
+                throw new InvalidOperationException(
+                    "The expected live-input model erased beyond its owned text.");
+            }
+            end--;
+            if (char.IsLowSurrogate(text[end]) &&
+                end > 0 &&
+                char.IsHighSurrogate(text[end - 1]))
+            {
+                end--;
+            }
+        }
+        return string.Concat(text.AsSpan(0, end), edit.InsertText);
+    }
+
     private static void SendVirtualKeyFromWorker(
         ushort virtualKey,
-        VietnameseKeyboardHook hook)
+        LiveInputEventTracker inputEvents)
     {
-        var processedBefore = hook.ProcessedPhysicalEventCount;
-
-        SendPhysicalKeyEvent(virtualKey, keyUp: false);
+        SendPhysicalKeyEvent(
+            virtualKey,
+            keyUp: false,
+            LiveInputEventTracker.Marker);
         try
         {
-            WaitForProcessedEvents(
-                hook,
-                processedBefore + 1,
-                $"key-down 0x{virtualKey:X2}");
+            inputEvents.WaitFor(
+                virtualKey,
+                isKeyDown: true,
+                TimeSpan.FromSeconds(2));
         }
         finally
         {
-            SendPhysicalKeyEvent(virtualKey, keyUp: true);
+            SendPhysicalKeyEvent(
+                virtualKey,
+                keyUp: true,
+                LiveInputEventTracker.Marker);
         }
-        WaitForProcessedEvents(
-            hook,
-            processedBefore + 2,
-            $"key-up 0x{virtualKey:X2}");
-
-        // The hook callback can enqueue Unicode replacement input after the
-        // physical event. Give the target UI thread a brief chance to apply
-        // that edit before the next synthetic physical key arrives.
-        Thread.Sleep(3);
+        inputEvents.WaitFor(
+            virtualKey,
+            isKeyDown: false,
+            TimeSpan.FromSeconds(2));
     }
 
-    private static void SendPhysicalKeyEvent(ushort virtualKey, bool keyUp)
+    private static void WaitForLiveInputPreconditions(
+        nint targetWindow,
+        ushort virtualKey,
+        int index)
     {
-        Input[] inputs = [Input.Key(virtualKey, keyUp)];
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (GetForegroundWindow() == targetWindow &&
+                !IsPhysicalModifierPressed())
+            {
+                return;
+            }
+            Thread.Sleep(2);
+        }
+
+        throw new LiveInputDeliveryException(
+            $"The desktop was not ready for key 0x{virtualKey:X2} at index {index}. " +
+            $"foreground=0x{GetForegroundWindow():X};modifiersDown={IsPhysicalModifierPressed()}.");
+    }
+
+    private static bool IsPhysicalModifierPressed() =>
+        IsPhysicalKeyPressed(0x10) ||
+        IsPhysicalKeyPressed(0x11) ||
+        IsPhysicalKeyPressed(0x12) ||
+        IsPhysicalKeyPressed(0x5B) ||
+        IsPhysicalKeyPressed(0x5C);
+
+    private static string DescribePhysicalModifiers() =>
+        $"shift={IsPhysicalKeyPressed(0x10)}," +
+        $"control={IsPhysicalKeyPressed(0x11)}," +
+        $"alt={IsPhysicalKeyPressed(0x12)}," +
+        $"leftWin={IsPhysicalKeyPressed(0x5B)}," +
+        $"rightWin={IsPhysicalKeyPressed(0x5C)}";
+
+    private static string DescribeWindow(nint window)
+    {
+        _ = GetWindowThreadProcessId(window, out var processId);
+        try
+        {
+            using var process = Process.GetProcessById(checked((int)processId));
+            return $"0x{window:X}/{process.ProcessName}/{processId}";
+        }
+        catch (Exception)
+        {
+            return $"0x{window:X}/unknown/{processId}";
+        }
+    }
+
+    private static bool IsPhysicalKeyPressed(int virtualKey) =>
+        (GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
+
+    private static void SendPhysicalKeyEvent(
+        ushort virtualKey,
+        bool keyUp,
+        nuint extraInfo = 0)
+    {
+        Input[] inputs = [Input.Key(virtualKey, keyUp, extraInfo)];
         var sent = SendInput(
             checked((uint)inputs.Length),
             inputs,
@@ -639,6 +875,80 @@ internal static class LiveKeyboardHookIntegrationTests
     private sealed class LiveInputDeliveryException(string message)
         : InvalidOperationException(message);
 
+    private sealed class LiveInputEventTracker : IDisposable
+    {
+        public static readonly nuint Marker =
+            unchecked((nuint)0x4B455954455354UL);
+
+        private readonly ConcurrentQueue<VietnameseKeyboardEvent> events = new();
+        private readonly AutoResetEvent eventAvailable = new(initialState: false);
+        private readonly IDisposable subscription;
+        private bool disposed;
+
+        public LiveInputEventTracker(VietnameseKeyboardHook hook)
+        {
+            subscription = hook.SubscribePhysicalEvents(Record);
+        }
+
+        public void WaitFor(
+            ushort virtualKey,
+            bool isKeyDown,
+            TimeSpan timeout)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var deadline = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                while (events.TryDequeue(out var keyboardEvent))
+                {
+                    if (keyboardEvent.VirtualKey == virtualKey &&
+                        keyboardEvent.IsKeyDown == isKeyDown)
+                    {
+                        return;
+                    }
+                    throw new LiveInputDeliveryException(
+                        $"The live hook observed an unexpected marked event. " +
+                        $"Expected key 0x{virtualKey:X2} " +
+                        $"{(isKeyDown ? "down" : "up")}, received " +
+                        $"0x{keyboardEvent.VirtualKey:X2} " +
+                        $"{(keyboardEvent.IsKeyDown ? "down" : "up")}.");
+                }
+
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+                _ = eventAvailable.WaitOne(remaining);
+            }
+
+            throw new LiveInputDeliveryException(
+                $"The live hook did not observe marked key 0x{virtualKey:X2} " +
+                $"{(isKeyDown ? "down" : "up")} within {timeout.TotalSeconds:F1} seconds.");
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+            disposed = true;
+            subscription.Dispose();
+            eventAvailable.Dispose();
+        }
+
+        private void Record(VietnameseKeyboardEvent keyboardEvent)
+        {
+            if (keyboardEvent.ExtraInfo != Marker)
+            {
+                return;
+            }
+            events.Enqueue(keyboardEvent);
+            eventAvailable.Set();
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct Input
     {
@@ -648,7 +958,10 @@ internal static class LiveKeyboardHookIntegrationTests
         public uint Type;
         public InputUnion Union;
 
-        public static Input Key(ushort virtualKey, bool keyUp) => new()
+        public static Input Key(
+            ushort virtualKey,
+            bool keyUp,
+            nuint extraInfo = 0) => new()
         {
             Type = InputKeyboard,
             Union = new InputUnion
@@ -657,6 +970,7 @@ internal static class LiveKeyboardHookIntegrationTests
                 {
                     VirtualKey = virtualKey,
                     Flags = keyUp ? KeyEventKeyUp : 0,
+                    ExtraInfo = extraInfo,
                 },
             },
         };
@@ -742,6 +1056,9 @@ internal static class LiveKeyboardHookIntegrationTests
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(

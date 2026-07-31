@@ -190,7 +190,10 @@ $versionProperties = @(
     "-p:FileVersion=$fileVersion"
 )
 
-Invoke-Checked 'cmake.exe' @('--preset', 'windows-msvc-release')
+Invoke-Checked 'cmake.exe' @(
+    '--preset', 'windows-msvc-release',
+    "-DKEYINA_VERSION=$Version"
+)
 Invoke-Checked 'cmake.exe' @('--build', '--preset', 'windows-msvc-release')
 
 if (-not $SkipVerification) {

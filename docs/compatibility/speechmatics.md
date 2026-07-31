@@ -10,9 +10,12 @@ Default provider contract:
 - Language: `vi`
 - Model: `enhanced`
 - Audio: raw mono `pcm_s16le`, 16,000 Hz
-- `max_delay`: `0.7`
+- `max_delay`: `2.0`
+- `max_delay_mode`: `flexible`
+- `conversation_config.end_of_utterance_silence_trigger`: `0` (disabled)
 - Partials: enabled for overlay only
-- Final segments: one atomic IPC insertion each
+- Final fragments: accumulated privately until the user stops dictation
+- Manual stop: one combined atomic IPC insertion after `EndOfTranscript`
 
 The API key is read from Windows Credential Manager target `Keyina/Speechmatics/ApiKey`. It is not accepted through command-line arguments or JSON configuration.
 
@@ -39,15 +42,16 @@ Covered behavior includes:
 - wait for RecognitionStarted before audio;
 - maximum 500 outstanding chunks;
 - AudioAdded sequence acknowledgements;
-- final-before-EndOfTranscript ordering;
-- mutable partial and immutable final handling;
+- final-before-EndOfTranscript ordering and coordinator drain signalling;
+- mutable partial and immutable final-fragment handling;
 - provider error, unexpected close, cancellation, and idempotent disposal;
 - Credential Manager read/write/overwrite/delete;
 - streaming resampler continuity across arbitrary callback boundaries;
 - a strict two-second, 64,000-byte PCM queue;
 - no-device, permission denial, device removal, overflow, and cancellation;
 - partial overlay-only behavior;
-- final transcript deduplication and focus-generation IPC;
+- no transcript insertion before the second dictation toggle;
+- final-fragment deduplication and one combined focus-generation IPC;
 - speech failure isolation from native Vietnamese input.
 
 ## Release performance evidence

@@ -6,6 +6,13 @@ using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.UI;
 
+public enum CredentialSetupTarget
+{
+    Speechmatics,
+    Translation,
+    LibreTranslate,
+}
+
 public sealed record SettingsSnapshot(
     bool VietnameseEnabled,
     bool SpeechEnabled,
@@ -50,7 +57,7 @@ public sealed record SettingsSnapshot(
         SpeechCredentialConfigured: true,
         CustomSnippetCount: 3,
         StatusMessage: "Ready",
-        Version: "0.1.0-dev",
+        Version: "0.1.6-dev",
         IpcStatus: "Focused app connected",
         HotkeyStatus: "Registered",
         TsfRegistered: true,

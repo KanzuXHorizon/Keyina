@@ -73,5 +73,5 @@ Name: "{group}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Para
 Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall
 Filename: "{app}\{#MyAppSettingsExeName}"; Parameters: "--companion-settings"; Description: "Open Keyina settings"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

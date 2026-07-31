@@ -135,6 +135,27 @@ RuntimeInputProfileError DecodeBindings(
 
 }  // namespace
 
+RuntimeInputProfile DefaultRuntimeInputProfile() noexcept {
+  RuntimeInputProfile profile{};
+  profile.vietnamese_enabled = true;
+  profile.restore_invalid_word = true;
+  profile.hotkeys = {
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::ModifierGesture, 0x03, 0x00},
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Hold, 0x05, 0x20},
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Press, 0x05, 0x56},
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Press, 0x05, 0x54},
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Press, 0x05, 0x5A},
+      RuntimeHotkeyBinding{
+          RuntimeHotkeyGesture::Press, 0x00, 0x1B},
+  };
+  return profile;
+}
+
 RuntimeInputProfileResult DecodeRuntimeInputProfile(
     std::span<const std::byte> bytes) noexcept {
   RuntimeInputProfileResult result{};

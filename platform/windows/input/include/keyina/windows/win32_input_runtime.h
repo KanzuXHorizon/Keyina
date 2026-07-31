@@ -141,7 +141,6 @@ class Win32InputRuntime {
   static Win32InputRuntime* active_runtime_;
 };
 
-[[nodiscard]] RuntimeInputProfile DefaultRuntimeInputProfile() noexcept;
 [[nodiscard]] RuntimeInputProfile LoadRuntimeInputProfileOrDefault() noexcept;
 [[nodiscard]] NativeResidentResourceSnapshot MeasureNativeResidentResources(
     Win32InputRuntime& runtime,

@@ -78,6 +78,7 @@ internal static class CompanionCommandSessionTests
     }
 
     [KeyinaTest("command companion starts without a WinForms bootstrap crash")]
+    [KeyinaInteractiveTest]
     private static void StartsWithoutWinFormsBootstrapCrash()
     {
         var executable = Path.Combine(AppContext.BaseDirectory, "Keyina.Host.exe");
@@ -112,19 +113,27 @@ internal static class CompanionCommandSessionTests
     {
         AssertEx.True(
             CompanionCommandSession.ShouldExit(
+                commandInFlight: false,
                 dictationActive: false,
                 canUndoTranslation: false,
-                translationPreviewCreated: false),
+                translationPreviewCreated: false,
+                interactiveWindowCreated: false),
             "Idle command companion remained resident.");
         AssertEx.False(
-            CompanionCommandSession.ShouldExit(true, false, false),
+            CompanionCommandSession.ShouldExit(true, false, false, false, false),
+            "Companion exited while a command was still in flight.");
+        AssertEx.False(
+            CompanionCommandSession.ShouldExit(false, true, false, false, false),
             "Active dictation companion exited.");
         AssertEx.False(
-            CompanionCommandSession.ShouldExit(false, true, false),
+            CompanionCommandSession.ShouldExit(false, false, true, false, false),
             "Translation undo companion exited before expiry.");
         AssertEx.False(
-            CompanionCommandSession.ShouldExit(false, false, true),
+            CompanionCommandSession.ShouldExit(false, false, false, true, false),
             "Translation preview companion exited while visible.");
+        AssertEx.False(
+            CompanionCommandSession.ShouldExit(false, false, false, false, true),
+            "Credential settings companion exited while its window was visible.");
     }
 
     [KeyinaTest("production command companion enables speech without resident hooks tray or pipe")]

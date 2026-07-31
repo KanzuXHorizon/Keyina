@@ -6,8 +6,8 @@ namespace Keyina.Host.Tests;
 
 internal static class FocusedUnicodeEnvelopeWriterTests
 {
-    [KeyinaTest("focused Unicode writer delivers once to the unchanged focused control")]
-    private static void DeliversToUnchangedFocus()
+    [KeyinaTest("focused Unicode writer delivers multiple final segments to unchanged focus")]
+    private static void DeliversMultipleSegmentsToUnchangedFocus()
     {
         var context = new VietnameseTypingContext(42, (nint)100, ShouldBypassTyping: false);
         var inserted = new List<string>();
@@ -24,11 +24,13 @@ internal static class FocusedUnicodeEnvelopeWriterTests
         writer.WriteAsync(envelope, CancellationToken.None)
             .AsTask().GetAwaiter().GetResult();
 
-        AssertEx.Equal(1, inserted.Count);
-        AssertEx.Equal("xin chào", inserted[0]);
-        AssertThrows<FocusedUnicodeDeliveryException>(() =>
-            writer.WriteAsync(envelope, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult());
+        writer.WriteAsync(
+                envelope with { Payload = " thế giới" },
+                CancellationToken.None)
+            .AsTask().GetAwaiter().GetResult();
+
+        AssertEx.True(inserted.SequenceEqual(["xin chào", " thế giới"]),
+            "Focused writer did not preserve multiple final segments in one session.");
     }
 
     [KeyinaTest("focused Unicode writer rejects stale session and focus generation")]

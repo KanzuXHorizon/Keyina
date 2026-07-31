@@ -87,7 +87,6 @@ public sealed class FocusedUnicodeEnvelopeWriter : IIpcEnvelopeWriter
         }
 
         insertText(envelope.Payload);
-        bound = false;
         return ValueTask.CompletedTask;
     }
 }

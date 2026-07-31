@@ -7,6 +7,7 @@ using Keyina.Host.Windows.Typing;
 
 namespace Keyina.Host.Tests;
 
+[KeyinaInteractiveTest]
 internal static class SettingsFormTests
 {
     [KeyinaTest("settings form is accessible DPI-aware and exposes all production sections")]
@@ -122,6 +123,31 @@ internal static class SettingsFormTests
             "Settings toggles should use the Fluent owner-drawn control.");
     }
 
+    [KeyinaTest("credential setup opens and focuses the requested secure input")]
+    private static void CredentialSetupFocusesRequestedInput()
+    {
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample,
+            SettingsActions.NoOp)
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-1200, 100),
+        };
+        form.Show();
+
+        form.OpenCredentialSetup(CredentialSetupTarget.Speechmatics);
+        Application.DoEvents();
+        var speechInput = (TextBox)form.Controls.Find("speechApiKey", true).Single();
+        AssertEx.True(speechInput.Focused,
+            "Speech credential setup did not focus the Speechmatics key input.");
+
+        form.OpenCredentialSetup(CredentialSetupTarget.Translation);
+        Application.DoEvents();
+        var translationInput = (TextBox)form.Controls.Find("deepLApiKey", true).Single();
+        AssertEx.True(translationInput.Focused,
+            "Translation credential setup did not focus the DeepL key input.");
+    }
+
     [KeyinaTest("translation credential input trims pasted whitespace before secure storage")]
     private static void TranslationCredentialInputNormalizesPastedSecret()
     {
@@ -149,6 +175,37 @@ internal static class SettingsFormTests
         AssertEx.True(keyEvent.Handled, "Enter should be handled by the credential input.");
         AssertEx.True(keyEvent.SuppressKeyPress,
             "Enter should not emit a system beep after saving the credential.");
+    }
+
+    [KeyinaTest("speech and LibreTranslate credentials normalize and save on Enter")]
+    private static void AdditionalCredentialInputsNormalizeAndSaveOnEnter()
+    {
+        var speechSecrets = new List<string>();
+        var libreSecrets = new List<string>();
+        var actions = SettingsActions.NoOp with
+        {
+            SaveSpeechApiKey = speechSecrets.Add,
+            SaveLibreTranslateApiKey = libreSecrets.Add,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+
+        var speechInput = (TextBox)form.Controls.Find("speechApiKey", true).Single();
+        speechInput.Text = "  speech-key\r\n";
+        var speechEvent = InvokeKeyDown(speechInput, Keys.Enter);
+        AssertEx.True(speechSecrets.SequenceEqual(["speech-key"]),
+            "Speech credential was not trimmed and saved on Enter.");
+        AssertEx.Equal(string.Empty, speechInput.Text);
+        AssertEx.True(speechEvent.Handled && speechEvent.SuppressKeyPress,
+            "Speech credential Enter key was not fully handled.");
+
+        var libreInput = (TextBox)form.Controls.Find("libreTranslateApiKey", true).Single();
+        libreInput.Text = "  libre-key\r\n";
+        var libreEvent = InvokeKeyDown(libreInput, Keys.Enter);
+        AssertEx.True(libreSecrets.SequenceEqual(["libre-key"]),
+            "LibreTranslate credential was not trimmed and saved on Enter.");
+        AssertEx.Equal(string.Empty, libreInput.Text);
+        AssertEx.True(libreEvent.Handled && libreEvent.SuppressKeyPress,
+            "LibreTranslate credential Enter key was not fully handled.");
     }
 
     [KeyinaTest("hotkeys settings expose editable rows and restore actions")]

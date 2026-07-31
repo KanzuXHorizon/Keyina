@@ -95,10 +95,39 @@ internal static class SpeechmaticsSessionTests
         AssertEx.Equal("xin chào", finalEvent.Text);
         AssertEx.True(!stopTask.IsCompleted, "Stop completed before EndOfTranscript after final.");
 
+        var endEventTask = session.ReadEventAsync(CancellationToken.None).AsTask();
         transport.EnqueueJson("{\"message\":\"EndOfTranscript\"}");
+        var endEvent = await endEventTask.WaitAsync(TimeSpan.FromSeconds(1));
+        AssertEx.Equal(SpeechEventKind.EndOfTranscript, endEvent.Kind);
         await stopTask;
         AssertEx.True(transport.Closed, "Transport was not closed after EndOfTranscript.");
         AssertEx.Equal(SpeechmaticsSessionState.Stopped, session.State);
+    });
+
+    [KeyinaTest("Speechmatics startup preserves provider authentication failure type")]
+    private static void StartupPreservesAuthenticationFailure() => Run(async () =>
+    {
+        var transport = new FakeSpeechmaticsTransport();
+        await using var session = CreateSession(transport);
+        var startTask = session.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => transport.SentText.Count == 1);
+        transport.EnqueueJson(
+            "{\"message\":\"Error\",\"type\":\"not_authorised\",\"reason\":\"invalid token\"}");
+
+        try
+        {
+            await startTask;
+        }
+        catch (SpeechmaticsSessionException exception)
+        {
+            AssertEx.Equal("not_authorised", exception.ProviderType);
+            AssertEx.True(exception.IsAuthenticationFailure,
+                "Speechmatics authentication error was not classified as a credential failure.");
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "Speechmatics startup accepted an authentication provider error.");
     });
 
     [KeyinaTest("Speechmatics provider errors fault the session without exposing transcript text")]

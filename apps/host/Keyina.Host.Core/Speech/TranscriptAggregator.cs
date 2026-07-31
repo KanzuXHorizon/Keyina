@@ -27,6 +27,7 @@ public sealed class TranscriptAggregator
     private readonly StringBuilder committedText = new();
     private string partialText = string.Empty;
     private int finalOrdinal;
+    private bool completed;
 
     public string PartialText => partialText;
 
@@ -51,12 +52,32 @@ public sealed class TranscriptAggregator
         };
     }
 
+    public IpcEnvelope? Complete(
+        IpcSessionId sessionId,
+        ulong focusGeneration)
+    {
+        if (completed || committedText.Length == 0)
+        {
+            return null;
+        }
+
+        completed = true;
+        partialText = string.Empty;
+        return new IpcEnvelope(
+            IpcMessageType.FinalTranscript,
+            Flags: 0,
+            sessionId,
+            focusGeneration,
+            committedText.ToString());
+    }
+
     public void Reset()
     {
         committedSegments.Clear();
         committedText.Clear();
         partialText = string.Empty;
         finalOrdinal = 0;
+        completed = false;
     }
 
     private TranscriptUpdate ApplyPartial(TranscriptEvent transcriptEvent)
@@ -85,13 +106,7 @@ public sealed class TranscriptAggregator
 
         AppendCommittedText(text);
         finalOrdinal = checked(finalOrdinal + 1);
-        var envelope = new IpcEnvelope(
-            IpcMessageType.FinalTranscript,
-            Flags: 0,
-            sessionId,
-            focusGeneration,
-            text);
-        return new TranscriptUpdate(partialText, envelope, finalOrdinal);
+        return new TranscriptUpdate(partialText, null, finalOrdinal);
     }
 
     private static string ValidateTextAndTiming(TranscriptEvent transcriptEvent)
@@ -113,14 +128,15 @@ public sealed class TranscriptAggregator
                 nameof(transcriptEvent));
         }
 
-        return transcriptEvent.Text;
+        return transcriptEvent.Text.Trim();
     }
 
     private void AppendCommittedText(string text)
     {
-        if (committedText.Length != 0 &&
+        var prependSpace = committedText.Length != 0 &&
             !char.IsWhiteSpace(committedText[^1]) &&
-            !StartsWithClosingPunctuation(text))
+            !StartsWithClosingPunctuation(text);
+        if (prependSpace)
         {
             committedText.Append(' ');
         }

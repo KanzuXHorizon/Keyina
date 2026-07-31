@@ -23,6 +23,7 @@ using Keyina.Host.Windows.Hotkeys;
 using Keyina.Host.Windows.Ipc;
 using Keyina.Host.Windows.Startup;
 using Keyina.Host.Windows.Typing;
+using Keyina.Speechmatics;
 
 namespace Keyina.Host.Runtime;
 
@@ -362,7 +363,24 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
-    public void OpenSettings(string? section = null)
+    public void OpenSettings(string? section = null) =>
+        OpenSettingsCore(section, forceDisplay: false);
+
+    private void OpenCredentialSetup(CredentialSetupTarget target)
+    {
+        var section = target switch
+        {
+            CredentialSetupTarget.Speechmatics => "speech",
+            CredentialSetupTarget.Translation or
+            CredentialSetupTarget.LibreTranslate => "translation",
+            _ => throw new ArgumentOutOfRangeException(nameof(target)),
+        };
+        OpenSettingsCore(section, forceDisplay: true);
+        settingsForm!.OpenCredentialSetup(target);
+        settingsForm.Activate();
+    }
+
+    private void OpenSettingsCore(string? section, bool forceDisplay)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         RememberForegroundApplication();
@@ -372,7 +390,10 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             {
                 settingsForm.WindowState = FormWindowState.Normal;
             }
-            settingsForm.Show();
+            if (options.DisplaySettingsWindows || forceDisplay)
+            {
+                settingsForm.Show();
+            }
             if (!string.IsNullOrWhiteSpace(section))
             {
                 settingsForm.OpenSection(section);
@@ -391,7 +412,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             settingsForm.OpenSection(section);
         }
-        if (options.DisplaySettingsWindows)
+        if (options.DisplaySettingsWindows || forceDisplay)
         {
             settingsForm.Show();
         }
@@ -1192,7 +1213,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 ReportFailure("speech_credential_missing");
-                PublishFeedback(FeedbackEvents.Error("Chưa cấu hình khóa Speechmatics"));
+                PublishFeedback(FeedbackEvents.Error(
+                    "Nhập khóa Speechmatics trong cửa sổ Cài đặt vừa mở"));
+                OpenCredentialSetup(CredentialSetupTarget.Speechmatics);
                 return;
             }
 
@@ -1202,6 +1225,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                     targetSessionId,
                     cancellationToken)
                 .ConfigureAwait(true);
+        }
+        catch (SpeechmaticsSessionException exception) when (
+            exception.IsAuthenticationFailure)
+        {
+            ReportFailure("speech_credential_invalid");
+            PublishFeedback(FeedbackEvents.Error(
+                "Khóa Speechmatics không hợp lệ; hãy cập nhật trong Cài đặt vừa mở"));
+            OpenCredentialSetup(CredentialSetupTarget.Speechmatics);
         }
         catch (Exception)
         {
@@ -1291,7 +1322,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             ReportFailure("translation_provider_missing");
             PublishFeedback(FeedbackEvents.Error(
-                "Hãy cấu hình khóa DeepL hoặc endpoint LibreTranslate"));
+                "Nhập khóa DeepL hoặc bật LibreTranslate trong Cài đặt vừa mở"));
+            OpenCredentialSetup(CredentialSetupTarget.Translation);
             return;
         }
 
@@ -1329,6 +1361,14 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         var (errorCode, message) = MapTranslationFailure(outcome.FailureCode);
         ReportFailure(errorCode);
         PublishFeedback(FeedbackEvents.Error(message));
+        if (outcome.FailureCode == TranslationFailureCode.AuthenticationFailed)
+        {
+            OpenCredentialSetup(
+                string.IsNullOrWhiteSpace(apiKey) &&
+                configuration.TranslationProviders.LibreTranslateEnabled
+                    ? CredentialSetupTarget.LibreTranslate
+                    : CredentialSetupTarget.Translation);
+        }
     }
 
     private void OpenTranslationPreview(TranslationPreview preview)
@@ -1446,13 +1486,13 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 "Bản xem trước đã hết hạn; hãy dịch lại"),
             TranslationFailureCode.AuthenticationFailed => (
                 "translation_auth_failed",
-                "Khóa DeepL không hợp lệ"),
+                "Khóa dịch không hợp lệ; hãy cập nhật trong Cài đặt vừa mở"),
             TranslationFailureCode.RateLimited => (
                 "translation_rate_limited",
-                "DeepL đang giới hạn yêu cầu"),
+                "Dịch vụ dịch đang giới hạn yêu cầu"),
             TranslationFailureCode.QuotaExceeded => (
                 "translation_quota_exceeded",
-                "Đã hết hạn mức DeepL miễn phí"),
+                "Đã hết hạn mức của dịch vụ dịch"),
             TranslationFailureCode.InvalidResponse => (
                 "translation_invalid_response",
                 "Bản dịch không giữ nguyên nội dung kỹ thuật"),
@@ -1471,6 +1511,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     {
         state = HostReducer.Reduce(state, hostEvent);
         RefreshVisualState();
+        if (hostEvent is HostFailed
+            {
+                ErrorCode: "speech_credential_invalid",
+            })
+        {
+            PublishFeedback(FeedbackEvents.Error(
+                "Khóa Speechmatics không hợp lệ; hãy cập nhật trong Cài đặt vừa mở"));
+            OpenCredentialSetup(CredentialSetupTarget.Speechmatics);
+        }
     }
 
     private void HandleDictationStateChanged()
@@ -1907,16 +1956,15 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         toggleDictationMenuItem.Enabled = configuration.SpeechEnabled;
         toggleDictationMenuItem.ShortcutKeyDisplayString = FormatShortcutDisplay(
             configuration.Hotkeys.ToggleDictation.Chord);
-        var translationAvailable = configuration.TranslationEnabled &&
-            settingsSnapshot.TranslationCredentialConfigured;
-        translateSelectionMenuItem.Enabled = translationAvailable;
+        var translationProviderConfigured = IsTranslationProviderConfigured();
+        translateSelectionMenuItem.Enabled = configuration.TranslationEnabled;
         translateSelectionMenuItem.Text =
             $"Dịch sang {TranslationLanguageCatalog.GetDisplayName(configuration.TranslationTargetLanguage)}";
         translateSelectionMenuItem.ShortcutKeyDisplayString =
             !configuration.TranslationEnabled
                 ? string.Empty
-                : !settingsSnapshot.TranslationCredentialConfigured
-                    ? "Cần khóa DeepL"
+                : !translationProviderConfigured
+                    ? "Cần provider dịch"
                     : translationHotkeyReady
                         ? FormatShortcutDisplay(
                             configuration.Hotkeys.TranslateSelection.Chord)

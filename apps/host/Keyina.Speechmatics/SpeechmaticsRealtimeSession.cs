@@ -25,6 +25,26 @@ public sealed class SpeechmaticsSessionException : Exception
         : base(message, innerException)
     {
     }
+
+    public string? ProviderType { get; init; }
+
+    public bool IsAuthenticationFailure =>
+        IsAuthenticationProviderType(ProviderType);
+
+    public static bool IsAuthenticationProviderType(string? providerType)
+    {
+        if (string.IsNullOrWhiteSpace(providerType))
+        {
+            return false;
+        }
+
+        var normalized = providerType.Replace('-', '_').ToLowerInvariant();
+        return normalized.Contains("auth", StringComparison.Ordinal) ||
+            normalized.Contains("authoris", StringComparison.Ordinal) ||
+            normalized.Contains("authoriz", StringComparison.Ordinal) ||
+            normalized.Contains("credential", StringComparison.Ordinal) ||
+            normalized.Contains("token", StringComparison.Ordinal);
+    }
 }
 
 public sealed class SpeechmaticsRealtimeSession : ISpeechmaticsRealtimeSession
@@ -300,6 +320,8 @@ public sealed class SpeechmaticsRealtimeSession : ISpeechmaticsRealtimeSession
                         break;
 
                     case SpeechEventKind.EndOfTranscript:
+                        await events.Writer.WriteAsync(speechEvent, cancellationToken)
+                            .ConfigureAwait(false);
                         endOfTranscript.TrySetResult();
                         break;
 
@@ -307,7 +329,10 @@ public sealed class SpeechmaticsRealtimeSession : ISpeechmaticsRealtimeSession
                         await events.Writer.WriteAsync(speechEvent, cancellationToken)
                             .ConfigureAwait(false);
                         Fault(new SpeechmaticsSessionException(
-                            $"Speechmatics provider error: {speechEvent.ProviderType ?? "unknown"}."));
+                            $"Speechmatics provider error: {speechEvent.ProviderType ?? "unknown"}.")
+                        {
+                            ProviderType = speechEvent.ProviderType,
+                        });
                         return;
 
                     case SpeechEventKind.PartialTranscript:

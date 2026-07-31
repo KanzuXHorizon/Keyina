@@ -20,8 +20,8 @@ internal static class TranscriptAggregatorTests
         AssertEx.Equal<IpcEnvelope?>(null, revised.FinalEnvelope);
     }
 
-    [KeyinaTest("final transcript clears partial and creates one focused IPC envelope")]
-    private static void FinalCreatesOneEnvelope()
+    [KeyinaTest("final transcripts remain buffered until manual completion")]
+    private static void FinalIsBufferedUntilComplete()
     {
         var aggregator = new TranscriptAggregator();
         var session = new IpcSessionId(11, 22);
@@ -29,12 +29,16 @@ internal static class TranscriptAggregatorTests
 
         var update = aggregator.Apply(Final("xin chào", 0.0, 0.8), session, 9);
         AssertEx.Equal("", update.PartialText);
-        AssertEx.NotNull(update.FinalEnvelope, "Final transcript did not create IPC.");
-        AssertEx.Equal(IpcMessageType.FinalTranscript, update.FinalEnvelope!.MessageType);
-        AssertEx.Equal(session, update.FinalEnvelope.SessionId);
-        AssertEx.Equal<ulong>(9, update.FinalEnvelope.FocusGeneration);
-        AssertEx.Equal("xin chào", update.FinalEnvelope.Payload);
+        AssertEx.Equal<IpcEnvelope?>(null, update.FinalEnvelope);
         AssertEx.Equal(1, update.FinalOrdinal);
+
+        var envelope = aggregator.Complete(session, 9);
+        AssertEx.NotNull(envelope, "Manual completion did not create IPC.");
+        AssertEx.Equal(IpcMessageType.FinalTranscript, envelope!.MessageType);
+        AssertEx.Equal(session, envelope.SessionId);
+        AssertEx.Equal<ulong>(9, envelope.FocusGeneration);
+        AssertEx.Equal("xin chào", envelope.Payload);
+        AssertEx.Equal<IpcEnvelope?>(null, aggregator.Complete(session, 9));
     }
 
     [KeyinaTest("duplicate provider finals are ignored but distinct segments remain ordered")]
@@ -48,11 +52,21 @@ internal static class TranscriptAggregatorTests
         var duplicate = aggregator.Apply(first, session, 1);
         var second = aggregator.Apply(Final("mọi người", 0.8, 1.4), session, 1);
 
-        AssertEx.NotNull(firstUpdate.FinalEnvelope, "First final was lost.");
+        AssertEx.Equal<IpcEnvelope?>(null, firstUpdate.FinalEnvelope);
         AssertEx.Equal<IpcEnvelope?>(null, duplicate.FinalEnvelope);
-        AssertEx.NotNull(second.FinalEnvelope, "Second final was lost.");
+        AssertEx.Equal<IpcEnvelope?>(null, second.FinalEnvelope);
         AssertEx.Equal(2, second.FinalOrdinal);
         AssertEx.Equal("xin chào mọi người", aggregator.CommittedText);
+
+        var punctuation = aggregator.Apply(
+            Final(" ! ", 1.4, 1.5),
+            session,
+            1);
+        AssertEx.Equal<IpcEnvelope?>(null, punctuation.FinalEnvelope);
+        AssertEx.Equal("xin chào mọi người!", aggregator.CommittedText);
+        AssertEx.Equal(
+            "xin chào mọi người!",
+            aggregator.Complete(session, 1)!.Payload);
     }
 
     [KeyinaTest("aggregator rejects non transcript events and empty final text")]

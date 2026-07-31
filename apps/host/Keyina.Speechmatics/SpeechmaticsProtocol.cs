@@ -26,7 +26,13 @@ public static class SpeechmaticsProtocol
             writer.WriteString("language", options.Language);
             writer.WriteString("model", options.Model);
             writer.WriteNumber("max_delay", options.MaxDelaySeconds);
+            writer.WriteString("max_delay_mode", options.MaxDelayMode);
             writer.WriteBoolean("enable_partials", options.EnablePartials);
+            writer.WriteStartObject("conversation_config");
+            writer.WriteNumber(
+                "end_of_utterance_silence_trigger",
+                options.EndOfUtteranceSilenceTriggerSeconds);
+            writer.WriteEndObject();
             writer.WriteEndObject();
 
             writer.WriteEndObject();
@@ -109,9 +115,7 @@ public static class SpeechmaticsProtocol
         return new SpeechEvent
         {
             Kind = kind,
-            Text = kind == SpeechEventKind.PartialTranscript
-                ? RequiredStringAllowEmpty(metadata, "transcript")
-                : RequiredString(metadata, "transcript"),
+            Text = RequiredStringAllowEmpty(metadata, "transcript"),
             StartTimeSeconds = RequiredDouble(metadata, "start_time"),
             EndTimeSeconds = RequiredDouble(metadata, "end_time"),
         };

@@ -10,8 +10,8 @@ namespace Keyina.Host.Tests;
 
 internal static class DictationCoordinatorTests
 {
-    [KeyinaTest("dictation coordinator keeps partials overlay-only and emits one IPC per final")]
-    private static void PartialsAndFinalsAreSeparated() => Run(async () =>
+    [KeyinaTest("dictation coordinator keeps all fragments private until the user stops")]
+    private static void TranscriptIsInsertedOnceOnManualStop() => Run(async () =>
     {
         var session = new FakeRealtimeSession();
         var audio = new FakeAudioCapture();
@@ -33,32 +33,49 @@ internal static class DictationCoordinatorTests
         audio.Emit(new byte[] { 1, 2, 3, 4 });
         await WaitUntilAsync(() => session.AudioChunks.Count == 1);
 
+        session.Emit(Partial(string.Empty));
+        await Task.Delay(50);
+        AssertEx.Equal(DictationStatus.Listening, overlay.State.Status);
+        AssertEx.Equal(null, hostState.ErrorCode,
+            "An empty warm-up partial faulted the dictation session.");
+
         session.Emit(Partial("xin chao"));
         await WaitUntilAsync(() => overlay.State.PartialText == "xin chao");
         AssertEx.Equal(0, writer.Envelopes.Count);
 
+        session.Emit(Final(string.Empty, 0.0, 0.1));
+        await Task.Delay(50);
+        AssertEx.Equal(0, overlay.State.FinalSegments);
+        AssertEx.Equal(DictationStatus.Listening, overlay.State.Status);
+
         var final = Final("xin chào", 0.0, 0.8);
         session.Emit(final);
         session.Emit(final);
-        await WaitUntilAsync(() => writer.Envelopes.Count == 1);
-        AssertEx.Equal(IpcMessageType.FinalTranscript, writer.Envelopes[0].MessageType);
-        AssertEx.Equal("xin chào", writer.Envelopes[0].Payload);
-        AssertEx.Equal<ulong>(77, writer.Envelopes[0].FocusGeneration);
+        session.Emit(Final("thế giới", 0.8, 1.4));
+        await WaitUntilAsync(() => overlay.State.FinalSegments == 2);
+        AssertEx.Equal(0, writer.Envelopes.Count,
+            "A provider final fragment was inserted before the second toggle.");
+        AssertEx.Equal(DictationStatus.Listening, overlay.State.Status);
 
         var stopTask = coordinator.StopAsync(CancellationToken.None);
         await WaitUntilAsync(() => session.StopCalls == 1);
         await stopTask;
+        AssertEx.Equal(1, writer.Envelopes.Count);
+        AssertEx.Equal(IpcMessageType.FinalTranscript, writer.Envelopes[0].MessageType);
+        AssertEx.Equal("xin chào thế giới", writer.Envelopes[0].Payload);
+        AssertEx.Equal<ulong>(77, writer.Envelopes[0].FocusGeneration);
         AssertEx.Equal(DictationStatus.Inserted, overlay.State.Status);
         AssertEx.True(!hostState.Listening, "Host remained in listening state after stop.");
     });
 
-    [KeyinaTest("dictation coordinator speech failures do not disable Vietnamese input")]
-    private static void SpeechFailureIsIsolatedFromInputMode() => Run(async () =>
+    [KeyinaTest("dictation coordinator classifies provider authentication without disabling Vietnamese input")]
+    private static void SpeechAuthenticationFailureIsIsolatedFromInputMode() => Run(async () =>
     {
-        var session = new FakeRealtimeSession();
+        var firstSession = new FakeRealtimeSession();
+        var secondSession = new FakeRealtimeSession();
         var hostState = HostState.Initial;
         var coordinator = CreateCoordinator(
-            session,
+            new SequenceSessionFactory(firstSession, secondSession),
             new FakeAudioCapture(),
             new FakeEnvelopeWriter(),
             new DictationOverlayModel(),
@@ -68,7 +85,7 @@ internal static class DictationCoordinatorTests
             "test-key",
             new IpcSessionId(1, 2),
             CancellationToken.None);
-        session.Emit(new SpeechEvent
+        firstSession.Emit(new SpeechEvent
         {
             Kind = SpeechEventKind.ProviderError,
             ProviderType = "not_authorised",
@@ -77,11 +94,141 @@ internal static class DictationCoordinatorTests
 
         await WaitUntilAsync(() =>
             coordinator.State.Status == DictationStatus.Error &&
-            hostState.ErrorCode == "speech_provider_error" &&
+            hostState.ErrorCode == "speech_credential_invalid" &&
             !hostState.Listening);
         AssertEx.True(hostState.VietnameseEnabled, "Speech failure disabled native Vietnamese input.");
         AssertEx.True(!hostState.Listening, "Speech failure left listening state active.");
-        AssertEx.Equal("speech_provider_error", hostState.ErrorCode);
+        AssertEx.Equal("speech_credential_invalid", hostState.ErrorCode);
+        await WaitUntilAsync(() =>
+            firstSession.State == SpeechmaticsSessionState.Disposed);
+
+        await coordinator.StartAsync(
+            "test-key",
+            new IpcSessionId(3, 4),
+            CancellationToken.None);
+        AssertEx.Equal(DictationStatus.Listening, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Started, secondSession.State);
+        await coordinator.CancelAsync();
+    });
+
+    [KeyinaTest("dictation coordinator resets terminal state before a new session")]
+    private static void TerminalStateCanRestart() => Run(async () =>
+    {
+        var firstSession = new FakeRealtimeSession();
+        var secondSession = new FakeRealtimeSession();
+        var coordinator = CreateCoordinator(
+            new SequenceSessionFactory(firstSession, secondSession),
+            new FakeAudioCapture(),
+            new FakeEnvelopeWriter(),
+            new DictationOverlayModel(),
+            _ => { });
+
+        await coordinator.StartAsync(
+            "test-key",
+            new IpcSessionId(5, 6),
+            CancellationToken.None);
+        await coordinator.CancelAsync();
+        AssertEx.Equal(DictationStatus.Cancelled, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Disposed, firstSession.State);
+
+        await coordinator.StartAsync(
+            "test-key",
+            new IpcSessionId(7, 8),
+            CancellationToken.None);
+        AssertEx.Equal(DictationStatus.Listening, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Started, secondSession.State);
+        await coordinator.CancelAsync();
+    });
+
+    [KeyinaTest("dictation coordinator classifies startup credential failure and can retry")]
+    private static void StartupCredentialFailureCanRetry() => Run(async () =>
+    {
+        var failedSession = new FakeRealtimeSession
+        {
+            StartFailure = new SpeechmaticsSessionException(
+                "Synthetic authentication failure.")
+            {
+                ProviderType = "not_authorised",
+            },
+        };
+        var retrySession = new FakeRealtimeSession();
+        var hostState = HostState.Initial;
+        var coordinator = CreateCoordinator(
+            new SequenceSessionFactory(failedSession, retrySession),
+            new FakeAudioCapture(),
+            new FakeEnvelopeWriter(),
+            new DictationOverlayModel(),
+            hostEvent => hostState = HostReducer.Reduce(hostState, hostEvent));
+
+        try
+        {
+            await coordinator.StartAsync(
+                "test-key",
+                new IpcSessionId(11, 12),
+                CancellationToken.None);
+        }
+        catch (SpeechmaticsSessionException exception)
+        {
+            AssertEx.True(exception.IsAuthenticationFailure,
+                "Startup exception lost its credential classification.");
+        }
+
+        AssertEx.Equal("speech_credential_invalid", hostState.ErrorCode);
+        AssertEx.Equal(DictationStatus.Error, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Disposed, failedSession.State);
+
+        await coordinator.StartAsync(
+            "test-key",
+            new IpcSessionId(13, 14),
+            CancellationToken.None);
+        AssertEx.Equal(DictationStatus.Listening, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Started, retrySession.State);
+        await coordinator.CancelAsync();
+    });
+
+    [KeyinaTest("dictation coordinator classifies factory credential failure and can retry")]
+    private static void FactoryCredentialFailureCanRetry() => Run(async () =>
+    {
+        var failure = new SpeechmaticsSessionException(
+            "Synthetic factory authentication failure.")
+        {
+            ProviderType = "not_authorised",
+        };
+        var retrySession = new FakeRealtimeSession();
+        var hostState = HostState.Initial;
+        var coordinator = CreateCoordinator(
+            new ThrowingThenSessionFactory(failure, retrySession),
+            new FakeAudioCapture(),
+            new FakeEnvelopeWriter(),
+            new DictationOverlayModel(),
+            hostEvent => hostState = HostReducer.Reduce(hostState, hostEvent));
+        var threw = false;
+
+        try
+        {
+            await coordinator.StartAsync(
+                "test-key",
+                new IpcSessionId(15, 16),
+                CancellationToken.None);
+        }
+        catch (SpeechmaticsSessionException exception)
+        {
+            threw = true;
+            AssertEx.True(exception.IsAuthenticationFailure,
+                "Factory exception lost its credential classification.");
+        }
+
+        AssertEx.True(threw, "Factory credential failure was not propagated.");
+        AssertEx.Equal("speech_credential_invalid", hostState.ErrorCode);
+        AssertEx.Equal(DictationStatus.Error, coordinator.State.Status);
+
+        await coordinator.StartAsync(
+            "test-key",
+            new IpcSessionId(17, 18),
+            CancellationToken.None);
+        AssertEx.Equal(DictationStatus.Listening, coordinator.State.Status);
+        AssertEx.Equal(SpeechmaticsSessionState.Started, retrySession.State);
+        await coordinator.CancelAsync();
     });
 
     [KeyinaTest("dictation coordinator disposal is idempotent and releases active work")]
@@ -133,8 +280,21 @@ internal static class DictationCoordinatorTests
         FakeEnvelopeWriter writer,
         DictationOverlayModel overlay,
         Action<HostEvent> hostEvent) =>
-        new(
+        CreateCoordinator(
             new FakeSessionFactory(session),
+            audio,
+            writer,
+            overlay,
+            hostEvent);
+
+    private static DictationCoordinator CreateCoordinator(
+        ISpeechmaticsSessionFactory sessionFactory,
+        FakeAudioCapture audio,
+        FakeEnvelopeWriter writer,
+        DictationOverlayModel overlay,
+        Action<HostEvent> hostEvent) =>
+        new(
+            sessionFactory,
             audio,
             writer,
             overlay,
@@ -176,6 +336,35 @@ internal static class DictationCoordinatorTests
         {
             AssertEx.Equal("test-key", apiKey);
             return session;
+        }
+    }
+
+    private sealed class SequenceSessionFactory(params FakeRealtimeSession[] sessions)
+        : ISpeechmaticsSessionFactory
+    {
+        private readonly Queue<FakeRealtimeSession> remaining = new(sessions);
+
+        public ISpeechmaticsRealtimeSession Create(string apiKey)
+        {
+            AssertEx.Equal("test-key", apiKey);
+            if (!remaining.TryDequeue(out var session))
+            {
+                throw new InvalidOperationException("No fake speech session remains.");
+            }
+            return session;
+        }
+    }
+
+    private sealed class ThrowingThenSessionFactory(
+        Exception failure,
+        FakeRealtimeSession retrySession) : ISpeechmaticsSessionFactory
+    {
+        private int calls;
+
+        public ISpeechmaticsRealtimeSession Create(string apiKey)
+        {
+            AssertEx.Equal("test-key", apiKey);
+            return calls++ == 0 ? throw failure : retrySession;
         }
     }
 
@@ -232,9 +421,15 @@ internal static class DictationCoordinatorTests
 
         public int StopCalls { get; private set; }
 
+        public Exception? StartFailure { get; init; }
+
         public Task StartAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (StartFailure is not null)
+            {
+                throw StartFailure;
+            }
             State = SpeechmaticsSessionState.Started;
             return Task.CompletedTask;
         }
@@ -255,6 +450,10 @@ internal static class DictationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             StopCalls++;
+            events.Writer.TryWrite(new SpeechEvent
+            {
+                Kind = SpeechEventKind.EndOfTranscript,
+            });
             State = SpeechmaticsSessionState.Stopped;
             return Task.CompletedTask;
         }

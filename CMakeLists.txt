@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Keyina VERSION 0.1.0 LANGUAGES CXX)
+set(KEYINA_VERSION "0.1.6" CACHE STRING "Keyina semantic version")
+project(Keyina VERSION "${KEYINA_VERSION}" LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(KeyinaCompilerOptions)

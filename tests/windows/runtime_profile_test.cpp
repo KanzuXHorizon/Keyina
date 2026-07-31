@@ -14,11 +14,11 @@ using keyina::windows::RuntimeHotkeyGesture;
 using keyina::windows::RuntimeInputProfileError;
 
 constexpr std::array<std::uint8_t, 36> kDefaultVector{
-    0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x01, 0x06,
+    0x4B, 0x49, 0x52, 0x50, 0x02, 0x24, 0x11, 0x06,
     0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
     0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
     0x00, 0x1B, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-    0xA6, 0xCE, 0x4F, 0x2A,
+    0xB6, 0xCD, 0x5D, 0xCA,
 };
 
 std::span<const std::byte> AsBytes(
@@ -45,6 +45,13 @@ void RewriteChecksum(std::array<std::uint8_t, 36>& bytes) {
 
 }  // namespace
 
+KEYINA_TEST(default_native_profile_restores_invalid_latin_tokens) {
+  const auto profile = keyina::windows::DefaultRuntimeInputProfile();
+
+  KEYINA_EXPECT_TRUE(profile.vietnamese_enabled);
+  KEYINA_EXPECT_TRUE(profile.restore_invalid_word);
+}
+
 KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   const auto result = keyina::windows::DecodeRuntimeInputProfile(
       AsBytes(kDefaultVector));
@@ -53,6 +60,7 @@ KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   KEYINA_EXPECT_TRUE(result.profile.vietnamese_enabled);
   KEYINA_EXPECT_TRUE(!result.profile.speech_enabled);
   KEYINA_EXPECT_TRUE(!result.profile.translation_enabled);
+  KEYINA_EXPECT_TRUE(result.profile.restore_invalid_word);
   KEYINA_EXPECT_EQ(result.profile.source_schema_version, 1);
   KEYINA_EXPECT_EQ(result.profile.hotkeys[0].gesture,
                    RuntimeHotkeyGesture::ModifierGesture);

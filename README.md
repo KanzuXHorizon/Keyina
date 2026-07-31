@@ -149,8 +149,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts/windows/build-release.ps1
 
 powershell -NoProfile -ExecutionPolicy Bypass `
-  -File scripts/windows/verify-release.ps1 `
-  -Version 0.1.0
+  -File scripts/windows/verify-release.ps1
 ```
 
 Artifacts are written under `artifacts/release/<version>/`. Signing is fail-closed when `-Sign -RequireSignature` is used. Certificate-store and PFX configuration, silent installation, upgrade behavior, checksums, and versioning are documented in [`docs/releasing.md`](docs/releasing.md).

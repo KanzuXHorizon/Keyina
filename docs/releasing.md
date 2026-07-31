@@ -62,8 +62,7 @@ Use `-SkipVerification` only while debugging the packaging scripts. It must not 
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
-  -File scripts/windows/verify-release.ps1 `
-  -Version 0.1.0
+  -File scripts/windows/verify-release.ps1
 ```
 
 The verification script checks every published checksum, confirms the version reported by the packaged host, reruns packaged self-tests, and verifies Authenticode signatures when the manifest declares a signed release.
@@ -107,13 +106,13 @@ Do not place a PFX file, private key, password, or signing service token inside 
 Interactive installation:
 
 ```powershell
-.\artifacts\release\0.1.0\installer\Keyina-Setup-0.1.0-x64.exe
+.\artifacts\release\0.1.6\installer\Keyina-Setup-0.1.6-x64.exe
 ```
 
 Silent current-user installation:
 
 ```powershell
-.\Keyina-Setup-0.1.0-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+.\Keyina-Setup-0.1.6-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 To update Keyina, build a higher version and run its installer. The stable `AppId` makes Inno Setup reuse the existing install directory and uninstall registration. Close Keyina when Setup asks so resident hooks and binaries can be replaced safely.

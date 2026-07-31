@@ -116,6 +116,7 @@ internal static class ClipboardSelectionAccessorTests
     }
 
     [KeyinaTest("live clipboard selection capture remains reliable in a real focused textbox")]
+    [KeyinaInteractiveTest]
     private static void LiveCaptureRemainsReliableInFocusedTextbox()
     {
         if (!string.Equals(

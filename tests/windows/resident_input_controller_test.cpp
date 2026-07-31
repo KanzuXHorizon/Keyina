@@ -123,6 +123,16 @@ KEYINA_TEST(resident_input_controller_composes_telex_without_heap_output) {
   KEYINA_EXPECT_TRUE(controller.pointer_observation_required());
 }
 
+KEYINA_TEST(resident_input_controller_keeps_embedded_tone_keys_literal_in_latin_tokens) {
+  ResidentInputController controller(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(controller, visible, U"register");
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"register"});
+}
+
 KEYINA_TEST(resident_input_controller_resets_on_pointer_focus_and_secure_context) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;

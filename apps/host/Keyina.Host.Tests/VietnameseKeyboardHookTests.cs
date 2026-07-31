@@ -431,6 +431,37 @@ internal static class VietnameseKeyboardHookTests
         }
     }
 
+    [KeyinaTest("resident hook sustains the flexible Telex burst matrix")]
+    private static void HookSustainsFlexibleTelexBurstMatrix()
+    {
+        var native = new FakeHookNativeApi();
+        var injector = new TextModelInjector();
+        native.Target = injector;
+        using var hook = new VietnameseKeyboardHook(
+            new NativeEngineClient(),
+            injector,
+            native);
+        hook.Start(enabledInitially: true);
+
+        var burstCases = new[]
+        {
+            (Raw: "truocws dduocwj nuawx tieengs vieetj vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+            (Raw: "truowcs dduowcj nuwxa tieesng vieejt vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+            (Raw: "truwocs dduwocj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+            (Raw: "truowsc dduowjc nuwxa tieesng vieetj vaanx voisw motoj mootj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+            (Raw: "truocsw dduocwj nuawx tieengs vieejt vaanx vowis mootj motoj ", Expected: "trước được nữa tiếng việt vẫn với một một "),
+        };
+        var expected = new StringBuilder();
+        for (var iteration = 0; iteration < 20; iteration++)
+        {
+            var testCase = burstCases[iteration % burstCases.Length];
+            Type(native, testCase.Raw);
+            expected.Append(testCase.Expected);
+        }
+
+        AssertEx.Equal(expected.ToString(), injector.Text);
+    }
+
     [KeyinaTest("resident hook profiling is inert when disabled")]
     private static void HookProfilingIsInertWhenDisabled()
     {
