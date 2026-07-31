@@ -15,6 +15,15 @@ struct NativeLatencySnapshot {
   std::uint64_t mean_ns{};
 };
 
+enum class NativeCallbackLatencyStage : std::uint8_t {
+  KeyStateAndHotkey = 0,
+  KeyUpRelease,
+  TypingContext,
+  ControllerProcess,
+  Injection,
+  Count,
+};
+
 class NativeLatencyHistogram {
  public:
   static constexpr std::size_t kBucketCount = 64;

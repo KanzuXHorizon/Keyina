@@ -642,7 +642,7 @@ bool Win32InputRuntime::Start() noexcept {
   toggle_chord_contaminated_ = false;
   startup_stage_ = NativeRuntimeStartupStage::None;
   startup_error_ = ERROR_SUCCESS;
-  callback_latency_histogram_.Clear();
+  ClearCallbackLatency();
   performance_counter_frequency_ = 0;
   if (profile_callback_latency_) {
     LARGE_INTEGER frequency{};
@@ -982,41 +982,59 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     NativeCallbackLatencyScope callback_latency(
         profile_callback_latency_ ? &callback_latency_histogram_ : nullptr,
         performance_counter_frequency_);
+    auto stage_histogram = [this](
+        NativeCallbackLatencyStage stage) noexcept
+        -> NativeLatencyHistogram* {
+      if (!profile_callback_latency_) {
+        return nullptr;
+      }
+      const auto index = static_cast<std::size_t>(stage);
+      return index < callback_stage_latency_histograms_.size()
+                 ? &callback_stage_latency_histograms_[index]
+                 : nullptr;
+    };
+
     ++processed_keyboard_events_;
     const bool key_down = IsKeyDownMessage(message);
     const auto virtual_key = static_cast<std::uint16_t>(native_event.vkCode);
     const bool was_pressed = pressed_keys_.Get(virtual_key);
-    if (key_down && !was_pressed && virtual_key == VK_CAPITAL) {
-      caps_lock_ = !caps_lock_;
-    }
-    pressed_keys_.Set(virtual_key, key_down);
-    if (IsModifierKey(virtual_key)) {
-      RefreshModifierState();
-    }
-
     PhysicalKeyEvent event{};
-    event.virtual_key = virtual_key;
-    event.character = key_down
-                          ? TranslateCharacter(
-                                virtual_key,
-                                (modifier_state_ & kShiftModifier) != 0,
-                                caps_lock_)
-                          : U'\0';
-    event.key_down = key_down;
-    event.shift = (modifier_state_ & kShiftModifier) != 0;
-    event.control = (modifier_state_ & kControlModifier) != 0;
-    event.alt = (modifier_state_ & kAltModifier) != 0;
-    event.windows = (modifier_state_ & kWindowsModifier) != 0;
+    RuntimeHotkeyDecision hotkey_decision{};
+    {
+      NativeCallbackLatencyScope key_state_latency(
+          stage_histogram(NativeCallbackLatencyStage::KeyStateAndHotkey),
+          performance_counter_frequency_);
+      if (key_down && !was_pressed && virtual_key == VK_CAPITAL) {
+        caps_lock_ = !caps_lock_;
+      }
+      pressed_keys_.Set(virtual_key, key_down);
+      if (IsModifierKey(virtual_key)) {
+        RefreshModifierState();
+      }
 
-    ProcessToggleGesture(event);
-    const bool companion_state_required = key_down &&
-        (event.virtual_key == profile_.hotkeys[4].virtual_key ||
-         event.virtual_key == profile_.hotkeys[5].virtual_key);
-    const auto hotkey_decision = hotkey_router_.Process(
-        event,
-        profile_,
-        was_pressed,
-        companion_state_required && IsCommandCompanionActive());
+      event.virtual_key = virtual_key;
+      event.character = key_down
+                            ? TranslateCharacter(
+                                  virtual_key,
+                                  (modifier_state_ & kShiftModifier) != 0,
+                                  caps_lock_)
+                            : U'\0';
+      event.key_down = key_down;
+      event.shift = (modifier_state_ & kShiftModifier) != 0;
+      event.control = (modifier_state_ & kControlModifier) != 0;
+      event.alt = (modifier_state_ & kAltModifier) != 0;
+      event.windows = (modifier_state_ & kWindowsModifier) != 0;
+
+      ProcessToggleGesture(event);
+      const bool companion_state_required = key_down &&
+          (event.virtual_key == profile_.hotkeys[4].virtual_key ||
+           event.virtual_key == profile_.hotkeys[5].virtual_key);
+      hotkey_decision = hotkey_router_.Process(
+          event,
+          profile_,
+          was_pressed,
+          companion_state_required && IsCommandCompanionActive());
+    }
     if (hotkey_decision.command != RuntimeCommand::None &&
         !QueueManagedCommand(hotkey_decision.command) &&
         hotkey_decision.suppress && key_down) {
@@ -1028,13 +1046,25 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     }
 
     if (!key_down) {
-      const InputDecision release = controller_.Process(event, {});
-      return release.suppress
+      bool suppress_release = false;
+      {
+        NativeCallbackLatencyScope key_up_latency(
+            stage_histogram(NativeCallbackLatencyStage::KeyUpRelease),
+            performance_counter_frequency_);
+        suppress_release = controller_.Process(event, {}).suppress;
+      }
+      return suppress_release
                  ? 1
                  : CallNextHookEx(nullptr, code, message, data);
     }
 
-    const TypingContext context = CaptureTypingContext();
+    TypingContext context{};
+    {
+      NativeCallbackLatencyScope context_latency(
+          stage_histogram(NativeCallbackLatencyStage::TypingContext),
+          performance_counter_frequency_);
+      context = CaptureTypingContext();
+    }
     if (key_down) {
       if (last_key_down_context_known_ && last_key_down_context_ != context) {
         ++context_change_count_;
@@ -1045,43 +1075,61 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         ++bypass_context_count_;
       }
     }
-    const InputDecision decision = controller_.Process(event, context);
-    if (key_down) {
-      UpdateSnippetOverlay();
+
+    InputDecision decision{};
+    {
+      NativeCallbackLatencyScope controller_latency(
+          stage_histogram(NativeCallbackLatencyStage::ControllerProcess),
+          performance_counter_frequency_);
+      decision = controller_.Process(event, context);
+      if (key_down) {
+        UpdateSnippetOverlay();
+      }
+      RequestPointerRegistration(
+          controller_.pointer_observation_required() &&
+          !context.bypass_typing);
     }
-    RequestPointerRegistration(
-        controller_.pointer_observation_required() &&
-        !context.bypass_typing);
     if (!decision.suppress) {
       return CallNextHookEx(nullptr, code, message, data);
     }
-    if (key_down) {
-      ++suppressed_edit_count_;
-      const bool chromium_target =
-          IsDeferredInputTarget(context.focus_window);
-      const bool defer_input =
-          (profile_.clipboard_compatibility_enabled && reload_profiles_) ||
-          chromium_target;
-      const bool injected = defer_input
-                                ? QueueDeferredInput(
-                                      decision, context,
-                                      chromium_target &&
-                                          !profile_.clipboard_compatibility_enabled)
-                                : Inject(decision, context.focus_window);
-      if (!injected) {
-        ++failed_injection_count_;
-        controller_.Reset();
-        RequestPointerRegistration(false);
-        return CallNextHookEx(nullptr, code, message, data);
+
+    bool injection_failed = false;
+    {
+      NativeCallbackLatencyScope injection_latency(
+          stage_histogram(NativeCallbackLatencyStage::Injection),
+          performance_counter_frequency_);
+      if (key_down) {
+        ++suppressed_edit_count_;
+        const bool chromium_target =
+            IsDeferredInputTarget(context.focus_window);
+        const bool defer_input =
+            (profile_.clipboard_compatibility_enabled && reload_profiles_) ||
+            chromium_target;
+        const bool injected = defer_input
+                                  ? QueueDeferredInput(
+                                        decision, context,
+                                        chromium_target &&
+                                            !profile_.clipboard_compatibility_enabled)
+                                  : Inject(decision, context.focus_window);
+        if (!injected) {
+          ++failed_injection_count_;
+          controller_.Reset();
+          RequestPointerRegistration(false);
+          injection_failed = true;
+        } else {
+          ++successful_injection_count_;
+        }
       }
-      ++successful_injection_count_;
+      if (!injection_failed && key_down) {
+        HandleSnippetCommand(
+            decision.snippet_command,
+            decision.snippet_command_payload,
+            decision.snippet_target_process_id,
+            decision.snippet_target_focus_window);
+      }
     }
-    if (key_down) {
-      HandleSnippetCommand(
-          decision.snippet_command,
-          decision.snippet_command_payload,
-          decision.snippet_target_process_id,
-          decision.snippet_target_focus_window);
+    if (injection_failed) {
+      return CallNextHookEx(nullptr, code, message, data);
     }
     return 1;
   } catch (...) {

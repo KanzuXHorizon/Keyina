@@ -637,11 +637,26 @@ int RunCallbackLatencySelfTest() noexcept {
   const bool focus_confirmed = GetFocus() == edit;
   const bool foreground_confirmed = GetForegroundWindow() == window;
   bool success = focus_ready && focus_confirmed && foreground_confirmed;
-  std::uint64_t expected_total_processed = 0;
+  std::uint32_t focus_reacquire_count = 0;
+  auto ensure_test_focus = [&]() noexcept {
+    if (GetFocus() == edit && GetForegroundWindow() == window) {
+      return true;
+    }
+    ++focus_reacquire_count;
+    const bool reacquired = FocusTestControl(window, edit);
+    runtime.PumpMessagesFor(10);
+    return reacquired && GetFocus() == edit &&
+        GetForegroundWindow() == window;
+  };
+  const std::uint64_t warmup_processed_before =
+      runtime.processed_keyboard_events();
+  const std::uint64_t warmup_contexts_before =
+      runtime.typing_context_capture_count();
+  std::uint64_t expected_total_processed = warmup_processed_before;
 
   for (std::size_t offset = 0; offset < kWarmupPairs && success;
        offset += kBatchPairs) {
-    if (GetFocus() != edit || GetForegroundWindow() != window) {
+    if (!ensure_test_focus()) {
       success = false;
       break;
     }
@@ -677,7 +692,7 @@ int RunCallbackLatencySelfTest() noexcept {
 
   for (std::size_t offset = 0; offset < kIterations && success;
        offset += kBatchPairs) {
-    if (GetFocus() != edit || GetForegroundWindow() != window) {
+    if (!ensure_test_focus()) {
       success = false;
       break;
     }
@@ -709,6 +724,14 @@ int RunCallbackLatencySelfTest() noexcept {
       runtime.successful_injection_count();
   const std::uint64_t failed_injections_total =
       runtime.failed_injection_count();
+  const std::uint64_t warmup_processed_events =
+      processed_before >= warmup_processed_before
+          ? processed_before - warmup_processed_before
+          : 0;
+  const std::uint64_t warmup_context_captures =
+      contexts_before >= warmup_contexts_before
+          ? contexts_before - warmup_contexts_before
+          : 0;
   const std::uint64_t processed_events =
       processed_total >= processed_before
           ? processed_total - processed_before
@@ -730,12 +753,29 @@ int RunCallbackLatencySelfTest() noexcept {
           ? failed_injections_total - failed_injections_before
           : 0;
   const auto callback_latency = runtime.callback_latency_snapshot();
+  const auto key_state_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::KeyStateAndHotkey);
+  const auto key_up_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::KeyUpRelease);
+  const auto context_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::TypingContext);
+  const auto controller_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::ControllerProcess);
+  const auto injection_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::Injection);
   const bool hook_running = runtime.hook_running();
-  success = success && processed_before == kWarmupPairs * 2 &&
+  success = success && warmup_processed_events == kWarmupPairs * 2 &&
+      warmup_context_captures == kWarmupPairs &&
       processed_events == kExpectedEvents &&
-      expected_total_processed == (kWarmupPairs * 2) + kExpectedEvents &&
+      expected_total_processed ==
+          warmup_processed_before + (kWarmupPairs * 2) + kExpectedEvents &&
       typing_context_captures == kIterations &&
       callback_latency.sample_count == kExpectedEvents &&
+      key_state_latency.sample_count == kExpectedEvents &&
+      key_up_latency.sample_count == kIterations &&
+      context_latency.sample_count == kIterations &&
+      controller_latency.sample_count == kIterations &&
+      injection_latency.sample_count == 0 &&
       suppressed_edits == 0 && successful_injections == 0 &&
       failed_injections == 0 && callback_latency.p50_ns > 0 &&
       callback_latency.p50_ns <= callback_latency.p95_ns &&
@@ -748,24 +788,41 @@ int RunCallbackLatencySelfTest() noexcept {
     SetForegroundWindow(previous_foreground);
   }
 
-  std::array<char, 1024> json{};
+  std::array<char, 4096> json{};
   const int length = sprintf_s(
       json.data(),
       json.size(),
       "{\"result\":\"%s\",\"warmup_pairs\":%llu,"
+      "\"warmup_events\":%llu,\"warmup_context_captures\":%llu,"
       "\"iterations\":%llu,\"expected_events\":%llu,"
       "\"processed_events\":%llu,"
       "\"typing_context_captures\":%llu,\"callback_samples\":%llu,"
       "\"callback_p50_ns\":%llu,\"callback_p95_ns\":%llu,"
       "\"callback_p99_ns\":%llu,\"callback_maximum_ns\":%llu,"
-      "\"callback_mean_ns\":%llu,\"suppressed_edits\":%llu,"
+      "\"callback_mean_ns\":%llu,"
+      "\"key_state_samples\":%llu,\"key_state_p50_ns\":%llu,"
+      "\"key_state_p95_ns\":%llu,\"key_state_p99_ns\":%llu,"
+      "\"key_state_mean_ns\":%llu,"
+      "\"key_up_samples\":%llu,\"key_up_p50_ns\":%llu,"
+      "\"key_up_p95_ns\":%llu,\"key_up_p99_ns\":%llu,"
+      "\"key_up_mean_ns\":%llu,"
+      "\"context_samples\":%llu,\"context_p50_ns\":%llu,"
+      "\"context_p95_ns\":%llu,\"context_p99_ns\":%llu,"
+      "\"context_mean_ns\":%llu,"
+      "\"controller_samples\":%llu,\"controller_p50_ns\":%llu,"
+      "\"controller_p95_ns\":%llu,\"controller_p99_ns\":%llu,"
+      "\"controller_mean_ns\":%llu,"
+      "\"injection_samples\":%llu,\"suppressed_edits\":%llu,"
       "\"successful_injections\":%llu,\"failed_injections\":%llu,"
       "\"focus_ready\":%s,\"focus_confirmed\":%s,"
-      "\"foreground_confirmed\":%s,\"hook_running\":%s}\n",
+      "\"foreground_confirmed\":%s,\"focus_reacquire_count\":%u,"
+      "\"hook_running\":%s}\n",
       success
           ? "callback_latency_self_test_pass"
           : "callback_latency_self_test_failed",
       static_cast<unsigned long long>(kWarmupPairs),
+      static_cast<unsigned long long>(warmup_processed_events),
+      static_cast<unsigned long long>(warmup_context_captures),
       static_cast<unsigned long long>(kIterations),
       static_cast<unsigned long long>(kExpectedEvents),
       static_cast<unsigned long long>(processed_events),
@@ -776,12 +833,34 @@ int RunCallbackLatencySelfTest() noexcept {
       static_cast<unsigned long long>(callback_latency.p99_ns),
       static_cast<unsigned long long>(callback_latency.maximum_ns),
       static_cast<unsigned long long>(callback_latency.mean_ns),
+      static_cast<unsigned long long>(key_state_latency.sample_count),
+      static_cast<unsigned long long>(key_state_latency.p50_ns),
+      static_cast<unsigned long long>(key_state_latency.p95_ns),
+      static_cast<unsigned long long>(key_state_latency.p99_ns),
+      static_cast<unsigned long long>(key_state_latency.mean_ns),
+      static_cast<unsigned long long>(key_up_latency.sample_count),
+      static_cast<unsigned long long>(key_up_latency.p50_ns),
+      static_cast<unsigned long long>(key_up_latency.p95_ns),
+      static_cast<unsigned long long>(key_up_latency.p99_ns),
+      static_cast<unsigned long long>(key_up_latency.mean_ns),
+      static_cast<unsigned long long>(context_latency.sample_count),
+      static_cast<unsigned long long>(context_latency.p50_ns),
+      static_cast<unsigned long long>(context_latency.p95_ns),
+      static_cast<unsigned long long>(context_latency.p99_ns),
+      static_cast<unsigned long long>(context_latency.mean_ns),
+      static_cast<unsigned long long>(controller_latency.sample_count),
+      static_cast<unsigned long long>(controller_latency.p50_ns),
+      static_cast<unsigned long long>(controller_latency.p95_ns),
+      static_cast<unsigned long long>(controller_latency.p99_ns),
+      static_cast<unsigned long long>(controller_latency.mean_ns),
+      static_cast<unsigned long long>(injection_latency.sample_count),
       static_cast<unsigned long long>(suppressed_edits),
       static_cast<unsigned long long>(successful_injections),
       static_cast<unsigned long long>(failed_injections),
       focus_ready ? "true" : "false",
       focus_confirmed ? "true" : "false",
       foreground_confirmed ? "true" : "false",
+      focus_reacquire_count,
       hook_running ? "true" : "false");
   if (length > 0) {
     WriteStandardOutput(

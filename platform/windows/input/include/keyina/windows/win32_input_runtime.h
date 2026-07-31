@@ -105,8 +105,19 @@ class Win32InputRuntime {
     return callback_latency_histogram_.Snapshot();
   }
 
+  [[nodiscard]] NativeLatencySnapshot callback_stage_latency_snapshot(
+      NativeCallbackLatencyStage stage) const noexcept {
+    const auto index = static_cast<std::size_t>(stage);
+    return index < callback_stage_latency_histograms_.size()
+               ? callback_stage_latency_histograms_[index].Snapshot()
+               : NativeLatencySnapshot{};
+  }
+
   void ClearCallbackLatency() noexcept {
     callback_latency_histogram_.Clear();
+    for (auto& histogram : callback_stage_latency_histograms_) {
+      histogram.Clear();
+    }
   }
 
   [[nodiscard]] RuntimeInputProfile profile() const noexcept {
@@ -184,6 +195,10 @@ class Win32InputRuntime {
   bool profile_callback_latency_{false};
   std::uint64_t performance_counter_frequency_{};
   NativeLatencyHistogram callback_latency_histogram_{};
+  std::array<
+      NativeLatencyHistogram,
+      static_cast<std::size_t>(NativeCallbackLatencyStage::Count)>
+      callback_stage_latency_histograms_{};
   HWND window_{nullptr};
   HWND snippet_overlay_window_{nullptr};
   HHOOK hook_{nullptr};
