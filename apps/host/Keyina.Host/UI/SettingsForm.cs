@@ -6,6 +6,7 @@ using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Speech;
 using Keyina.Host.Core.Translation;
 using Keyina.Host.UI.Fluent;
 using Keyina.Host.Windows.Typing;
@@ -56,6 +57,7 @@ public sealed partial class SettingsForm : Form
     private readonly FluentStatusBadge hotkeyStatus;
     private readonly Label snippetCount;
     private readonly FluentToggle vietnameseToggle;
+    private readonly FluentToggle clipboardCompatibilityToggle;
     private readonly FluentToggle speechToggle;
     private readonly FluentToggle translationToggle;
     private readonly FluentToggle translationPreviewToggle;
@@ -71,6 +73,7 @@ public sealed partial class SettingsForm : Form
     private readonly System.Windows.Forms.Timer typingDiagnosticTimer;
     private readonly ComboBox feedbackMode;
     private readonly FluentButton previewFeedback;
+    private readonly ComboBox speechLanguage;
     private readonly TextBox speechApiKey;
     private readonly FluentButton saveSpeechKey;
     private readonly FluentButton removeSpeechKey;
@@ -97,6 +100,7 @@ public sealed partial class SettingsForm : Form
     private bool applyingSnapshot;
     private bool applicationRulesDirty;
     private bool resourcesReleased;
+    private bool? compactLayout;
 
     public SettingsForm(SettingsSnapshot snapshot, SettingsActions actions)
     {
@@ -120,6 +124,7 @@ public sealed partial class SettingsForm : Form
         KeyPreview = true;
         DoubleBuffered = true;
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        SuspendLayout();
 
         statusMessage = CreateBadge("statusMessage", 142);
         inputStatus = CreateBadge("inputStatus", 104);
@@ -135,6 +140,9 @@ public sealed partial class SettingsForm : Form
         snippetCount = CreateLabel("snippetCount", string.Empty, LabelRole.Secondary);
 
         vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
+        clipboardCompatibilityToggle = CreateToggle(
+            "clipboardCompatibilityToggle",
+            "Gửi văn bản qua clipboard");
         speechToggle = CreateToggle("speechToggle", "Bật nhập bằng giọng nói");
         translationToggle = CreateToggle("translationToggle", "Bật dịch nhanh văn bản đang chọn");
         translationPreviewToggle = CreateToggle(
@@ -229,6 +237,20 @@ public sealed partial class SettingsForm : Form
             "Xóa khóa",
             FluentButtonKind.Secondary,
             108);
+
+        speechLanguage = new ComboBox
+        {
+            Name = "speechLanguage",
+            AccessibleName = "Ngôn ngữ nhận dạng giọng nói",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            DisplayMember = nameof(SpeechLanguage.DisplayName),
+            ValueMember = nameof(SpeechLanguage.Code),
+            DataSource = SpeechLanguageCatalog.Supported.ToArray(),
+            Height = 36,
+            IntegralHeight = false,
+            DropDownHeight = 320,
+        };
 
         translationTargetLanguage = new ComboBox
         {
@@ -424,9 +446,17 @@ public sealed partial class SettingsForm : Form
         pages.Add("applications", CreateApplicationsPage());
         pages.Add("snippets", CreateSnippetsPage());
         pages.Add("diagnostics", CreateDiagnosticsPage());
-        foreach (var page in pages.Values)
+        pageHost.SuspendLayout();
+        try
         {
-            pageHost.Controls.Add(page);
+            foreach (var page in pages.Values)
+            {
+                pageHost.Controls.Add(page);
+            }
+        }
+        finally
+        {
+            pageHost.ResumeLayout(performLayout: false);
         }
 
         vietnameseToggle.CheckedChanged += (_, _) =>
@@ -436,11 +466,26 @@ public sealed partial class SettingsForm : Form
                 actions.SetVietnameseEnabled(vietnameseToggle.Checked);
             }
         };
+        clipboardCompatibilityToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetClipboardCompatibilityEnabled(
+                    clipboardCompatibilityToggle.Checked);
+            }
+        };
         speechToggle.CheckedChanged += (_, _) =>
         {
             if (!applyingSnapshot)
             {
                 actions.SetSpeechEnabled(speechToggle.Checked);
+            }
+        };
+        speechLanguage.SelectedValueChanged += (_, _) =>
+        {
+            if (!applyingSnapshot && speechLanguage.SelectedValue is string language)
+            {
+                actions.SetSpeechLanguage(language);
             }
         };
         translationToggle.CheckedChanged += (_, _) =>
@@ -582,7 +627,9 @@ public sealed partial class SettingsForm : Form
 
         ApplySnapshot(snapshot);
         ApplySystemTheme();
+        UpdateResponsiveShell();
         ShowSection("overview");
+        ResumeLayout(performLayout: true);
     }
 
     public bool UsesBufferedRendering => DoubleBuffered;
@@ -595,6 +642,7 @@ public sealed partial class SettingsForm : Form
         try
         {
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
+            clipboardCompatibilityToggle.Checked = snapshot.ClipboardCompatibilityEnabled;
             speechToggle.Checked = snapshot.SpeechEnabled;
             translationToggle.Checked = snapshot.TranslationEnabled;
             translationPreviewToggle.Checked = snapshot.TranslationPreviewEnabled;
@@ -602,6 +650,7 @@ public sealed partial class SettingsForm : Form
             allowLocalTranslationEndpointToggle.Checked =
                 snapshot.TranslationProviders.AllowLocalEndpoint;
             libreTranslateEndpoint.Text = snapshot.TranslationProviders.LibreTranslateEndpoint;
+            speechLanguage.SelectedValue = snapshot.SpeechLanguage;
             translationTargetLanguage.SelectedValue = snapshot.TranslationTargetLanguage;
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
@@ -1071,6 +1120,13 @@ public sealed partial class SettingsForm : Form
             "Ctrl + Shift",
             vietnameseToggle));
         stack.Controls.Add(CreateSettingRow(
+            "clipboardCompatibilityRow",
+            "\uE8C8",
+            "Tương thích game qua clipboard",
+            "Tùy chọn chậm hơn cho game hoặc ứng dụng không nhận Unicode trực tiếp. Keyina chỉ dùng khi bật.",
+            "Có thể tăng độ trễ",
+            clipboardCompatibilityToggle));
+        stack.Controls.Add(CreateSettingRow(
             "startupRow",
             "\uE7E8",
             "Khởi động cùng Windows",
@@ -1176,6 +1232,38 @@ public sealed partial class SettingsForm : Form
             "Ctrl + Alt + V",
             speechToggle));
 
+        var languageCard = CreateCard("speechLanguageCard", 118);
+        var languageLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 2,
+            Padding = new Padding(4),
+            Margin = Padding.Empty,
+        };
+        languageLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        languageLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280F));
+        languageLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+        languageLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        languageCard.Controls.Add(languageLayout);
+        var languageTitle = CreateLabel(
+            "speechLanguageTitle",
+            "Ngôn ngữ nhận dạng",
+            LabelRole.Heading);
+        languageTitle.Dock = DockStyle.Fill;
+        languageLayout.Controls.Add(languageTitle, 0, 0);
+        speechLanguage.Dock = DockStyle.Fill;
+        speechLanguage.Margin = new Padding(8, 0, 0, 4);
+        languageLayout.Controls.Add(speechLanguage, 1, 0);
+        var languageHint = CreateLabel(
+            "speechLanguageHint",
+            "Tự động phù hợp khi thường xuyên đổi ngôn ngữ; chọn cố định sẽ chính xác hơn với câu ngắn.",
+            LabelRole.Secondary);
+        languageHint.Dock = DockStyle.Fill;
+        languageLayout.Controls.Add(languageHint, 0, 1);
+        languageLayout.SetColumnSpan(languageHint, 2);
+        stack.Controls.Add(languageCard);
+
         var credentialCard = CreateCard("speechCredentialCard", 238);
         var credentialLayout = new TableLayoutPanel
         {
@@ -1258,7 +1346,7 @@ public sealed partial class SettingsForm : Form
         providerCard.Controls.Add(CreateIconTextLayout(
             "\uE8D4",
             "Cấu hình hiện tại",
-            "Tiếng Việt · đoạn tạm chỉ hiển thị trên lớp phủ · nhấn lại phím tắt để hoàn tất."));
+            "Nhận dạng đa ngôn ngữ · đoạn tạm chỉ hiển thị trên lớp phủ · nhấn lại phím tắt để hoàn tất."));
         stack.Controls.Add(providerCard);
         return page;
     }
@@ -2984,160 +3072,6 @@ public sealed partial class SettingsForm : Form
         ShowSection("diagnostics");
     }
 
-    private void StartTypingDiagnosticCapture()
-    {
-        if (!typingDiagnosticInput.IsHandleCreated)
-        {
-            _ = typingDiagnosticInput.Handle;
-        }
-        TypingDiagnosticTrace.Activate(typingDiagnosticInput.Handle);
-        typingDiagnosticStatus.Text = "Đang ghi — chỉ ô sandbox này.";
-        typingDiagnosticStatus.ForeColor = palette.Success;
-        typingDiagnosticTimer.Start();
-        RecordTypingDiagnosticControlEvent("Session.Start");
-    }
-
-    private void PauseTypingDiagnosticCapture()
-    {
-        if (typingDiagnosticInput.IsHandleCreated)
-        {
-            RecordTypingDiagnosticControlEvent("Session.Pause");
-            TypingDiagnosticTrace.Deactivate(typingDiagnosticInput.Handle);
-        }
-        typingDiagnosticTimer.Stop();
-        typingDiagnosticStatus.Text = "Tạm dừng — log vẫn được giữ để xem hoặc xuất.";
-        typingDiagnosticStatus.ForeColor = palette.TextSecondary;
-        RefreshTypingDiagnosticLog();
-    }
-
-    private void RecordTypingDiagnosticControlEvent(string eventName)
-    {
-        if (!typingDiagnosticInput.IsHandleCreated)
-        {
-            return;
-        }
-        TypingDiagnosticTrace.RecordOutput(
-            typingDiagnosticInput.Handle,
-            eventName,
-            typingDiagnosticInput.Text,
-            typingDiagnosticInput.SelectionStart,
-            typingDiagnosticInput.SelectionLength);
-        RefreshTypingDiagnosticLog();
-    }
-
-    private void RefreshTypingDiagnosticLog()
-    {
-        if (typingDiagnosticLog.IsDisposed)
-        {
-            return;
-        }
-        typingDiagnosticLog.Text = TypingDiagnosticTrace.FormatSnapshot(
-            GetTypingDiagnosticFilter());
-        if (typingDiagnosticLog.TextLength > 0)
-        {
-            typingDiagnosticLog.SelectionStart = typingDiagnosticLog.TextLength;
-            typingDiagnosticLog.SelectionLength = 0;
-            typingDiagnosticLog.ScrollToCaret();
-        }
-    }
-
-    private TypingDiagnosticTraceKind? GetTypingDiagnosticFilter() =>
-        typingDiagnosticFilter.SelectedIndex switch
-        {
-            0 => null,
-            1 => TypingDiagnosticTraceKind.Physical,
-            2 => TypingDiagnosticTraceKind.Engine,
-            3 => TypingDiagnosticTraceKind.Output,
-            4 => TypingDiagnosticTraceKind.Anomaly,
-            _ => null,
-        };
-
-    private void ClearTypingDiagnosticLog()
-    {
-        TypingDiagnosticTrace.Clear();
-        typingDiagnosticLog.Clear();
-        typingDiagnosticStatus.Text = TypingDiagnosticTrace.IsEnabled
-            ? "Đang ghi — log vừa được xóa."
-            : "Tạm dừng — log đã được xóa.";
-        typingDiagnosticStatus.ForeColor = TypingDiagnosticTrace.IsEnabled
-            ? palette.Success
-            : palette.TextSecondary;
-    }
-
-    private void CopyTypingDiagnosticLog()
-    {
-        var text = TypingDiagnosticTrace.FormatSnapshot(GetTypingDiagnosticFilter());
-        if (text.Length == 0)
-        {
-            typingDiagnosticStatus.Text = "Chưa có sự kiện để sao chép.";
-            typingDiagnosticStatus.ForeColor = palette.Warning;
-            return;
-        }
-
-        try
-        {
-            Clipboard.SetText(text, TextDataFormat.UnicodeText);
-            typingDiagnosticStatus.Text = "Đã sao chép log đang hiển thị.";
-            typingDiagnosticStatus.ForeColor = palette.Success;
-        }
-        catch (ExternalException)
-        {
-            typingDiagnosticStatus.Text = "Clipboard đang bận; hãy thử lại.";
-            typingDiagnosticStatus.ForeColor = palette.Error;
-        }
-    }
-
-    private void ExportTypingDiagnosticLog()
-    {
-        var text = TypingDiagnosticTrace.FormatSnapshot(GetTypingDiagnosticFilter());
-        if (text.Length == 0)
-        {
-            typingDiagnosticStatus.Text = "Chưa có sự kiện để xuất.";
-            typingDiagnosticStatus.ForeColor = palette.Warning;
-            return;
-        }
-
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Xuất log chẩn đoán bộ gõ",
-            Filter = "Keyina typing log (*.log)|*.log|Text file (*.txt)|*.txt",
-            DefaultExt = "log",
-            AddExtension = true,
-            FileName = $"keyina-typing-{DateTime.Now:yyyyMMdd-HHmmss}.log",
-            OverwritePrompt = true,
-        };
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
-        }
-
-        try
-        {
-            File.WriteAllText(
-                dialog.FileName,
-                text,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            typingDiagnosticStatus.Text = "Đã xuất log vào file đã chọn.";
-            typingDiagnosticStatus.ForeColor = palette.Success;
-        }
-        catch (Exception exception) when (
-            exception is IOException or
-            UnauthorizedAccessException or
-            ArgumentException)
-        {
-            typingDiagnosticStatus.Text = "Không thể xuất log; hãy chọn vị trí khác.";
-            typingDiagnosticStatus.ForeColor = palette.Error;
-        }
-    }
-
-    private static string FormatDiagnosticCharacter(char character) => character switch
-    {
-        '\r' => "\\r",
-        '\n' => "\\n",
-        '\t' => "\\t",
-        _ => character.ToString(),
-    };
-
     private async Task RunDiagnosticsAsync(FluentButton runButton)
     {
         runButton.Enabled = false;
@@ -3163,109 +3097,6 @@ public sealed partial class SettingsForm : Form
                 runButton.Enabled = true;
             }
         }
-    }
-
-    private TextBox[] GetApplicationRuleTextBoxes() =>
-    [
-        disableVietnameseApplications,
-        disableSpeechApplications,
-        disableTranslationApplications,
-        suppressVisualFeedbackApplications,
-    ];
-
-    private void UpdateApplicationRulesDisplay(ApplicationPreferences preferences)
-    {
-        ArgumentNullException.ThrowIfNull(preferences);
-        var normalized = preferences.Normalize();
-        disableVietnameseApplications.Lines = normalized.DisableVietnamese;
-        disableSpeechApplications.Lines = normalized.DisableSpeech;
-        disableTranslationApplications.Lines = normalized.DisableTranslation;
-        suppressVisualFeedbackApplications.Lines = normalized.SuppressVisualFeedback;
-        applicationRulesStatus.Text = "Mỗi dòng là một tên file .exe, ví dụ game.exe.";
-        applicationRulesStatus.ForeColor = palette.TextTertiary;
-    }
-
-    private void SaveApplicationPreferences()
-    {
-        try
-        {
-            var preferences = new ApplicationPreferences(
-                ParseApplicationRules(disableVietnameseApplications),
-                ParseApplicationRules(disableSpeechApplications),
-                ParseApplicationRules(disableTranslationApplications),
-                ParseApplicationRules(suppressVisualFeedbackApplications))
-                .Normalize();
-            applicationRulesDirty = false;
-            UpdateApplicationRulesDisplay(preferences);
-            actions.SetApplicationPreferences(preferences);
-            applicationRulesStatus.Text = "Đã kiểm tra và lưu quy tắc ứng dụng.";
-            applicationRulesStatus.ForeColor = palette.Success;
-        }
-        catch (ArgumentException exception)
-        {
-            applicationRulesDirty = true;
-            applicationRulesStatus.Text = LocalizeApplicationRuleError(exception.Message);
-            applicationRulesStatus.ForeColor = palette.Error;
-        }
-    }
-
-    private void AddForegroundApplication(TextBox target)
-    {
-        ArgumentNullException.ThrowIfNull(target);
-        var executableName = actions.GetForegroundApplicationName();
-        if (string.IsNullOrWhiteSpace(executableName))
-        {
-            applicationRulesStatus.Text =
-                "Không xác định được ứng dụng trước khi mở Cài đặt. Hãy nhập tên file .exe thủ công.";
-            applicationRulesStatus.ForeColor = palette.Warning;
-            return;
-        }
-
-        try
-        {
-            var normalized = ApplicationPreferences.NormalizeExecutableName(executableName);
-            var existing = ParseApplicationRules(target);
-            if (existing.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-            {
-                applicationRulesStatus.Text = $"{normalized} đã có trong danh sách.";
-                applicationRulesStatus.ForeColor = palette.Warning;
-                return;
-            }
-            target.Lines = existing.Append(normalized).ToArray();
-            applicationRulesDirty = true;
-            applicationRulesStatus.Text = $"Đã thêm {normalized}; nhấn Lưu quy tắc để áp dụng.";
-            applicationRulesStatus.ForeColor = palette.Warning;
-        }
-        catch (ArgumentException)
-        {
-            applicationRulesStatus.Text =
-                "Ứng dụng hiện tại không cung cấp tên file .exe hợp lệ.";
-            applicationRulesStatus.ForeColor = palette.Error;
-        }
-    }
-
-    private static string[] ParseApplicationRules(TextBox textBox) =>
-        textBox.Lines
-            .Select(line => line.Trim())
-            .Where(line => line.Length > 0)
-            .ToArray();
-
-    private static string LocalizeApplicationRuleError(string message)
-    {
-        if (message.Contains("duplicate", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Danh sách có tên ứng dụng bị trùng.";
-        }
-        if (message.Contains("path", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("wildcard", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Chỉ nhập tên file .exe, không nhập đường dẫn hoặc wildcard.";
-        }
-        if (message.Contains(".exe", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Mỗi dòng phải là một tên file Windows kết thúc bằng .exe.";
-        }
-        return "Quy tắc ứng dụng không hợp lệ. Hãy kiểm tra từng dòng.";
     }
 
     private void EditHotkey(HotkeyCommand command)
@@ -3410,11 +3241,27 @@ public sealed partial class SettingsForm : Form
 
     private void UpdateResponsiveShell()
     {
-        var sidebarWidth = ClientSize.Width < 1020 ? 206F : 228F;
-        shell.ColumnStyles[0].Width = sidebarWidth;
-        contentPanel.Padding = ClientSize.Width < 1020
-            ? new Padding(22, 20, 22, 22)
-            : new Padding(30, 22, 30, 26);
+        var useCompactLayout = ClientSize.Width < 1020;
+        if (compactLayout == useCompactLayout)
+        {
+            return;
+        }
+
+        compactLayout = useCompactLayout;
+        shell.SuspendLayout();
+        contentPanel.SuspendLayout();
+        try
+        {
+            shell.ColumnStyles[0].Width = useCompactLayout ? 206F : 228F;
+            contentPanel.Padding = useCompactLayout
+                ? new Padding(22, 20, 22, 22)
+                : new Padding(30, 22, 30, 26);
+        }
+        finally
+        {
+            contentPanel.ResumeLayout(performLayout: false);
+            shell.ResumeLayout(performLayout: true);
+        }
     }
 
     private void SystemEventsUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs eventArgs)

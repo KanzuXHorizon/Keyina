@@ -30,11 +30,15 @@ public sealed record SettingsSnapshot(
 {
     public KeyinaHealthSnapshot Health { get; init; } = KeyinaHealthSnapshot.Healthy;
 
+    public string SpeechLanguage { get; init; } = "auto";
+
     public bool TranslationEnabled { get; init; }
 
     public bool TranslationCredentialConfigured { get; init; }
 
     public bool TranslationPreviewEnabled { get; init; }
+
+    public bool ClipboardCompatibilityEnabled { get; init; }
 
     public bool LibreTranslateCredentialConfigured { get; init; }
 
@@ -100,11 +104,15 @@ public sealed record SettingsActions(
     Action<FeedbackMode> SetFeedbackMode,
     Action PreviewFeedback)
 {
+    public Action<string> SetSpeechLanguage { get; init; } = _ => { };
+
     public Action<bool> SetTranslationEnabled { get; init; } = _ => { };
 
     public Action<string> SetTranslationTargetLanguage { get; init; } = _ => { };
 
     public Action<bool> SetTranslationPreviewEnabled { get; init; } = _ => { };
+
+    public Action<bool> SetClipboardCompatibilityEnabled { get; init; } = _ => { };
 
     public Action<TranslationProviderPreferences> SetTranslationProviders { get; init; } = _ => { };
 

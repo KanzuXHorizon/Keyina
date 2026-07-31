@@ -2,10 +2,10 @@ namespace Keyina.Speechmatics;
 
 public sealed record SpeechmaticsOptions
 {
-    public static SpeechmaticsOptions VietnameseDefault { get; } = new()
+    public static SpeechmaticsOptions MultilingualDefault { get; } = new()
     {
         Endpoint = new Uri("wss://global.rt.speechmatics.com/v2", UriKind.Absolute),
-        Language = "vi",
+        Language = "auto",
         Model = "enhanced",
         MaxDelaySeconds = 2.0,
         MaxDelayMode = "flexible",
@@ -14,6 +14,10 @@ public sealed record SpeechmaticsOptions
         SampleRate = 16_000,
         ChunkSizeBytes = 4_096,
     };
+
+    [Obsolete("Use MultilingualDefault or configure Language explicitly.")]
+    public static SpeechmaticsOptions VietnameseDefault { get; } =
+        MultilingualDefault with { Language = "vi" };
 
     public required Uri Endpoint { get; init; }
 

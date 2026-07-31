@@ -42,8 +42,8 @@ public sealed class TranslationPreviewForm : Form
         StartPosition = FormStartPosition.Manual;
         MinimumSize = new Size(480, 320);
         Size = CalculateInitialSize(preview.TranslatedText);
-        FormBorderStyle = FormBorderStyle.Sizable;
-        MaximizeBox = true;
+        FormBorderStyle = FormBorderStyle.None;
+        MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
         TopMost = true;
@@ -72,7 +72,7 @@ public sealed class TranslationPreviewForm : Form
             Padding = Padding.Empty,
         };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
         header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
         header.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
         shell.Controls.Add(header, 0, 0);
@@ -112,6 +112,17 @@ public sealed class TranslationPreviewForm : Form
         header.Controls.Add(zoomActions, 1, 0);
         header.SetRowSpan(zoomActions, 2);
 
+        var closeButton = CreateButton(
+            "closeTranslationPreview",
+            "×",
+            FluentButtonKind.Subtle,
+            40,
+            height: 32);
+        closeButton.AccessibleName = "Đóng bản dịch";
+        closeButton.AccessibleDescription = "Đóng trình đọc mà không thay văn bản gốc.";
+        closeButton.Margin = Padding.Empty;
+        closeButton.Click += (_, _) => CompleteOnce(cancel);
+
         var increaseZoomButton = CreateButton(
             "increaseTranslationZoom",
             "A+",
@@ -128,6 +139,7 @@ public sealed class TranslationPreviewForm : Form
             height: 32);
         decreaseZoomButton.AccessibleDescription = "Giảm cỡ chữ bản dịch.";
         decreaseZoomButton.Margin = new Padding(0, 0, 6, 0);
+        zoomActions.Controls.Add(closeButton);
         zoomActions.Controls.Add(increaseZoomButton);
         zoomActions.Controls.Add(decreaseZoomButton);
 

@@ -17,9 +17,11 @@ constexpr std::uint8_t kSpeechEnabledFlag = 1u << 1u;
 constexpr std::uint8_t kTranslationEnabledFlag = 1u << 2u;
 constexpr std::uint8_t kTraditionalTonePlacementFlag = 1u << 3u;
 constexpr std::uint8_t kRestoreInvalidWordFlag = 1u << 4u;
+constexpr std::uint8_t kClipboardCompatibilityFlag = 1u << 5u;
 constexpr std::uint8_t kKnownFlags =
     kVietnameseEnabledFlag | kSpeechEnabledFlag | kTranslationEnabledFlag |
-    kTraditionalTonePlacementFlag | kRestoreInvalidWordFlag;
+    kTraditionalTonePlacementFlag | kRestoreInvalidWordFlag |
+    kClipboardCompatibilityFlag;
 constexpr std::uint8_t kControlModifier = 1u << 0u;
 constexpr std::uint8_t kShiftModifier = 1u << 1u;
 constexpr std::uint8_t kAltModifier = 1u << 2u;
@@ -201,6 +203,8 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
       (flags & kTraditionalTonePlacementFlag) != 0;
   result.profile.restore_invalid_word =
       (flags & kRestoreInvalidWordFlag) != 0;
+  result.profile.clipboard_compatibility_enabled =
+      (flags & kClipboardCompatibilityFlag) != 0;
   result.error = DecodeBindings(bytes, result.profile);
   return result;
 }

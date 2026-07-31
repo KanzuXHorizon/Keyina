@@ -312,6 +312,38 @@ bool HasRepeatedTrailingLiteralS(std::u32string_view raw) noexcept {
          ToAsciiLower(raw[raw.size() - 2]) == U's';
 }
 
+bool HasTrailingRepeatedLetterModifierEscape(
+    std::u32string_view raw) noexcept {
+  if (raw.size() < 3) {
+    return false;
+  }
+  const char32_t repeated = ToAsciiLower(raw.back());
+  if (repeated != U'a' && repeated != U'e' && repeated != U'o' &&
+      repeated != U'd' && repeated != U'w') {
+    return false;
+  }
+  return ToAsciiLower(raw[raw.size() - 2]) == repeated &&
+         ToAsciiLower(raw[raw.size() - 3]) == repeated;
+}
+
+bool HasRepeatedAsciiVowelBeforeTrailingCharacter(
+    std::u32string_view raw) noexcept {
+  if (raw.size() < 3) {
+    return false;
+  }
+
+  const std::size_t repeated_vowel_start = raw.size() - 3;
+  const char32_t previous = ToAsciiLower(raw[raw.size() - 2]);
+  const char32_t trailing = ToAsciiLower(raw.back());
+  const bool follows_another_vowel =
+      repeated_vowel_start > 0 &&
+      IsAsciiVowel(ToAsciiLower(raw[repeated_vowel_start - 1]));
+  return IsAsciiVowel(previous) &&
+         ToAsciiLower(raw[repeated_vowel_start]) == previous &&
+         !follows_another_vowel &&
+         !ToneFromKey(trailing).has_value();
+}
+
 bool HasSeparatedVowelRuns(std::u32string_view visible) noexcept {
   bool saw_vowel = false;
   bool left_vowel_run = false;
@@ -573,7 +605,10 @@ void Engine::BuildVisibleForRaw() {
   const GuardResult guard = ClassifyToken(raw_keys_, context);
   if (guard.transform) {
     ComposeRaw(composition_buffer_);
-    if (config_.restore_invalid_word &&
+    if (HasTrailingRepeatedLetterModifierEscape(raw_keys_)) {
+      composition_buffer_.assign(raw_keys_);
+      composition_buffer_.pop_back();
+    } else if (config_.restore_invalid_word &&
         HasRepeatedTrailingLiteralS(raw_keys_) &&
         HasSeparatedVowelRuns(composition_buffer_)) {
       composition_buffer_.assign(raw_keys_);
@@ -598,8 +633,12 @@ void Engine::BuildVisibleForRaw() {
       const bool suspicious_tone_order =
           analysis.status != SyllableStatus::Valid &&
           HasSuspiciousToneBeforeNewVowel(raw_keys_);
+      const bool repeated_ascii_vowel_before_trailing_character =
+          analysis.status != SyllableStatus::Valid &&
+          HasRepeatedAsciiVowelBeforeTrailingCharacter(raw_keys_);
       if (impossible_structure || invalid_tone_modified_nucleus ||
-          ambiguous_embedded_tone || suspicious_tone_order) {
+          ambiguous_embedded_tone || suspicious_tone_order ||
+          repeated_ascii_vowel_before_trailing_character) {
         composition_buffer_.assign(literal_text_buffer_);
       }
     }

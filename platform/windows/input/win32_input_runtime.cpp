@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <string>
 #include <string_view>
@@ -26,7 +27,9 @@ constexpr std::size_t kMaximumVisibleSnippetSuggestions = 8;
 constexpr UINT kPointerRegistrationMessage = WM_APP + 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 2;
 constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
+constexpr UINT kDeferredInputMessage = WM_APP + 4;
 constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
+constexpr UINT_PTR kClipboardRestoreTimerIdentifier = 2;
 constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
 constexpr UINT kTrayIdentifier = 1;
 constexpr wchar_t kCommandCompanionMutexName[] =
@@ -41,6 +44,103 @@ constexpr std::uint8_t kShiftModifier = 1u << 1u;
 constexpr std::uint8_t kAltModifier = 1u << 2u;
 constexpr std::uint8_t kWindowsModifier = 1u << 3u;
 constexpr std::uint64_t kTenMiB = 10ULL * 1024ULL * 1024ULL;
+constexpr DWORD kClipboardPasteSettleMilliseconds = 100;
+
+bool OpenClipboardWithRetry(HWND owner) noexcept {
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    if (OpenClipboard(owner) != FALSE) {
+      return true;
+    }
+    Sleep(2);
+  }
+  return false;
+}
+
+bool ClipboardContainsOnlyRestorableText() noexcept {
+  UINT format = 0;
+  while ((format = EnumClipboardFormats(format)) != 0) {
+    if (format != CF_UNICODETEXT && format != CF_TEXT &&
+        format != CF_OEMTEXT && format != CF_LOCALE) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ReadClipboardUnicodeText(std::wstring& text, bool& present) {
+  present = IsClipboardFormatAvailable(CF_UNICODETEXT) != FALSE;
+  if (!present) {
+    text.clear();
+    return true;
+  }
+  const HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+  if (handle == nullptr) {
+    return false;
+  }
+  const auto* value = static_cast<const wchar_t*>(GlobalLock(handle));
+  if (value == nullptr) {
+    return false;
+  }
+  try {
+    text.assign(value);
+  } catch (...) {
+    GlobalUnlock(handle);
+    return false;
+  }
+  GlobalUnlock(handle);
+  return true;
+}
+
+bool SetClipboardUnicodeText(std::wstring_view text) noexcept {
+  const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+  if (memory == nullptr) {
+    return false;
+  }
+  void* destination = GlobalLock(memory);
+  if (destination == nullptr) {
+    GlobalFree(memory);
+    return false;
+  }
+  std::memcpy(destination, text.data(), text.size() * sizeof(wchar_t));
+  static_cast<wchar_t*>(destination)[text.size()] = L'\0';
+  GlobalUnlock(memory);
+  if (EmptyClipboard() == FALSE ||
+      SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+    GlobalFree(memory);
+    return false;
+  }
+  return true;
+}
+
+bool TryPasteIntoStandardEdit(
+    HWND focus,
+    std::uint16_t erase_codepoints,
+    std::wstring_view replacement) noexcept {
+  if (focus == nullptr || replacement.empty()) {
+    return false;
+  }
+  std::array<wchar_t, 32> class_name{};
+  const int class_length = GetClassNameW(
+      focus, class_name.data(), static_cast<int>(class_name.size()));
+  if (class_length <= 0 ||
+      _wcsicmp(class_name.data(), L"Edit") != 0) {
+    return false;
+  }
+  const LRESULT selection = SendMessageW(focus, EM_GETSEL, 0, 0);
+  const DWORD start = LOWORD(selection);
+  const DWORD end = HIWORD(selection);
+  const DWORD replacement_start =
+      start >= erase_codepoints ? start - erase_codepoints : 0;
+  static_cast<void>(SendMessageW(
+      focus, EM_SETSEL,
+      static_cast<WPARAM>(replacement_start),
+      static_cast<LPARAM>(end)));
+  static_cast<void>(SendMessageW(
+      focus, EM_REPLACESEL, TRUE,
+      reinterpret_cast<LPARAM>(replacement.data())));
+  return true;
+}
 
 bool IsKeyboardMessage(WPARAM message) noexcept {
   return message == WM_KEYDOWN || message == WM_KEYUP ||
@@ -463,10 +563,12 @@ bool TryGetRuntimeInputProfileWriteTime(
 Win32InputRuntime* Win32InputRuntime::active_runtime_ = nullptr;
 
 Win32InputRuntime::Win32InputRuntime(RuntimeInputProfile profile,
-                                     bool enable_tray) noexcept
+                                     bool enable_tray,
+                                     bool reload_profiles) noexcept
     : profile_(profile),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
-      enable_tray_(enable_tray) {}
+      enable_tray_(enable_tray),
+      reload_profiles_(reload_profiles) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
@@ -541,12 +643,14 @@ bool Win32InputRuntime::Start() noexcept {
       UpdateTray();
     }
   }
-  ReloadProfileIfChanged();
-  profile_timer_ = SetTimer(
-      window_,
-      kProfileReloadTimerIdentifier,
-      kProfileReloadIntervalMilliseconds,
-      nullptr);
+  if (reload_profiles_) {
+    ReloadProfileIfChanged();
+    profile_timer_ = SetTimer(
+        window_,
+        kProfileReloadTimerIdentifier,
+        kProfileReloadIntervalMilliseconds,
+        nullptr);
+  }
   return true;
 }
 
@@ -576,6 +680,11 @@ void Win32InputRuntime::Stop() noexcept {
     KillTimer(window_, profile_timer_);
     profile_timer_ = 0;
   }
+  if (clipboard_restore_timer_ != 0 && window_ != nullptr) {
+    KillTimer(window_, clipboard_restore_timer_);
+    clipboard_restore_timer_ = 0;
+  }
+  RestorePendingClipboard();
   pointer_registration_desired_ = false;
   ApplyPointerRegistration();
   if (hook_ != nullptr) {
@@ -612,6 +721,11 @@ void Win32InputRuntime::Stop() noexcept {
   if (active_runtime_ == this) {
     active_runtime_ = nullptr;
   }
+  pending_input_available_ = false;
+  pending_input_selection_replacement_ = false;
+  pending_input_decision_ = {};
+  pending_input_context_ = {};
+  pending_input_extended_insert_.clear();
   pressed_keys_.Clear();
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
@@ -706,6 +820,7 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
       const LRESULT result = DefWindowProcW(
           window, message, w_param, l_param);
       if (reset) {
+        ++pointer_reset_count_;
         controller_.OnPointerReset();
         pointer_registration_desired_ = false;
         ApplyPointerRegistration();
@@ -717,7 +832,18 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
         ReloadProfileIfChanged();
         return 0;
       }
+      if (w_param == kClipboardRestoreTimerIdentifier) {
+        if (clipboard_restore_timer_ != 0) {
+          KillTimer(window_, clipboard_restore_timer_);
+          clipboard_restore_timer_ = 0;
+        }
+        RestorePendingClipboard();
+        return 0;
+      }
       break;
+    case kDeferredInputMessage:
+      ProcessDeferredInput();
+      return 0;
     case kRuntimeCommandMessage:
       static_cast<void>(
           LaunchManagedCommand(static_cast<RuntimeCommand>(w_param)));
@@ -825,6 +951,16 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     }
 
     const TypingContext context = CaptureTypingContext();
+    if (key_down) {
+      if (last_key_down_context_known_ && last_key_down_context_ != context) {
+        ++context_change_count_;
+      }
+      last_key_down_context_ = context;
+      last_key_down_context_known_ = true;
+      if (context.bypass_typing) {
+        ++bypass_context_count_;
+      }
+    }
     const InputDecision decision = controller_.Process(event, context);
     if (key_down) {
       UpdateSnippetOverlay();
@@ -835,10 +971,26 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     if (!decision.suppress) {
       return CallNextHookEx(nullptr, code, message, data);
     }
-    if (key_down && !Inject(decision)) {
-      controller_.Reset();
-      RequestPointerRegistration(false);
-      return CallNextHookEx(nullptr, code, message, data);
+    if (key_down) {
+      ++suppressed_edit_count_;
+      const bool chromium_target =
+          IsDeferredInputTarget(context.focus_window);
+      const bool defer_input =
+          (profile_.clipboard_compatibility_enabled && reload_profiles_) ||
+          chromium_target;
+      const bool injected = defer_input
+                                ? QueueDeferredInput(
+                                      decision, context,
+                                      chromium_target &&
+                                          !profile_.clipboard_compatibility_enabled)
+                                : Inject(decision, context.focus_window);
+      if (!injected) {
+        ++failed_injection_count_;
+        controller_.Reset();
+        RequestPointerRegistration(false);
+        return CallNextHookEx(nullptr, code, message, data);
+      }
+      ++successful_injection_count_;
     }
     if (key_down) {
       HandleSnippetCommand(
@@ -859,7 +1011,16 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
   GUITHREADINFO info{};
   info.cbSize = sizeof(info);
   if (!GetGUIThreadInfo(0, &info) || info.hwndFocus == nullptr) {
+    cached_focus_window_ = nullptr;
+    cached_deferred_target_window_ = nullptr;
+    cached_deferred_target_ = false;
     return {};
+  }
+
+  if (info.hwndFocus != cached_focus_window_) {
+    cached_focus_window_ = info.hwndFocus;
+    cached_deferred_target_window_ = nullptr;
+    cached_deferred_target_ = false;
   }
 
   const HWND active = info.hwndActive != nullptr
@@ -869,8 +1030,11 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
     DWORD process_id = 0;
     if (GetWindowThreadProcessId(active, &process_id) == 0) {
       cached_active_window_ = nullptr;
+      cached_focus_window_ = nullptr;
+      cached_deferred_target_window_ = nullptr;
       cached_process_id_ = 0;
       cached_application_hash_ = 0;
+      cached_deferred_target_ = false;
       return {};
     }
     cached_active_window_ = active;
@@ -891,7 +1055,35 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
   };
 }
 
-bool Win32InputRuntime::Inject(const InputDecision& decision) noexcept {
+bool Win32InputRuntime::IsDeferredInputTarget(
+    std::uintptr_t focus_window) noexcept {
+  const HWND window = reinterpret_cast<HWND>(focus_window);
+  if (window == nullptr) {
+    return false;
+  }
+  if (window == cached_deferred_target_window_) {
+    return cached_deferred_target_;
+  }
+
+  std::array<wchar_t, 128> focus_class{};
+  const int class_length = GetClassNameW(
+      window,
+      focus_class.data(),
+      static_cast<int>(focus_class.size()));
+  cached_deferred_target_window_ = window;
+  cached_deferred_target_ = class_length > 0 &&
+      ShouldDeferInputForWindowClass(std::wstring_view(
+          focus_class.data(), static_cast<std::size_t>(class_length)));
+  return cached_deferred_target_;
+}
+
+bool Win32InputRuntime::Inject(
+    const InputDecision& decision,
+    std::uintptr_t target_focus_window) noexcept {
+  if (profile_.clipboard_compatibility_enabled &&
+      (decision.insert_units != 0 || !decision.extended_insert.empty())) {
+    return InjectViaClipboard(decision, target_focus_window);
+  }
   constexpr std::size_t kMaximumInputEvents =
       ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
   auto send = [](const InputDecision& part) noexcept {
@@ -932,6 +1124,247 @@ bool Win32InputRuntime::Inject(const InputDecision& decision) noexcept {
     offset += part.insert_units;
   }
   return true;
+}
+
+bool Win32InputRuntime::InjectWithSelectionReplacement(
+    const InputDecision& decision) noexcept {
+  constexpr std::size_t kMaximumInputEvents =
+      2 + (kMaxActiveKeys * 2) + (kMaximumInputInsertUnits * 2);
+  auto send = [](const InputDecision& part) noexcept {
+    std::array<INPUT, kMaximumInputEvents> inputs{};
+    const std::size_t count = BuildSelectionReplacementSequence(part, inputs);
+    if (count == 0) {
+      return part.backspace_count == 0 && part.insert_units == 0;
+    }
+    const UINT expected = static_cast<UINT>(count);
+    return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  };
+
+  if (decision.extended_insert.empty()) {
+    return send(decision);
+  }
+
+  std::size_t offset = 0;
+  bool first = true;
+  while (offset < decision.extended_insert.size()) {
+    InputDecision part{};
+    part.suppress = true;
+    part.backspace_count = first ? decision.backspace_count : 0;
+    const std::size_t remaining = decision.extended_insert.size() - offset;
+    part.insert_units = static_cast<std::uint16_t>(
+        std::min<std::size_t>(remaining, part.insert.size()));
+    for (std::size_t index = 0; index < part.insert_units; ++index) {
+      part.insert[index] = static_cast<wchar_t>(
+          decision.extended_insert[offset + index]);
+    }
+    if (!send(part)) {
+      return false;
+    }
+    offset += part.insert_units;
+    first = false;
+  }
+  return true;
+}
+
+bool Win32InputRuntime::QueueDeferredInput(
+    const InputDecision& decision,
+    const TypingContext& context,
+    bool selection_replacement) noexcept {
+  if (window_ == nullptr || pending_input_available_) {
+    return false;
+  }
+  try {
+    pending_input_extended_insert_.assign(decision.extended_insert);
+  } catch (...) {
+    return false;
+  }
+  pending_input_decision_ = decision;
+  pending_input_decision_.extended_insert = pending_input_extended_insert_;
+  pending_input_decision_.snippet_command_payload = {};
+  pending_input_context_ = context;
+  pending_input_selection_replacement_ = selection_replacement;
+  pending_input_available_ = true;
+  if (PostMessageW(window_, kDeferredInputMessage, 0, 0) == FALSE) {
+    pending_input_available_ = false;
+    pending_input_selection_replacement_ = false;
+    pending_input_decision_ = {};
+    pending_input_context_ = {};
+    pending_input_extended_insert_.clear();
+    return false;
+  }
+  return true;
+}
+
+void Win32InputRuntime::ProcessDeferredInput() noexcept {
+  if (!pending_input_available_) {
+    return;
+  }
+  const TypingContext current = CaptureTypingContext();
+  const HWND locked_focus = reinterpret_cast<HWND>(
+      pending_input_context_.focus_window);
+  DWORD foreground_process_id = 0;
+  const HWND foreground = GetForegroundWindow();
+  if (foreground != nullptr) {
+    static_cast<void>(GetWindowThreadProcessId(
+        foreground, &foreground_process_id));
+  }
+  const bool same_foreground_process =
+      foreground_process_id != 0 &&
+      foreground_process_id == pending_input_context_.foreground_process_id;
+  const bool target_unchanged = !reload_profiles_ ||
+      (same_foreground_process && locked_focus != nullptr &&
+       IsWindow(locked_focus) != FALSE);
+  bool injected = false;
+  if (target_unchanged) {
+    injected = pending_input_selection_replacement_
+                   ? InjectWithSelectionReplacement(pending_input_decision_)
+                   : Inject(
+                         pending_input_decision_,
+                         pending_input_context_.focus_window);
+  }
+  pending_input_available_ = false;
+  pending_input_selection_replacement_ = false;
+  pending_input_decision_ = {};
+  pending_input_context_ = {};
+  pending_input_extended_insert_.clear();
+  if (!injected) {
+    controller_.Reset();
+    RequestPointerRegistration(false);
+  }
+}
+
+bool Win32InputRuntime::InjectViaClipboard(
+    const InputDecision& decision,
+    std::uintptr_t target_focus_window) noexcept {
+  if (pending_clipboard_sequence_ != 0) {
+    RestorePendingClipboard();
+    if (pending_clipboard_sequence_ != 0) {
+      return false;
+    }
+  }
+
+  std::wstring replacement;
+  try {
+    if (!decision.extended_insert.empty()) {
+      replacement.assign(
+          reinterpret_cast<const wchar_t*>(decision.extended_insert.data()),
+          decision.extended_insert.size());
+    } else {
+      replacement.assign(decision.insert.data(), decision.insert_units);
+    }
+  } catch (...) {
+    return false;
+  }
+  if (replacement.empty()) {
+    return false;
+  }
+  HWND standard_edit_target =
+      reinterpret_cast<HWND>(target_focus_window);
+  if (standard_edit_target == nullptr ||
+      IsWindow(standard_edit_target) == FALSE) {
+    GUITHREADINFO info{};
+    info.cbSize = sizeof(info);
+    if (GetGUIThreadInfo(0, &info)) {
+      standard_edit_target = info.hwndFocus;
+    }
+  }
+  if (TryPasteIntoStandardEdit(
+          standard_edit_target,
+          decision.backspace_count,
+          replacement)) {
+    ++standard_edit_replace_count_;
+    return true;
+  }
+  if (!OpenClipboardWithRetry(window_)) {
+    return false;
+  }
+
+  std::wstring previous_text;
+  bool previous_text_present = false;
+  const bool clipboard_safe = ClipboardContainsOnlyRestorableText() &&
+      ReadClipboardUnicodeText(previous_text, previous_text_present);
+  if (!clipboard_safe) {
+    CloseClipboard();
+    return false;
+  }
+  if (!SetClipboardUnicodeText(replacement)) {
+    if (previous_text_present) {
+      static_cast<void>(SetClipboardUnicodeText(previous_text));
+    } else {
+      static_cast<void>(EmptyClipboard());
+    }
+    CloseClipboard();
+    return false;
+  }
+  const DWORD owned_sequence = GetClipboardSequenceNumber();
+  CloseClipboard();
+  if (owned_sequence == 0) {
+    return false;
+  }
+
+  pending_clipboard_text_ = std::move(previous_text);
+  pending_clipboard_text_present_ = previous_text_present;
+  pending_clipboard_sequence_ = owned_sequence;
+  clipboard_restore_timer_ = SetTimer(
+      window_,
+      kClipboardRestoreTimerIdentifier,
+      kClipboardPasteSettleMilliseconds,
+      nullptr);
+  if (clipboard_restore_timer_ == 0) {
+    RestorePendingClipboard();
+    return false;
+  }
+
+  constexpr std::size_t kMaximumClipboardEvents =
+      ((kMaxActiveKeys + 1) * 2) + 6;
+  std::array<INPUT, kMaximumClipboardEvents> inputs{};
+  const std::size_t count = BuildClipboardPasteSequence(decision, inputs);
+  const UINT expected = static_cast<UINT>(count);
+  const bool sent = count != 0 &&
+      SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  if (!sent) {
+    KillTimer(window_, clipboard_restore_timer_);
+    clipboard_restore_timer_ = 0;
+    RestorePendingClipboard();
+  }
+  return sent;
+}
+
+void Win32InputRuntime::RestorePendingClipboard() noexcept {
+  if (pending_clipboard_sequence_ == 0) {
+    return;
+  }
+  const DWORD current_sequence = GetClipboardSequenceNumber();
+  if (!ShouldRestoreClipboard(
+          pending_clipboard_sequence_, current_sequence)) {
+    pending_clipboard_text_.clear();
+    pending_clipboard_text_present_ = false;
+    pending_clipboard_sequence_ = 0;
+    return;
+  }
+  if (!OpenClipboardWithRetry(window_)) {
+    if (window_ != nullptr && clipboard_restore_timer_ == 0) {
+      clipboard_restore_timer_ = SetTimer(
+          window_,
+          kClipboardRestoreTimerIdentifier,
+          kClipboardPasteSettleMilliseconds,
+          nullptr);
+    }
+    return;
+  }
+  const bool still_owned = ShouldRestoreClipboard(
+      pending_clipboard_sequence_, GetClipboardSequenceNumber());
+  if (still_owned) {
+    if (pending_clipboard_text_present_) {
+      static_cast<void>(SetClipboardUnicodeText(pending_clipboard_text_));
+    } else {
+      static_cast<void>(EmptyClipboard());
+    }
+  }
+  CloseClipboard();
+  pending_clipboard_text_.clear();
+  pending_clipboard_text_present_ = false;
+  pending_clipboard_sequence_ = 0;
 }
 
 bool Win32InputRuntime::IsPointerResetPacket(HRAWINPUT input) noexcept {

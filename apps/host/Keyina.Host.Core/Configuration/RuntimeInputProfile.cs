@@ -9,6 +9,7 @@ public sealed record RuntimeInputProfileSnapshot(
     bool TranslationEnabled,
     bool TraditionalTonePlacement,
     bool RestoreInvalidWord,
+    bool ClipboardCompatibilityEnabled,
     int SourceSchemaVersion,
     HotkeyPreferences Hotkeys);
 
@@ -24,12 +25,14 @@ public static class RuntimeInputProfileCodec
     private const byte TranslationEnabledFlag = 1 << 2;
     private const byte TraditionalTonePlacementFlag = 1 << 3;
     private const byte RestoreInvalidWordFlag = 1 << 4;
+    private const byte ClipboardCompatibilityFlag = 1 << 5;
     private const byte KnownFlags =
         VietnameseEnabledFlag |
         SpeechEnabledFlag |
         TranslationEnabledFlag |
         TraditionalTonePlacementFlag |
-        RestoreInvalidWordFlag;
+        RestoreInvalidWordFlag |
+        ClipboardCompatibilityFlag;
 
     private static ReadOnlySpan<byte> Magic => "KIRP"u8;
 
@@ -122,6 +125,7 @@ public static class RuntimeInputProfileCodec
                 (flags & TranslationEnabledFlag) != 0,
                 (flags & TraditionalTonePlacementFlag) != 0,
                 (flags & RestoreInvalidWordFlag) != 0,
+                (flags & ClipboardCompatibilityFlag) != 0,
                 sourceSchemaVersion,
                 hotkeys);
         }
@@ -149,6 +153,10 @@ public static class RuntimeInputProfileCodec
             flags |= TranslationEnabledFlag;
         }
         flags |= RestoreInvalidWordFlag;
+        if (configuration.ClipboardCompatibilityEnabled)
+        {
+            flags |= ClipboardCompatibilityFlag;
+        }
         return flags;
     }
 

@@ -21,7 +21,7 @@ public static class SpeechSelfTest
         try
         {
             await using var session = new SpeechmaticsRealtimeSession(
-                SpeechmaticsOptions.VietnameseDefault,
+                SpeechmaticsOptions.MultilingualDefault,
                 transport,
                 "self-test-token");
 
@@ -116,7 +116,7 @@ public static class SpeechSelfTest
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (endpoint != SpeechmaticsOptions.VietnameseDefault.Endpoint ||
+            if (endpoint != SpeechmaticsOptions.MultilingualDefault.Endpoint ||
                 !authorizationHeader.StartsWith("Bearer ", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Self-test transport received invalid connection settings.");

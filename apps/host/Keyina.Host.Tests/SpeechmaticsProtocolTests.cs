@@ -6,14 +6,14 @@ namespace Keyina.Host.Tests;
 internal static class SpeechmaticsProtocolTests
 {
     private const string ExpectedStartJson =
-        "{\"message\":\"StartRecognition\",\"audio_format\":{\"type\":\"raw\",\"encoding\":\"pcm_s16le\",\"sample_rate\":16000},\"transcription_config\":{\"language\":\"vi\",\"model\":\"enhanced\",\"max_delay\":2,\"max_delay_mode\":\"flexible\",\"enable_partials\":true,\"conversation_config\":{\"end_of_utterance_silence_trigger\":0}}}";
+        "{\"message\":\"StartRecognition\",\"audio_format\":{\"type\":\"raw\",\"encoding\":\"pcm_s16le\",\"sample_rate\":16000},\"transcription_config\":{\"language\":\"auto\",\"model\":\"enhanced\",\"max_delay\":2,\"max_delay_mode\":\"flexible\",\"enable_partials\":true,\"conversation_config\":{\"end_of_utterance_silence_trigger\":0}}}";
 
-    [KeyinaTest("Speechmatics Vietnamese defaults match the production realtime contract")]
-    private static void DefaultsAreVietnameseAndLowLatency()
+    [KeyinaTest("Speechmatics multilingual defaults match the production realtime contract")]
+    private static void DefaultsAreMultilingualAndLowLatency()
     {
-        var options = SpeechmaticsOptions.VietnameseDefault;
+        var options = SpeechmaticsOptions.MultilingualDefault;
         AssertEx.Equal(new Uri("wss://global.rt.speechmatics.com/v2"), options.Endpoint);
-        AssertEx.Equal("vi", options.Language);
+        AssertEx.Equal("auto", options.Language);
         AssertEx.Equal("enhanced", options.Model);
         AssertEx.Equal(2.0, options.MaxDelaySeconds);
         AssertEx.Equal("flexible", options.MaxDelayMode);
@@ -28,7 +28,7 @@ internal static class SpeechmaticsProtocolTests
     private static void StartRecognitionJsonIsExact()
     {
         var bytes = SpeechmaticsProtocol.CreateStartRecognition(
-            SpeechmaticsOptions.VietnameseDefault);
+            SpeechmaticsOptions.MultilingualDefault);
         AssertEx.Equal(ExpectedStartJson, Encoding.UTF8.GetString(bytes));
     }
 
@@ -45,25 +45,25 @@ internal static class SpeechmaticsProtocolTests
     private static void InvalidOptionsAreRejected()
     {
         AssertThrows<ArgumentException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with
+            (SpeechmaticsOptions.MultilingualDefault with
             {
                 Endpoint = new Uri("ws://global.rt.speechmatics.com/v2"),
             }).Validate());
         AssertThrows<ArgumentException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with { Language = "" }).Validate());
+            (SpeechmaticsOptions.MultilingualDefault with { Language = "" }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with { MaxDelaySeconds = 0 }).Validate());
+            (SpeechmaticsOptions.MultilingualDefault with { MaxDelaySeconds = 0 }).Validate());
         AssertThrows<ArgumentException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with { MaxDelayMode = "fast" }).Validate());
+            (SpeechmaticsOptions.MultilingualDefault with { MaxDelayMode = "fast" }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with
+            (SpeechmaticsOptions.MultilingualDefault with
             {
                 EndOfUtteranceSilenceTriggerSeconds = 2.1,
             }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with { SampleRate = 0 }).Validate());
+            (SpeechmaticsOptions.MultilingualDefault with { SampleRate = 0 }).Validate());
         AssertThrows<ArgumentOutOfRangeException>(() =>
-            (SpeechmaticsOptions.VietnameseDefault with { ChunkSizeBytes = 3 }).Validate());
+            (SpeechmaticsOptions.MultilingualDefault with { ChunkSizeBytes = 3 }).Validate());
     }
 
     [KeyinaTest("Speechmatics parser distinguishes revised partials and immutable finals")]

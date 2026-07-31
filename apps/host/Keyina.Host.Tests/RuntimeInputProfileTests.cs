@@ -31,6 +31,7 @@ internal static class RuntimeInputProfileTests
             VietnameseEnabled = false,
             SpeechEnabled = true,
             TranslationEnabled = true,
+            ClipboardCompatibilityEnabled = true,
             Hotkeys = HotkeyPreferences.Default
                 .WithChord(
                     HotkeyCommand.ToggleVietnamese,
@@ -56,6 +57,7 @@ internal static class RuntimeInputProfileTests
         AssertEx.True(decoded.SpeechEnabled, "Speech state changed during profile round trip.");
         AssertEx.True(decoded.TranslationEnabled, "Translation state changed during profile round trip.");
         AssertEx.True(decoded.RestoreInvalidWord, "Invalid-Latin restoration changed during profile round trip.");
+        AssertEx.True(decoded.ClipboardCompatibilityEnabled, "Clipboard compatibility mode changed during profile round trip.");
         AssertEx.Equal(configuration.SchemaVersion, decoded.SourceSchemaVersion);
         AssertEx.Equal(configuration.Hotkeys, decoded.Hotkeys);
     }

@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace keyina::windows {
 
@@ -35,7 +36,8 @@ struct NativeResidentResourceSnapshot {
 class Win32InputRuntime {
  public:
   explicit Win32InputRuntime(RuntimeInputProfile profile,
-                             bool enable_tray) noexcept;
+                             bool enable_tray,
+                             bool reload_profiles = true) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -61,6 +63,34 @@ class Win32InputRuntime {
 
   [[nodiscard]] std::uint64_t processed_keyboard_events() const noexcept {
     return processed_keyboard_events_;
+  }
+
+  [[nodiscard]] std::uint64_t suppressed_edit_count() const noexcept {
+    return suppressed_edit_count_;
+  }
+
+  [[nodiscard]] std::uint64_t successful_injection_count() const noexcept {
+    return successful_injection_count_;
+  }
+
+  [[nodiscard]] std::uint64_t failed_injection_count() const noexcept {
+    return failed_injection_count_;
+  }
+
+  [[nodiscard]] std::uint64_t bypass_context_count() const noexcept {
+    return bypass_context_count_;
+  }
+
+  [[nodiscard]] std::uint64_t context_change_count() const noexcept {
+    return context_change_count_;
+  }
+
+  [[nodiscard]] std::uint64_t pointer_reset_count() const noexcept {
+    return pointer_reset_count_;
+  }
+
+  [[nodiscard]] std::uint64_t standard_edit_replace_count() const noexcept {
+    return standard_edit_replace_count_;
   }
 
   [[nodiscard]] RuntimeInputProfile profile() const noexcept {
@@ -89,7 +119,22 @@ class Win32InputRuntime {
   LRESULT HandleKeyboardEvent(int code, WPARAM message,
                               LPARAM data) noexcept;
   [[nodiscard]] TypingContext CaptureTypingContext() noexcept;
-  [[nodiscard]] bool Inject(const InputDecision& decision) noexcept;
+  [[nodiscard]] bool IsDeferredInputTarget(
+      std::uintptr_t focus_window) noexcept;
+  [[nodiscard]] bool Inject(
+      const InputDecision& decision,
+      std::uintptr_t target_focus_window = 0) noexcept;
+  [[nodiscard]] bool InjectWithSelectionReplacement(
+      const InputDecision& decision) noexcept;
+  [[nodiscard]] bool InjectViaClipboard(
+      const InputDecision& decision,
+      std::uintptr_t target_focus_window) noexcept;
+  [[nodiscard]] bool QueueDeferredInput(
+      const InputDecision& decision,
+      const TypingContext& context,
+      bool selection_replacement) noexcept;
+  void ProcessDeferredInput() noexcept;
+  void RestorePendingClipboard() noexcept;
   [[nodiscard]] bool IsPointerResetPacket(HRAWINPUT input) noexcept;
   void RequestPointerRegistration(bool active) noexcept;
   void ApplyPointerRegistration() noexcept;
@@ -119,6 +164,7 @@ class Win32InputRuntime {
   ResidentInputController controller_;
   RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
+  bool reload_profiles_{true};
   HWND window_{nullptr};
   HWND snippet_overlay_window_{nullptr};
   HHOOK hook_{nullptr};
@@ -131,8 +177,11 @@ class Win32InputRuntime {
   NOTIFYICONDATAW tray_data_{};
   KeyStateSet pressed_keys_{};
   HWND cached_active_window_{nullptr};
+  HWND cached_focus_window_{nullptr};
+  HWND cached_deferred_target_window_{nullptr};
   std::uint32_t cached_process_id_{};
   std::uint64_t cached_application_hash_{};
+  bool cached_deferred_target_{};
   std::uint8_t modifier_state_{};
   bool caps_lock_{false};
   bool pointer_registration_desired_{false};
@@ -146,9 +195,27 @@ class Win32InputRuntime {
   FILETIME snippet_profile_write_time_{};
   bool snippet_profile_write_time_known_{false};
   UINT_PTR profile_timer_{};
+  UINT_PTR clipboard_restore_timer_{};
+  InputDecision pending_input_decision_{};
+  TypingContext pending_input_context_{};
+  std::u16string pending_input_extended_insert_{};
+  bool pending_input_available_{false};
+  bool pending_input_selection_replacement_{false};
+  std::wstring pending_clipboard_text_{};
+  DWORD pending_clipboard_sequence_{};
+  bool pending_clipboard_text_present_{false};
   NativeRuntimeStartupStage startup_stage_{NativeRuntimeStartupStage::None};
   DWORD startup_error_{};
   std::uint64_t processed_keyboard_events_{};
+  std::uint64_t suppressed_edit_count_{};
+  std::uint64_t successful_injection_count_{};
+  std::uint64_t failed_injection_count_{};
+  std::uint64_t bypass_context_count_{};
+  TypingContext last_key_down_context_{};
+  bool last_key_down_context_known_{false};
+  std::uint64_t context_change_count_{};
+  std::uint64_t pointer_reset_count_{};
+  std::uint64_t standard_edit_replace_count_{};
 
   static Win32InputRuntime* active_runtime_;
 };

@@ -252,7 +252,7 @@ std::string Processor() {
 std::size_t TypeSequence(keyina::Engine& engine, std::u32string_view sequence) {
   std::size_t checksum = 0;
   for (const char32_t character : sequence) {
-    const auto edit = engine.Process(
+    const auto edit = engine.ProcessView(
         {keyina::KeyKind::Character, character, false, false, false});
     checksum += edit.insert.size() + edit.erase_codepoints + edit.consumed;
   }

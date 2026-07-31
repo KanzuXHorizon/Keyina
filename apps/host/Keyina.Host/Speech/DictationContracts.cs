@@ -16,20 +16,30 @@ public interface IIpcEnvelopeWriter
 public sealed class SpeechmaticsSessionFactory : ISpeechmaticsSessionFactory
 {
     private readonly SpeechmaticsOptions options;
+    private readonly Func<string>? languageProvider;
     private readonly Func<ISpeechmaticsTransport> transportFactory;
 
     public SpeechmaticsSessionFactory(
         SpeechmaticsOptions? options = null,
-        Func<ISpeechmaticsTransport>? transportFactory = null)
+        Func<ISpeechmaticsTransport>? transportFactory = null,
+        Func<string>? languageProvider = null)
     {
-        this.options = options ?? SpeechmaticsOptions.VietnameseDefault;
+        this.options = options ?? SpeechmaticsOptions.MultilingualDefault;
         this.options.Validate();
+        this.languageProvider = languageProvider;
         this.transportFactory = transportFactory ?? (() => new ClientWebSocketTransport());
     }
 
     public ISpeechmaticsRealtimeSession Create(string apiKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
-        return new SpeechmaticsRealtimeSession(options, transportFactory(), apiKey);
+        var sessionOptions = languageProvider is null
+            ? options
+            : options with
+            {
+                Language = Keyina.Host.Core.Speech.SpeechLanguageCatalog.Normalize(languageProvider()),
+            };
+        sessionOptions.Validate();
+        return new SpeechmaticsRealtimeSession(sessionOptions, transportFactory(), apiKey);
     }
 }

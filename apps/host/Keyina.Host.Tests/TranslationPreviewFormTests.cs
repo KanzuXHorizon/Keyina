@@ -26,7 +26,10 @@ internal static class TranslationPreviewFormTests
         AssertEx.True(
             form.AccessibleDescription?.Contains("không thay đổi", StringComparison.OrdinalIgnoreCase) == true,
             "Overlay accessibility copy did not explain that original text remains unchanged.");
-        AssertEx.Equal(FormBorderStyle.Sizable, form.FormBorderStyle);
+        AssertEx.Equal(FormBorderStyle.None, form.FormBorderStyle);
+        AssertEx.False(form.MaximizeBox, "Borderless translation overlay must not expose maximize chrome.");
+        AssertEx.False(form.MinimizeBox, "Borderless translation overlay must not expose minimize chrome.");
+        AssertEx.Equal(1, form.Controls.Find("closeTranslationPreview", true).Length);
         AssertEx.True(form.MinimumSize.Width >= 460,
             "Translation reader minimum width is too narrow for readable text.");
         AssertEx.Equal(0, form.Controls.Find("translationPreviewOriginal", true).Length);

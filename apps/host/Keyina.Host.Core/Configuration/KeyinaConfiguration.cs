@@ -2,6 +2,7 @@ using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Snippets;
+using Keyina.Host.Core.Speech;
 using Keyina.Host.Core.Translation;
 using System.Text.Json;
 
@@ -101,9 +102,13 @@ public sealed record KeyinaConfiguration(
     public const int CurrentSchemaVersion = 1;
     public const int MaximumCustomSnippets = 10_000;
 
+    public string SpeechLanguage { get; init; } = "auto";
+
     public bool TranslationEnabled { get; init; }
 
     public bool TranslationPreviewEnabled { get; init; }
+
+    public bool ClipboardCompatibilityEnabled { get; init; }
 
     public string TranslationTargetLanguage { get; init; } = "VI";
 
@@ -141,6 +146,16 @@ public sealed record KeyinaConfiguration(
         if (Feedback is null || !Enum.IsDefined(Feedback.Mode))
         {
             throw new ConfigurationValidationException("Configuration feedback mode is invalid.");
+        }
+        try
+        {
+            _ = SpeechLanguageCatalog.Normalize(SpeechLanguage);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration speech language is invalid.",
+                exception);
         }
         if (!TranslationLanguageCatalog.IsSupportedTarget(TranslationTargetLanguage))
         {

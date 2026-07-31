@@ -102,6 +102,11 @@ KEYINA_TEST(repeated_letter_modifier_escapes_to_literal_telex) {
     keyina::Engine engine;
     KEYINA_EXPECT_EQ(Type(engine, test.raw), std::u32string{test.expected});
   }
+
+  keyina::Engine repeated_e;
+  keyina::Engine repeated_a;
+  KEYINA_EXPECT_EQ(Type(repeated_e, U"eeee"), std::u32string{U"eee"});
+  KEYINA_EXPECT_EQ(Type(repeated_a, U"aaaa"), std::u32string{U"aaa"});
 }
 
 KEYINA_TEST(applies_delayed_w_modifier_across_the_vowel_nucleus) {

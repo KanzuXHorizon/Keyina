@@ -67,6 +67,14 @@ set_tests_properties(keyina.windows.input_typing PROPERTIES
   TIMEOUT 10
 )
 
+add_test(NAME keyina.windows.input_clipboard_typing
+  COMMAND KeyinaInput --clipboard-typing-self-test)
+set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "clipboard_typing_self_test_pass"
+  TIMEOUT 10
+)
+
 add_test(NAME keyina.windows.input_tray_resource
   COMMAND KeyinaInput --tray-resource-self-test)
 set_tests_properties(keyina.windows.input_tray_resource PROPERTIES

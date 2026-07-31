@@ -42,6 +42,7 @@ struct RuntimeInputProfile {
   bool translation_enabled{false};
   bool traditional_tone_placement{false};
   bool restore_invalid_word{false};
+  bool clipboard_compatibility_enabled{false};
   std::int32_t source_schema_version{1};
   std::array<RuntimeHotkeyBinding, kRuntimeHotkeyCount> hotkeys{};
 };

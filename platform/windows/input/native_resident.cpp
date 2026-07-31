@@ -274,7 +274,7 @@ bool WaitForExpectedText(
   return false;
 }
 
-int RunTypingSelfTest() noexcept {
+int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   const HWND previous_foreground = GetForegroundWindow();
   const HINSTANCE instance = GetModuleHandleW(nullptr);
   HWND window = CreateWindowExW(
@@ -307,6 +307,13 @@ int RunTypingSelfTest() noexcept {
   bool foreground_confirmed = false;
   bool success = false;
   std::uint64_t processed_events = 0;
+  std::uint64_t suppressed_edits = 0;
+  std::uint64_t successful_injections = 0;
+  std::uint64_t failed_injections = 0;
+  std::uint64_t bypass_contexts = 0;
+  std::uint64_t context_changes = 0;
+  std::uint64_t pointer_resets = 0;
+  std::uint64_t standard_edit_replaces = 0;
   std::array<wchar_t, 64> text{};
   int length = 0;
 
@@ -316,7 +323,8 @@ int RunTypingSelfTest() noexcept {
     DrainCurrentThreadMessages(20);
     auto profile = keyina::windows::DefaultRuntimeInputProfile();
     profile.vietnamese_enabled = true;
-    keyina::windows::Win32InputRuntime runtime(profile, false);
+    profile.clipboard_compatibility_enabled = clipboard_compatibility;
+    keyina::windows::Win32InputRuntime runtime(profile, false, false);
     if (!runtime.Start()) {
       DestroyWindow(window);
       WriteStandardOutput("typing_self_test_runtime_failed\n");
@@ -356,6 +364,13 @@ int RunTypingSelfTest() noexcept {
           edit, text.data(), static_cast<int>(text.size()));
     }
     processed_events = runtime.processed_keyboard_events();
+    suppressed_edits = runtime.suppressed_edit_count();
+    successful_injections = runtime.successful_injection_count();
+    failed_injections = runtime.failed_injection_count();
+    bypass_contexts = runtime.bypass_context_count();
+    context_changes = runtime.context_change_count();
+    pointer_resets = runtime.pointer_reset_count();
+    standard_edit_replaces = runtime.standard_edit_replace_count();
     runtime.Stop();
     if (!success) {
       DrainCurrentThreadMessages(300);
@@ -366,7 +381,10 @@ int RunTypingSelfTest() noexcept {
     SetForegroundWindow(previous_foreground);
   }
   if (success) {
-    WriteStandardOutput("typing_self_test_pass\n");
+    WriteStandardOutput(
+        clipboard_compatibility
+            ? "clipboard_typing_self_test_pass\n"
+            : "typing_self_test_pass\n");
     return 0;
   }
 
@@ -381,12 +399,23 @@ int RunTypingSelfTest() noexcept {
       diagnostic.data(), diagnostic.size(),
       "{\"error\":\"typing_self_test_failed\",\"focus_ready\":%s,"
       "\"focus_confirmed\":%s,\"foreground_confirmed\":%s,"
-      "\"processed_events\":%llu,\"text_length\":%d,"
+      "\"processed_events\":%llu,\"suppressed_edits\":%llu,"
+      "\"successful_injections\":%llu,\"failed_injections\":%llu,"
+      "\"bypass_contexts\":%llu,\"context_changes\":%llu,"
+      "\"pointer_resets\":%llu,\"standard_edit_replaces\":%llu,"
+      "\"text_length\":%d,"
       "\"actual\":\"%.*s\"}\n",
       focus_ready ? "true" : "false",
       focus_confirmed ? "true" : "false",
       foreground_confirmed ? "true" : "false",
       static_cast<unsigned long long>(processed_events),
+      static_cast<unsigned long long>(suppressed_edits),
+      static_cast<unsigned long long>(successful_injections),
+      static_cast<unsigned long long>(failed_injections),
+      static_cast<unsigned long long>(bypass_contexts),
+      static_cast<unsigned long long>(context_changes),
+      static_cast<unsigned long long>(pointer_resets),
+      static_cast<unsigned long long>(standard_edit_replaces),
       length, utf8_length, actual_utf8.data());
   if (diagnostic_length > 0) {
     WriteStandardOutput(std::string_view(
@@ -540,6 +569,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--resource-self-test");
   const bool typing_self_test = HasArgument(
       __argc, __wargv, L"--typing-self-test");
+  const bool clipboard_typing_self_test = HasArgument(
+      __argc, __wargv, L"--clipboard-typing-self-test");
   const bool tray_resource_self_test = HasArgument(
       __argc, __wargv, L"--tray-resource-self-test");
   const bool profile_reload_self_test = HasArgument(
@@ -554,8 +585,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   if (resource_self_test || tray_resource_self_test) {
     return RunResourceSelfTest(tray_resource_self_test);
   }
-  if (typing_self_test) {
-    return RunTypingSelfTest();
+  if (typing_self_test || clipboard_typing_self_test) {
+    return RunTypingSelfTest(clipboard_typing_self_test);
   }
   if (profile_reload_self_test) {
     return RunProfileReloadSelfTest();

@@ -136,6 +136,22 @@ KEYINA_TEST(keeps_final_tone_key_composition_editable) {
                    std::u32string{U"nguyẽn"});
 }
 
+KEYINA_TEST(keeps_vietnamese_double_vowel_composition_with_invalid_word_restore) {
+  constexpr std::array<TelexCase, 3> cases = {{
+      {U"tieengs", U"tiếng"},
+      {U"vieet", U"viêt"},
+      {U"vieetj", U"việt"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
 KEYINA_TEST(restores_tone_keys_embedded_in_latin_tokens) {
   constexpr std::array<TelexCase, 7> cases = {{
       {U"regist", U"regist"},
@@ -164,8 +180,24 @@ KEYINA_TEST(restores_tone_keys_embedded_in_latin_tokens) {
 }
 
 KEYINA_TEST(restores_common_latin_tokens_without_dictionary_autocorrection) {
-  constexpr std::array<TelexCase, 10> cases = {{
+  constexpr std::array<TelexCase, 26> cases = {{
       {U"process", U"process"},
+      {U"deep", U"deep"},
+      {U"keep", U"keep"},
+      {U"feed", U"feed"},
+      {U"feel", U"feel"},
+      {U"week", U"week"},
+      {U"green", U"green"},
+      {U"screen", U"screen"},
+      {U"speed", U"speed"},
+      {U"sleep", U"sleep"},
+      {U"book", U"book"},
+      {U"look", U"look"},
+      {U"good", U"good"},
+      {U"cool", U"cool"},
+      {U"tool", U"tool"},
+      {U"boot", U"boot"},
+      {U"screenshot", U"screenshot"},
       {U"search", U"search"},
       {U"research", U"research"},
       {U"codex", U"codex"},

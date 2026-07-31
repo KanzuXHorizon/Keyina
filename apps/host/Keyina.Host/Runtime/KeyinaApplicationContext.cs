@@ -709,7 +709,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 dictationOverlay.StateChanged += (_, _) =>
                     PostSignal(HandleDictationStateChanged);
                 dictationCoordinator = new DictationCoordinator(
-                    new SpeechmaticsSessionFactory(),
+                    new SpeechmaticsSessionFactory(
+                        languageProvider: () => configuration.SpeechLanguage),
                     new WasapiMicrophoneCapture(),
                     envelopeWriter,
                     dictationOverlay,
@@ -840,6 +841,16 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         RefreshVisualState();
     }
 
+    private void SetSpeechLanguage(string language)
+    {
+        configuration = configuration with
+        {
+            SpeechLanguage = Keyina.Host.Core.Speech.SpeechLanguageCatalog.Normalize(language),
+        };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
     private void SetTranslationEnabled(bool enabled)
     {
         configuration = configuration with { TranslationEnabled = enabled };
@@ -902,6 +913,16 @@ public sealed class KeyinaApplicationContext : ApplicationContext
                 translationHotkeyReady = false;
             }
         }
+    }
+
+    private void SetClipboardCompatibilityEnabled(bool enabled)
+    {
+        configuration = configuration with
+        {
+            ClipboardCompatibilityEnabled = enabled,
+        };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
     }
 
     private void SetTranslationPreviewEnabled(bool enabled)
@@ -1818,9 +1839,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         SetFeedbackMode,
         PreviewFeedback)
     {
+        SetSpeechLanguage = SetSpeechLanguage,
         SetTranslationEnabled = SetTranslationEnabled,
         SetTranslationTargetLanguage = SetTranslationTargetLanguage,
         SetTranslationPreviewEnabled = SetTranslationPreviewEnabled,
+        SetClipboardCompatibilityEnabled = SetClipboardCompatibilityEnabled,
         SetTranslationProviders = SetTranslationProviders,
         SaveDeepLApiKey = secret =>
         {
@@ -2010,9 +2033,11 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             configuration.Feedback?.Mode ?? FeedbackMode.Automatic)
         {
             Health = health,
+            SpeechLanguage = configuration.SpeechLanguage,
             TranslationEnabled = configuration.TranslationEnabled,
             TranslationCredentialConfigured = translationCredentialConfigured,
             TranslationPreviewEnabled = configuration.TranslationPreviewEnabled,
+            ClipboardCompatibilityEnabled = configuration.ClipboardCompatibilityEnabled,
             LibreTranslateCredentialConfigured = libreTranslateCredentialConfigured,
             TranslationProviders = configuration.TranslationProviders,
             TranslationHotkeyRegistered = translationHotkeyReady,

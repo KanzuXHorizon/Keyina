@@ -24,6 +24,11 @@ AppPublisherURL={#MyAppUrl}
 AppSupportURL={#MyAppUrl}/issues
 AppUpdatesURL={#MyAppUrl}/releases
 AppCopyright=Copyright © 2026 Keyina contributors
+AppComments=Bộ gõ tiếng Việt, nhập bằng giọng nói, dịch nhanh và gõ tắt cho Windows.
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=Bộ công cụ nhập liệu Keyina cho Windows
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Keyina
 DefaultGroupName=Keyina
 DisableProgramGroupPage=yes
@@ -63,7 +68,7 @@ SignedUninstaller=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Tạo lối tắt Cài đặt Keyina trên màn hình"; GroupDescription: "Lối tắt bổ sung:"; Flags: unchecked
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -77,4 +82,4 @@ Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppResidentExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall
-Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; Description: "Open Keyina settings"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; Description: "Mở Cài đặt Keyina"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

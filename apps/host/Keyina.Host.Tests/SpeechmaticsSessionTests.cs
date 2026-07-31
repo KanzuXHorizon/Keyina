@@ -14,7 +14,7 @@ internal static class SpeechmaticsSessionTests
         var startTask = session.StartAsync(CancellationToken.None);
         await WaitUntilAsync(() => transport.SentText.Count == 1);
 
-        AssertEx.Equal(SpeechmaticsOptions.VietnameseDefault.Endpoint, transport.ConnectedEndpoint);
+        AssertEx.Equal(SpeechmaticsOptions.MultilingualDefault.Endpoint, transport.ConnectedEndpoint);
         AssertEx.Equal("Bearer test-token", transport.AuthorizationHeader);
         AssertEx.True(!startTask.IsCompleted, "Start completed before RecognitionStarted.");
         AssertEx.True(
@@ -40,7 +40,7 @@ internal static class SpeechmaticsSessionTests
             session.SendAudioAsync(new byte[3], CancellationToken.None));
         await AssertThrowsAsync<ArgumentOutOfRangeException>(() =>
             session.SendAudioAsync(
-                new byte[SpeechmaticsOptions.VietnameseDefault.ChunkSizeBytes + 2],
+                new byte[SpeechmaticsOptions.MultilingualDefault.ChunkSizeBytes + 2],
                 CancellationToken.None));
 
         await session.SendAudioAsync(new byte[] { 1, 2, 3, 4 }, CancellationToken.None);
@@ -182,7 +182,7 @@ internal static class SpeechmaticsSessionTests
     });
 
     private static SpeechmaticsRealtimeSession CreateSession(FakeSpeechmaticsTransport transport) =>
-        new(SpeechmaticsOptions.VietnameseDefault, transport, "test-token");
+        new(SpeechmaticsOptions.MultilingualDefault, transport, "test-token");
 
     private static async Task StartAsync(
         SpeechmaticsRealtimeSession session,
