@@ -99,3 +99,11 @@ set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
   PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
   TIMEOUT 20
 )
+
+add_test(NAME keyina.windows.input_transform_callback_latency
+  COMMAND KeyinaInput --transform-callback-latency-self-test)
+set_tests_properties(keyina.windows.input_transform_callback_latency PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "transform_callback_latency_self_test_pass"
+  TIMEOUT 30
+)

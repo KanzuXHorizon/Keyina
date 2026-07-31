@@ -40,7 +40,8 @@ class Win32InputRuntime {
       RuntimeInputProfile profile,
       bool enable_tray,
       bool reload_profiles = true,
-      bool profile_callback_latency = false) noexcept;
+      bool profile_callback_latency = false,
+      ULONG_PTR accepted_input_marker = 0) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -193,6 +194,7 @@ class Win32InputRuntime {
   bool enable_tray_{false};
   bool reload_profiles_{true};
   bool profile_callback_latency_{false};
+  ULONG_PTR accepted_input_marker_{};
   std::uint64_t performance_counter_frequency_{};
   NativeLatencyHistogram callback_latency_histogram_{};
   std::array<

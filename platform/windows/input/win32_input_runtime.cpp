@@ -625,12 +625,14 @@ Win32InputRuntime::Win32InputRuntime(
     RuntimeInputProfile profile,
     bool enable_tray,
     bool reload_profiles,
-    bool profile_callback_latency) noexcept
+    bool profile_callback_latency,
+    ULONG_PTR accepted_input_marker) noexcept
     : profile_(profile),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
       enable_tray_(enable_tray),
       reload_profiles_(reload_profiles),
-      profile_callback_latency_(profile_callback_latency) {}
+      profile_callback_latency_(profile_callback_latency),
+      accepted_input_marker_(accepted_input_marker) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
@@ -976,6 +978,10 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     const auto& native_event =
         *reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
     if (native_event.dwExtraInfo == kKeyinaInjectionMarker) {
+      return CallNextHookEx(nullptr, code, message, data);
+    }
+    if (accepted_input_marker_ != 0 &&
+        native_event.dwExtraInfo != accepted_input_marker_) {
       return CallNextHookEx(nullptr, code, message, data);
     }
 

@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdio>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -15,6 +16,8 @@ constexpr wchar_t kMutexName[] = L"Local\\Keyina.NativeInput";
 constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
 constexpr UINT kSettingsMenuCommand = 1002;
 constexpr DWORD kCommandForwardTimeoutMilliseconds = 2'000;
+constexpr ULONG_PTR kSelfTestInputMarker =
+    static_cast<ULONG_PTR>(0x4B455954455354ULL);
 
 bool ForwardSettingsToExistingResident() noexcept {
   const ULONGLONG deadline =
@@ -208,6 +211,7 @@ std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = key;
     input.ki.dwFlags = flags;
+    input.ki.dwExtraInfo = kSelfTestInputMarker;
     inputs[count++] = input;
   };
   if (shift) {
@@ -235,6 +239,7 @@ std::uint32_t SendTestKeyPairBatch(std::size_t pair_count) noexcept {
     INPUT down{};
     down.type = INPUT_KEYBOARD;
     down.ki.wVk = static_cast<WORD>('A');
+    down.ki.dwExtraInfo = kSelfTestInputMarker;
     inputs[count++] = down;
 
     INPUT up = down;
@@ -275,12 +280,13 @@ void DrainCurrentThreadMessages(DWORD duration_milliseconds) noexcept {
   }
 }
 
+template <std::size_t Capacity>
 bool WaitForExpectedText(
     keyina::windows::Win32InputRuntime& runtime,
     HWND edit,
     std::wstring_view expected,
     DWORD timeout_milliseconds,
-    std::array<wchar_t, 64>& text,
+    std::array<wchar_t, Capacity>& text,
     int& length) noexcept {
   const ULONGLONG deadline = GetTickCount64() + timeout_milliseconds;
   do {
@@ -350,7 +356,7 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     profile.vietnamese_enabled = true;
     profile.clipboard_compatibility_enabled = clipboard_compatibility;
     keyina::windows::Win32InputRuntime runtime(
-        profile, false, false, true);
+        profile, false, false, true, kSelfTestInputMarker);
     if (!runtime.Start()) {
       DestroyWindow(window);
       WriteStandardOutput("typing_self_test_runtime_failed\n");
@@ -622,7 +628,7 @@ int RunCallbackLatencySelfTest() noexcept {
   profile.vietnamese_enabled = false;
   profile.clipboard_compatibility_enabled = false;
   keyina::windows::Win32InputRuntime runtime(
-      profile, false, false, true);
+      profile, false, false, true, kSelfTestInputMarker);
   if (!runtime.Start()) {
     DestroyWindow(window);
     WriteStandardOutput(
@@ -869,6 +875,329 @@ int RunCallbackLatencySelfTest() noexcept {
   return success ? 0 : 1;
 }
 
+int RunTransformCallbackLatencySelfTest() noexcept {
+  constexpr std::string_view kRawWord = "tieengs ";
+  constexpr std::size_t kWarmupWords = 16;
+  constexpr std::size_t kMeasuredWords = 256;
+  constexpr std::size_t kBatchWords = 16;
+  constexpr std::uint64_t kExpectedEvents =
+      kMeasuredWords * kRawWord.size() * 2;
+  constexpr std::uint64_t kExpectedContexts =
+      kMeasuredWords * kRawWord.size();
+  constexpr std::uint64_t kExpectedSuppressions = kMeasuredWords * 2;
+  static_assert(kMeasuredWords % kBatchWords == 0);
+
+  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  const std::wstring_view expected_word =
+      caps_lock ? std::wstring_view(L"TIẾNG ")
+                : std::wstring_view(L"tiếng ");
+  std::wstring expected_batch;
+  try {
+    expected_batch.reserve(expected_word.size() * kBatchWords);
+    for (std::size_t index = 0; index < kBatchWords; ++index) {
+      expected_batch.append(expected_word);
+    }
+  } catch (...) {
+    WriteStandardOutput(
+        "{\"result\":\"transform_callback_latency_self_test_failed\","
+        "\"error\":\"expected_text_allocation_failed\"}\n");
+    return 1;
+  }
+
+  const HWND previous_foreground = GetForegroundWindow();
+  const HINSTANCE instance = GetModuleHandleW(nullptr);
+  HWND window = CreateWindowExW(
+      WS_EX_TOOLWINDOW,
+      L"STATIC",
+      L"Keyina transform callback latency self-test",
+      WS_OVERLAPPEDWINDOW,
+      -1200,
+      540,
+      720,
+      180,
+      nullptr,
+      nullptr,
+      instance,
+      nullptr);
+  if (window == nullptr) {
+    WriteStandardOutput(
+        "{\"result\":\"transform_callback_latency_self_test_failed\","
+        "\"error\":\"window_create_failed\"}\n");
+    return 1;
+  }
+  HWND edit = CreateWindowExW(
+      0,
+      L"EDIT",
+      L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+      12,
+      12,
+      680,
+      40,
+      window,
+      nullptr,
+      instance,
+      nullptr);
+  if (edit == nullptr) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"transform_callback_latency_self_test_failed\","
+        "\"error\":\"edit_create_failed\"}\n");
+    return 1;
+  }
+
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = true;
+  profile.clipboard_compatibility_enabled = false;
+  keyina::windows::Win32InputRuntime runtime(
+      profile, false, false, true, kSelfTestInputMarker);
+  if (!runtime.Start()) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"transform_callback_latency_self_test_failed\","
+        "\"error\":\"runtime_start_failed\"}\n");
+    return 1;
+  }
+
+  runtime.PumpMessagesFor(50);
+  const bool focus_ready = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(50);
+  const bool focus_confirmed = GetFocus() == edit;
+  const bool foreground_confirmed = GetForegroundWindow() == window;
+  bool success = focus_ready && focus_confirmed && foreground_confirmed;
+  std::uint32_t focus_reacquire_count = 0;
+  auto ensure_test_focus = [&]() noexcept {
+    if (GetFocus() == edit && GetForegroundWindow() == window) {
+      return true;
+    }
+    ++focus_reacquire_count;
+    const bool reacquired = FocusTestControl(window, edit);
+    runtime.PumpMessagesFor(10);
+    return reacquired && GetFocus() == edit &&
+        GetForegroundWindow() == window;
+  };
+
+  std::array<wchar_t, 256> actual_text{};
+  int actual_length = 0;
+  auto send_batch = [&](std::uint64_t& expected_total_processed) noexcept {
+    if (!ensure_test_focus()) {
+      return false;
+    }
+    SetWindowTextW(edit, L"");
+    std::uint32_t sent_total = 0;
+    for (std::size_t word = 0; word < kBatchWords; ++word) {
+      for (const char character : kRawWord) {
+        if (!ensure_test_focus()) {
+          return false;
+        }
+        const std::uint32_t sent = SendTestCharacter(character, false);
+        if (sent != 2) {
+          return false;
+        }
+        sent_total += sent;
+      }
+    }
+    expected_total_processed += sent_total;
+    return WaitForProcessedKeyboardEvents(
+               runtime, expected_total_processed, 3000) &&
+        WaitForExpectedText(
+            runtime,
+            edit,
+            expected_batch,
+            3000,
+            actual_text,
+            actual_length);
+  };
+
+  const std::uint64_t warmup_processed_before =
+      runtime.processed_keyboard_events();
+  const std::uint64_t warmup_contexts_before =
+      runtime.typing_context_capture_count();
+  const std::uint64_t warmup_suppressed_before =
+      runtime.suppressed_edit_count();
+  const std::uint64_t warmup_injections_before =
+      runtime.successful_injection_count();
+  std::uint64_t expected_total_processed = warmup_processed_before;
+  if (success) {
+    success = send_batch(expected_total_processed);
+  }
+
+  const std::uint64_t processed_before =
+      runtime.processed_keyboard_events();
+  const std::uint64_t contexts_before =
+      runtime.typing_context_capture_count();
+  const std::uint64_t suppressed_before =
+      runtime.suppressed_edit_count();
+  const std::uint64_t successful_injections_before =
+      runtime.successful_injection_count();
+  const std::uint64_t failed_injections_before =
+      runtime.failed_injection_count();
+  runtime.ClearCallbackLatency();
+
+  for (std::size_t offset = 0; offset < kMeasuredWords && success;
+       offset += kBatchWords) {
+    success = send_batch(expected_total_processed);
+  }
+
+  const std::uint64_t processed_total =
+      runtime.processed_keyboard_events();
+  const std::uint64_t contexts_total =
+      runtime.typing_context_capture_count();
+  const std::uint64_t suppressed_total =
+      runtime.suppressed_edit_count();
+  const std::uint64_t successful_injections_total =
+      runtime.successful_injection_count();
+  const std::uint64_t failed_injections_total =
+      runtime.failed_injection_count();
+
+  const std::uint64_t warmup_events =
+      processed_before >= warmup_processed_before
+          ? processed_before - warmup_processed_before
+          : 0;
+  const std::uint64_t warmup_contexts =
+      contexts_before >= warmup_contexts_before
+          ? contexts_before - warmup_contexts_before
+          : 0;
+  const std::uint64_t warmup_suppressions =
+      suppressed_before >= warmup_suppressed_before
+          ? suppressed_before - warmup_suppressed_before
+          : 0;
+  const std::uint64_t warmup_injections =
+      successful_injections_before >= warmup_injections_before
+          ? successful_injections_before - warmup_injections_before
+          : 0;
+  const std::uint64_t processed_events =
+      processed_total >= processed_before
+          ? processed_total - processed_before
+          : 0;
+  const std::uint64_t typing_context_captures =
+      contexts_total >= contexts_before
+          ? contexts_total - contexts_before
+          : 0;
+  const std::uint64_t suppressed_edits =
+      suppressed_total >= suppressed_before
+          ? suppressed_total - suppressed_before
+          : 0;
+  const std::uint64_t successful_injections =
+      successful_injections_total >= successful_injections_before
+          ? successful_injections_total - successful_injections_before
+          : 0;
+  const std::uint64_t failed_injections =
+      failed_injections_total >= failed_injections_before
+          ? failed_injections_total - failed_injections_before
+          : 0;
+
+  const auto callback_latency = runtime.callback_latency_snapshot();
+  const auto key_state_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::KeyStateAndHotkey);
+  const auto key_up_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::KeyUpRelease);
+  const auto context_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::TypingContext);
+  const auto controller_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::ControllerProcess);
+  const auto injection_latency = runtime.callback_stage_latency_snapshot(
+      keyina::windows::NativeCallbackLatencyStage::Injection);
+  const bool hook_running = runtime.hook_running();
+
+  success = success &&
+      warmup_events == kWarmupWords * kRawWord.size() * 2 &&
+      warmup_contexts == kWarmupWords * kRawWord.size() &&
+      warmup_suppressions == kWarmupWords * 2 &&
+      warmup_injections == kWarmupWords * 2 &&
+      processed_events == kExpectedEvents &&
+      typing_context_captures == kExpectedContexts &&
+      suppressed_edits == kExpectedSuppressions &&
+      successful_injections == kExpectedSuppressions &&
+      failed_injections == 0 &&
+      callback_latency.sample_count == kExpectedEvents &&
+      key_state_latency.sample_count == kExpectedEvents &&
+      key_up_latency.sample_count == kExpectedContexts &&
+      context_latency.sample_count == kExpectedContexts &&
+      controller_latency.sample_count == kExpectedContexts &&
+      injection_latency.sample_count == kExpectedSuppressions &&
+      callback_latency.p50_ns > 0 && injection_latency.p50_ns > 0 &&
+      hook_running;
+
+  runtime.Stop();
+  DestroyWindow(window);
+  if (previous_foreground != nullptr) {
+    SetForegroundWindow(previous_foreground);
+  }
+
+  std::array<char, 4096> json{};
+  const int length = sprintf_s(
+      json.data(),
+      json.size(),
+      "{\"result\":\"%s\",\"caps_lock\":%s,"
+      "\"warmup_words\":%llu,\"warmup_events\":%llu,"
+      "\"warmup_contexts\":%llu,\"warmup_suppressions\":%llu,"
+      "\"measured_words\":%llu,\"expected_events\":%llu,"
+      "\"processed_events\":%llu,\"typing_context_captures\":%llu,"
+      "\"suppressed_edits\":%llu,\"successful_injections\":%llu,"
+      "\"failed_injections\":%llu,\"callback_samples\":%llu,"
+      "\"callback_p50_ns\":%llu,\"callback_p95_ns\":%llu,"
+      "\"callback_p99_ns\":%llu,\"callback_maximum_ns\":%llu,"
+      "\"callback_mean_ns\":%llu,"
+      "\"key_state_samples\":%llu,\"key_up_samples\":%llu,"
+      "\"context_samples\":%llu,\"context_p50_ns\":%llu,"
+      "\"context_p95_ns\":%llu,\"context_p99_ns\":%llu,"
+      "\"context_mean_ns\":%llu,"
+      "\"controller_samples\":%llu,\"controller_p50_ns\":%llu,"
+      "\"controller_p95_ns\":%llu,\"controller_p99_ns\":%llu,"
+      "\"controller_mean_ns\":%llu,"
+      "\"injection_samples\":%llu,\"injection_p50_ns\":%llu,"
+      "\"injection_p95_ns\":%llu,\"injection_p99_ns\":%llu,"
+      "\"injection_maximum_ns\":%llu,\"injection_mean_ns\":%llu,"
+      "\"focus_reacquire_count\":%u,\"hook_running\":%s}\n",
+      success
+          ? "transform_callback_latency_self_test_pass"
+          : "transform_callback_latency_self_test_failed",
+      caps_lock ? "true" : "false",
+      static_cast<unsigned long long>(kWarmupWords),
+      static_cast<unsigned long long>(warmup_events),
+      static_cast<unsigned long long>(warmup_contexts),
+      static_cast<unsigned long long>(warmup_suppressions),
+      static_cast<unsigned long long>(kMeasuredWords),
+      static_cast<unsigned long long>(kExpectedEvents),
+      static_cast<unsigned long long>(processed_events),
+      static_cast<unsigned long long>(typing_context_captures),
+      static_cast<unsigned long long>(suppressed_edits),
+      static_cast<unsigned long long>(successful_injections),
+      static_cast<unsigned long long>(failed_injections),
+      static_cast<unsigned long long>(callback_latency.sample_count),
+      static_cast<unsigned long long>(callback_latency.p50_ns),
+      static_cast<unsigned long long>(callback_latency.p95_ns),
+      static_cast<unsigned long long>(callback_latency.p99_ns),
+      static_cast<unsigned long long>(callback_latency.maximum_ns),
+      static_cast<unsigned long long>(callback_latency.mean_ns),
+      static_cast<unsigned long long>(key_state_latency.sample_count),
+      static_cast<unsigned long long>(key_up_latency.sample_count),
+      static_cast<unsigned long long>(context_latency.sample_count),
+      static_cast<unsigned long long>(context_latency.p50_ns),
+      static_cast<unsigned long long>(context_latency.p95_ns),
+      static_cast<unsigned long long>(context_latency.p99_ns),
+      static_cast<unsigned long long>(context_latency.mean_ns),
+      static_cast<unsigned long long>(controller_latency.sample_count),
+      static_cast<unsigned long long>(controller_latency.p50_ns),
+      static_cast<unsigned long long>(controller_latency.p95_ns),
+      static_cast<unsigned long long>(controller_latency.p99_ns),
+      static_cast<unsigned long long>(controller_latency.mean_ns),
+      static_cast<unsigned long long>(injection_latency.sample_count),
+      static_cast<unsigned long long>(injection_latency.p50_ns),
+      static_cast<unsigned long long>(injection_latency.p95_ns),
+      static_cast<unsigned long long>(injection_latency.p99_ns),
+      static_cast<unsigned long long>(injection_latency.maximum_ns),
+      static_cast<unsigned long long>(injection_latency.mean_ns),
+      focus_reacquire_count,
+      hook_running ? "true" : "false");
+  if (length > 0) {
+    WriteStandardOutput(
+        std::string_view(json.data(), static_cast<std::size_t>(length)));
+  }
+  return success ? 0 : 1;
+}
+
 int RunResourceSelfTest(bool enable_tray) noexcept {
   auto profile = keyina::windows::DefaultRuntimeInputProfile();
   profile.vietnamese_enabled = false;
@@ -943,6 +1272,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--profile-reload-self-test");
   const bool callback_latency_self_test = HasArgument(
       __argc, __wargv, L"--callback-latency-self-test");
+  const bool transform_callback_latency_self_test = HasArgument(
+      __argc, __wargv, L"--transform-callback-latency-self-test");
   const bool open_settings = HasArgument(
       __argc, __wargv, L"--open-settings");
 
@@ -961,6 +1292,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   }
   if (callback_latency_self_test) {
     return RunCallbackLatencySelfTest();
+  }
+  if (transform_callback_latency_self_test) {
+    return RunTransformCallbackLatencySelfTest();
   }
 
   HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
