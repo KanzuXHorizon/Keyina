@@ -93,6 +93,10 @@ class Win32InputRuntime {
     return standard_edit_replace_count_;
   }
 
+  [[nodiscard]] std::uint64_t typing_context_capture_count() const noexcept {
+    return typing_context_capture_count_;
+  }
+
   [[nodiscard]] RuntimeInputProfile profile() const noexcept {
     return profile_;
   }
@@ -216,6 +220,7 @@ class Win32InputRuntime {
   std::uint64_t context_change_count_{};
   std::uint64_t pointer_reset_count_{};
   std::uint64_t standard_edit_replace_count_{};
+  std::uint64_t typing_context_capture_count_{};
 
   static Win32InputRuntime* active_runtime_;
 };

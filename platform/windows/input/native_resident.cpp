@@ -314,6 +314,7 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   std::uint64_t context_changes = 0;
   std::uint64_t pointer_resets = 0;
   std::uint64_t standard_edit_replaces = 0;
+  std::uint64_t typing_context_captures = 0;
   std::array<wchar_t, 64> text{};
   int length = 0;
 
@@ -371,6 +372,8 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     context_changes = runtime.context_change_count();
     pointer_resets = runtime.pointer_reset_count();
     standard_edit_replaces = runtime.standard_edit_replace_count();
+    typing_context_captures = runtime.typing_context_capture_count();
+    success = success && typing_context_captures <= raw.size();
     runtime.Stop();
     if (!success) {
       DrainCurrentThreadMessages(300);
@@ -381,10 +384,26 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     SetForegroundWindow(previous_foreground);
   }
   if (success) {
-    WriteStandardOutput(
+    std::array<char, 512> success_json{};
+    const int success_length = sprintf_s(
+        success_json.data(), success_json.size(),
+        "{\"result\":\"%s\",\"processed_events\":%llu,"
+        "\"suppressed_edits\":%llu,\"successful_injections\":%llu,"
+        "\"failed_injections\":%llu,\"typing_context_captures\":%llu,"
+        "\"maximum_expected_context_captures\":%llu}\n",
         clipboard_compatibility
-            ? "clipboard_typing_self_test_pass\n"
-            : "typing_self_test_pass\n");
+            ? "clipboard_typing_self_test_pass"
+            : "typing_self_test_pass",
+        static_cast<unsigned long long>(processed_events),
+        static_cast<unsigned long long>(suppressed_edits),
+        static_cast<unsigned long long>(successful_injections),
+        static_cast<unsigned long long>(failed_injections),
+        static_cast<unsigned long long>(typing_context_captures),
+        static_cast<unsigned long long>(raw.size()));
+    if (success_length > 0) {
+      WriteStandardOutput(std::string_view(
+          success_json.data(), static_cast<std::size_t>(success_length)));
+    }
     return 0;
   }
 
@@ -403,6 +422,7 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       "\"successful_injections\":%llu,\"failed_injections\":%llu,"
       "\"bypass_contexts\":%llu,\"context_changes\":%llu,"
       "\"pointer_resets\":%llu,\"standard_edit_replaces\":%llu,"
+      "\"typing_context_captures\":%llu,\"maximum_expected_context_captures\":%llu,"
       "\"text_length\":%d,"
       "\"actual\":\"%.*s\"}\n",
       focus_ready ? "true" : "false",
@@ -416,6 +436,8 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       static_cast<unsigned long long>(context_changes),
       static_cast<unsigned long long>(pointer_resets),
       static_cast<unsigned long long>(standard_edit_replaces),
+      static_cast<unsigned long long>(typing_context_captures),
+      static_cast<unsigned long long>(raw.size()),
       length, utf8_length, actual_utf8.data());
   if (diagnostic_length > 0) {
     WriteStandardOutput(std::string_view(

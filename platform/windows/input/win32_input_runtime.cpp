@@ -950,6 +950,13 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return 1;
     }
 
+    if (!key_down) {
+      const InputDecision release = controller_.Process(event, {});
+      return release.suppress
+                 ? 1
+                 : CallNextHookEx(nullptr, code, message, data);
+    }
+
     const TypingContext context = CaptureTypingContext();
     if (key_down) {
       if (last_key_down_context_known_ && last_key_down_context_ != context) {
@@ -1008,6 +1015,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
 }
 
 TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
+  ++typing_context_capture_count_;
   GUITHREADINFO info{};
   info.cbSize = sizeof(info);
   if (!GetGUIThreadInfo(0, &info) || info.hwndFocus == nullptr) {
