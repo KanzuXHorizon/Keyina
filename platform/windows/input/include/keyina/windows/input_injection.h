@@ -50,6 +50,9 @@ enum class TextDeliveryMode : std::uint8_t {
     DWORD owned_sequence,
     DWORD current_sequence) noexcept;
 
+[[nodiscard]] bool IsStandardEditableWindowClass(
+    std::wstring_view class_name) noexcept;
+
 [[nodiscard]] bool RequiresSelectionReplacementForWindowClass(
     std::wstring_view class_name) noexcept;
 

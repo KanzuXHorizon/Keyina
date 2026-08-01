@@ -297,7 +297,8 @@ bool TryPasteIntoStandardEdit(
   const int class_length = GetClassNameW(
       focus, class_name.data(), static_cast<int>(class_name.size()));
   if (class_length <= 0 ||
-      _wcsicmp(class_name.data(), L"Edit") != 0) {
+      !IsStandardEditableWindowClass(std::wstring_view(
+          class_name.data(), static_cast<std::size_t>(class_length)))) {
     return false;
   }
   const LRESULT selection = SendMessageW(focus, EM_GETSEL, 0, 0);

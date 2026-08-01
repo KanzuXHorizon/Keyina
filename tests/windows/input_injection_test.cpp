@@ -202,6 +202,19 @@ KEYINA_TEST(native_literal_unicode_sequence_rejects_invalid_or_small_destination
   }
 }
 
+KEYINA_TEST(native_standard_edit_classes_use_synchronous_replacement) {
+  KEYINA_EXPECT_TRUE(keyina::windows::IsStandardEditableWindowClass(L"Edit"));
+  KEYINA_EXPECT_TRUE(keyina::windows::IsStandardEditableWindowClass(
+      L"WindowsForms10.EDIT.app.0.141b42a_r8_ad1"));
+  KEYINA_EXPECT_TRUE(keyina::windows::IsStandardEditableWindowClass(
+      L"RICHEDIT50W"));
+  KEYINA_EXPECT_TRUE(keyina::windows::IsStandardEditableWindowClass(
+      L"WindowsForms10.RichEdit20W.app.0.141b42a_r8_ad1"));
+  KEYINA_EXPECT_TRUE(!keyina::windows::IsStandardEditableWindowClass(
+      L"Chrome_RenderWidgetHostHWND"));
+  KEYINA_EXPECT_TRUE(!keyina::windows::IsStandardEditableWindowClass(L"UnityWndClass"));
+}
+
 KEYINA_TEST(native_chromium_windows_require_selection_replacement) {
   KEYINA_EXPECT_TRUE(
       keyina::windows::RequiresSelectionReplacementForWindowClass(

@@ -187,6 +187,48 @@ bool ShouldRestoreClipboard(
   return owned_sequence != 0 && owned_sequence == current_sequence;
 }
 
+bool IsStandardEditableWindowClass(
+    std::wstring_view class_name) noexcept {
+  auto equals_ascii_case_insensitive = [](
+      std::wstring_view left,
+      std::wstring_view right) noexcept {
+    if (left.size() != right.size()) {
+      return false;
+    }
+    for (std::size_t index = 0; index < left.size(); ++index) {
+      wchar_t lhs = left[index];
+      wchar_t rhs = right[index];
+      if (lhs >= L'a' && lhs <= L'z') {
+        lhs = static_cast<wchar_t>(lhs - (L'a' - L'A'));
+      }
+      if (rhs >= L'a' && rhs <= L'z') {
+        rhs = static_cast<wchar_t>(rhs - (L'a' - L'A'));
+      }
+      if (lhs != rhs) {
+        return false;
+      }
+    }
+    return true;
+  };
+  auto contains_ascii_case_insensitive = [&](std::wstring_view needle) noexcept {
+    if (needle.size() > class_name.size()) {
+      return false;
+    }
+    for (std::size_t offset = 0;
+         offset + needle.size() <= class_name.size(); ++offset) {
+      if (equals_ascii_case_insensitive(
+              class_name.substr(offset, needle.size()), needle)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  return equals_ascii_case_insensitive(class_name, L"Edit") ||
+      contains_ascii_case_insensitive(L".EDIT.") ||
+      contains_ascii_case_insensitive(L"RICHEDIT");
+}
+
 bool RequiresSelectionReplacementForWindowClass(
     std::wstring_view class_name) noexcept {
   return class_name.starts_with(L"Chrome_");
