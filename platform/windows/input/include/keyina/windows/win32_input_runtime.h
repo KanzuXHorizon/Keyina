@@ -1,5 +1,6 @@
 #pragma once
 
+#include <keyina/windows/bounded_spsc_queue.h>
 #include <keyina/windows/native_latency_histogram.h>
 #include <keyina/windows/resident_input_controller.h>
 #include <keyina/windows/runtime_hotkeys.h>
@@ -9,6 +10,8 @@
 #include <shellapi.h>
 
 #include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -103,6 +106,11 @@ class Win32InputRuntime {
     return typing_context_capture_count_;
   }
 
+  [[nodiscard]] std::uint64_t dropped_external_command_count()
+      const noexcept {
+    return dropped_external_command_count_.load(std::memory_order_relaxed);
+  }
+
   [[nodiscard]] NativeLatencySnapshot callback_latency_snapshot()
       const noexcept {
     return callback_latency_histogram_.Snapshot();
@@ -143,6 +151,7 @@ class Win32InputRuntime {
                                            LPARAM l_param) noexcept;
   static LRESULT CALLBACK KeyboardProcedure(int code, WPARAM message,
                                              LPARAM data) noexcept;
+  static DWORD WINAPI ExternalCommandWorkerProcedure(void* context) noexcept;
 
   LRESULT HandleWindowMessage(HWND window, UINT message, WPARAM w_param,
                               LPARAM l_param) noexcept;
@@ -164,11 +173,19 @@ class Win32InputRuntime {
   void RequestPointerRegistration(bool active) noexcept;
   void ApplyPointerRegistration() noexcept;
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
-  void HandleSnippetCommand(
-      RuntimeSnippetCommand command,
-      std::u16string_view payload,
+  void RequestSnippetOverlayUpdate() noexcept;
+  void RequestTrayUpdate() noexcept;
+  [[nodiscard]] bool PrepareDeferredSnippetCommand(
+      const InputDecision& decision) noexcept;
+  void CommitDeferredSnippetCommand(
+      RuntimeSnippetCommand command) noexcept;
+  void HandleDeferredSnippetActions() noexcept;
+  [[nodiscard]] bool StartExternalCommandWorker() noexcept;
+  void StopExternalCommandWorker() noexcept;
+  DWORD RunExternalCommandWorker() noexcept;
+  [[nodiscard]] bool IsDeferredTargetCurrent(
       std::uint32_t target_process_id,
-      std::uintptr_t target_focus_window) noexcept;
+      std::uintptr_t target_focus_window) const noexcept;
   [[nodiscard]] bool LaunchExternalSnippetCommand(
       std::u16string_view payload,
       std::uint32_t target_process_id,
@@ -250,6 +267,24 @@ class Win32InputRuntime {
   std::uint64_t pointer_reset_count_{};
   std::uint64_t standard_edit_replace_count_{};
   std::uint64_t typing_context_capture_count_{};
+  bool snippet_overlay_update_posted_{false};
+  bool tray_update_posted_{false};
+  std::atomic_uint32_t pending_snippet_actions_{};
+
+  struct ExternalSnippetWorkItem {
+    std::array<char16_t, kMaximumRuntimeSnippetExpansionUtf8Bytes> payload{};
+    std::size_t payload_units{};
+    std::uint32_t target_process_id{};
+    std::uintptr_t target_focus_window{};
+  };
+  static constexpr std::size_t kExternalCommandQueueStorage = 5;
+  BoundedSpscQueue<
+      ExternalSnippetWorkItem,
+      kExternalCommandQueueStorage> external_command_queue_{};
+  HANDLE external_command_event_{nullptr};
+  HANDLE external_command_stop_event_{nullptr};
+  HANDLE external_command_thread_{nullptr};
+  std::atomic_uint64_t dropped_external_command_count_{};
 
   static Win32InputRuntime* active_runtime_;
 };

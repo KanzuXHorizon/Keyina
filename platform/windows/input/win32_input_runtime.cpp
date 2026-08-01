@@ -28,6 +28,9 @@ constexpr std::size_t kMaximumVisibleSnippetSuggestions = 8;
 constexpr UINT kPointerRegistrationMessage = WM_APP + 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 2;
 constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
+constexpr UINT kSnippetOverlayUpdateMessage = WM_APP + 4;
+constexpr UINT kTrayUpdateMessage = WM_APP + 5;
+constexpr UINT kDeferredSnippetActionMessage = WM_APP + 6;
 constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
 constexpr UINT_PTR kClipboardRestoreTimerIdentifier = 2;
 constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
@@ -51,6 +54,9 @@ constexpr std::size_t kMaximumKeyboardInputEvents =
     ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
 constexpr std::size_t kMaximumSelectionInputEvents =
     2 + (kMaxActiveKeys * 2) + (kMaximumInputInsertUnits * 2);
+constexpr std::uint32_t kPendingToggleVietnameseAction = 1u << 0u;
+constexpr std::uint32_t kPendingToggleDictationAction = 1u << 1u;
+constexpr SIZE_T kExternalCommandWorkerStackReservation = 256 * 1024;
 
 #if defined(_MSC_VER)
 #define KEYINA_NOINLINE __declspec(noinline)
@@ -756,6 +762,12 @@ Win32InputRuntime::Win32InputRuntime(
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
 bool Win32InputRuntime::Start() noexcept {
+  if (hook_ != nullptr || active_runtime_ != nullptr ||
+      external_command_thread_ != nullptr) {
+    startup_error_ = ERROR_ALREADY_EXISTS;
+    return false;
+  }
+
   stopping_ = false;
   if (!ole_initialized_) {
     const HRESULT ole_result = OleInitialize(nullptr);
@@ -766,6 +778,10 @@ bool Win32InputRuntime::Start() noexcept {
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;
+  snippet_overlay_update_posted_ = false;
+  tray_update_posted_ = false;
+  pending_snippet_actions_.store(0, std::memory_order_relaxed);
+  external_command_queue_.ResetAfterShutdown();
   startup_stage_ = NativeRuntimeStartupStage::None;
   startup_error_ = ERROR_SUCCESS;
   ClearCallbackLatency();
@@ -780,11 +796,6 @@ bool Win32InputRuntime::Start() noexcept {
       profile_callback_latency_ = false;
     }
   }
-  if (hook_ != nullptr || active_runtime_ != nullptr) {
-    startup_error_ = ERROR_ALREADY_EXISTS;
-    return false;
-  }
-
   WNDCLASSEXW window_class{};
   window_class.cbSize = sizeof(window_class);
   window_class.hInstance = GetModuleHandleW(nullptr);
@@ -851,6 +862,7 @@ bool Win32InputRuntime::Start() noexcept {
         kProfileReloadIntervalMilliseconds,
         nullptr);
   }
+  static_cast<void>(StartExternalCommandWorker());
   return true;
 }
 
@@ -899,6 +911,7 @@ void Win32InputRuntime::Stop() noexcept {
     UnhookWindowsHookEx(hook_);
     hook_ = nullptr;
   }
+  StopExternalCommandWorker();
   if (tray_added_ && shell_notify_icon_ != nullptr) {
     shell_notify_icon_(NIM_DELETE, &tray_data_);
     tray_added_ = false;
@@ -935,6 +948,10 @@ void Win32InputRuntime::Stop() noexcept {
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;
+  snippet_overlay_update_posted_ = false;
+  tray_update_posted_ = false;
+  pending_snippet_actions_.store(0, std::memory_order_relaxed);
+  external_command_queue_.ResetAfterShutdown();
   controller_.Reset();
 }
 
@@ -1013,11 +1030,28 @@ LRESULT CALLBACK Win32InputRuntime::KeyboardProcedure(
   return runtime->HandleKeyboardEvent(code, message, data);
 }
 
+DWORD WINAPI Win32InputRuntime::ExternalCommandWorkerProcedure(
+    void* context) noexcept {
+  auto* runtime = static_cast<Win32InputRuntime*>(context);
+  return runtime == nullptr ? 1 : runtime->RunExternalCommandWorker();
+}
+
 LRESULT Win32InputRuntime::HandleWindowMessage(
     HWND window, UINT message, WPARAM w_param, LPARAM l_param) noexcept {
   switch (message) {
     case kPointerRegistrationMessage:
       ApplyPointerRegistration();
+      return 0;
+    case kSnippetOverlayUpdateMessage:
+      snippet_overlay_update_posted_ = false;
+      UpdateSnippetOverlay();
+      return 0;
+    case kTrayUpdateMessage:
+      tray_update_posted_ = false;
+      UpdateTray();
+      return 0;
+    case kDeferredSnippetActionMessage:
+      HandleDeferredSnippetActions();
       return 0;
     case WM_INPUT: {
       const bool reset = IsPointerResetPacket(
@@ -1222,7 +1256,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
           performance_counter_frequency_);
       decision = controller_.Process(event, context);
       if (key_down) {
-        UpdateSnippetOverlay();
+        RequestSnippetOverlayUpdate();
       }
       RequestPointerRegistration(
           controller_.pointer_observation_required() &&
@@ -1267,6 +1301,13 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return 1;
     }
 
+    if (!PrepareDeferredSnippetCommand(decision)) {
+      ++failed_injection_count_;
+      controller_.Reset();
+      RequestPointerRegistration(false);
+      return CallNextHookEx(nullptr, code, message, data);
+    }
+
     bool injection_failed = false;
     {
       NativeCallbackLatencyScope injection_latency(
@@ -1292,16 +1333,11 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         ++failed_injection_count_;
         controller_.Reset();
         RequestPointerRegistration(false);
+        external_command_queue_.CancelProducer();
         injection_failed = true;
       } else {
         ++successful_injection_count_;
-      }
-      if (!injection_failed) {
-        HandleSnippetCommand(
-            decision.snippet_command,
-            decision.snippet_command_payload,
-            decision.snippet_target_process_id,
-            decision.snippet_target_focus_window);
+        CommitDeferredSnippetCommand(decision.snippet_command);
       }
     }
     if (injection_failed) {
@@ -1689,7 +1725,7 @@ void Win32InputRuntime::ProcessToggleGesture(
       profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
       controller_.ApplyProfile(profile_);
       RequestPointerRegistration(false);
-      UpdateTray();
+      RequestTrayUpdate();
       static_cast<void>(QueueManagedCommand(
           profile_.vietnamese_enabled
               ? RuntimeCommand::SetVietnameseEnabled
@@ -1700,33 +1736,217 @@ void Win32InputRuntime::ProcessToggleGesture(
   }
 }
 
-void Win32InputRuntime::HandleSnippetCommand(
-    RuntimeSnippetCommand command,
-    std::u16string_view payload,
-    std::uint32_t target_process_id,
-    std::uintptr_t target_focus_window) noexcept {
+void Win32InputRuntime::RequestSnippetOverlayUpdate() noexcept {
+  if (snippet_overlay_update_posted_ || window_ == nullptr) {
+    return;
+  }
+  if (PostMessageW(window_, kSnippetOverlayUpdateMessage, 0, 0) != FALSE) {
+    snippet_overlay_update_posted_ = true;
+  }
+}
+
+void Win32InputRuntime::RequestTrayUpdate() noexcept {
+  if (tray_update_posted_ || window_ == nullptr) {
+    return;
+  }
+  if (PostMessageW(window_, kTrayUpdateMessage, 0, 0) != FALSE) {
+    tray_update_posted_ = true;
+  }
+}
+
+bool Win32InputRuntime::PrepareDeferredSnippetCommand(
+    const InputDecision& decision) noexcept {
+  external_command_queue_.CancelProducer();
+  switch (decision.snippet_command) {
+    case RuntimeSnippetCommand::None:
+      return true;
+    case RuntimeSnippetCommand::ToggleVietnamese:
+    case RuntimeSnippetCommand::ToggleDictation:
+      if (window_ == nullptr) {
+        return false;
+      }
+      if (pending_snippet_actions_.load(std::memory_order_acquire) == 0 &&
+          PostMessageW(window_, kDeferredSnippetActionMessage, 0, 0) == FALSE) {
+        return false;
+      }
+      return true;
+    case RuntimeSnippetCommand::ExternalOutput:
+      break;
+    default:
+      return false;
+  }
+
+  if (external_command_thread_ == nullptr ||
+      external_command_event_ == nullptr ||
+      decision.snippet_command_payload.empty() ||
+      decision.snippet_command_payload.size() >
+          kMaximumRuntimeSnippetExpansionUtf8Bytes ||
+      decision.snippet_target_process_id == 0 ||
+      decision.snippet_target_focus_window == 0 ||
+      shell_execute_ == nullptr) {
+    return false;
+  }
+
+  auto* item = external_command_queue_.TryReserveProducer();
+  if (item == nullptr) {
+    dropped_external_command_count_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+
+  std::copy(
+      decision.snippet_command_payload.begin(),
+      decision.snippet_command_payload.end(),
+      item->payload.begin());
+  item->payload_units = decision.snippet_command_payload.size();
+  item->target_process_id = decision.snippet_target_process_id;
+  item->target_focus_window = decision.snippet_target_focus_window;
+  return true;
+}
+
+void Win32InputRuntime::CommitDeferredSnippetCommand(
+    RuntimeSnippetCommand command) noexcept {
   switch (command) {
     case RuntimeSnippetCommand::ToggleVietnamese:
-      profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
-      controller_.ApplyProfile(profile_);
-      RequestPointerRegistration(false);
-      UpdateTray();
-      static_cast<void>(QueueManagedCommand(
-          profile_.vietnamese_enabled
-              ? RuntimeCommand::SetVietnameseEnabled
-              : RuntimeCommand::SetVietnameseDisabled));
+      pending_snippet_actions_.fetch_xor(
+          kPendingToggleVietnameseAction,
+          std::memory_order_release);
       break;
     case RuntimeSnippetCommand::ToggleDictation:
-      static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+      pending_snippet_actions_.fetch_xor(
+          kPendingToggleDictationAction,
+          std::memory_order_release);
       break;
     case RuntimeSnippetCommand::ExternalOutput:
-      static_cast<void>(LaunchExternalSnippetCommand(
-          payload, target_process_id, target_focus_window));
+      if (external_command_queue_.CommitProducer()) {
+        static_cast<void>(SetEvent(external_command_event_));
+      }
       break;
     case RuntimeSnippetCommand::None:
     default:
       break;
   }
+}
+
+void Win32InputRuntime::HandleDeferredSnippetActions() noexcept {
+  const std::uint32_t actions =
+      pending_snippet_actions_.exchange(0, std::memory_order_acq_rel);
+  if ((actions & kPendingToggleVietnameseAction) != 0) {
+    profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+    controller_.ApplyProfile(profile_);
+    RequestPointerRegistration(false);
+    UpdateTray();
+    static_cast<void>(QueueManagedCommand(
+        profile_.vietnamese_enabled
+            ? RuntimeCommand::SetVietnameseEnabled
+            : RuntimeCommand::SetVietnameseDisabled));
+  }
+  if ((actions & kPendingToggleDictationAction) != 0) {
+    static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+  }
+}
+
+bool Win32InputRuntime::StartExternalCommandWorker() noexcept {
+  if (external_command_thread_ != nullptr) {
+    return true;
+  }
+  external_command_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  external_command_stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (external_command_event_ == nullptr ||
+      external_command_stop_event_ == nullptr) {
+    StopExternalCommandWorker();
+    return false;
+  }
+  external_command_thread_ = CreateThread(
+      nullptr,
+      kExternalCommandWorkerStackReservation,
+      &Win32InputRuntime::ExternalCommandWorkerProcedure,
+      this,
+      STACK_SIZE_PARAM_IS_A_RESERVATION,
+      nullptr);
+  if (external_command_thread_ == nullptr) {
+    StopExternalCommandWorker();
+    return false;
+  }
+  return true;
+}
+
+void Win32InputRuntime::StopExternalCommandWorker() noexcept {
+  if (external_command_stop_event_ != nullptr) {
+    static_cast<void>(SetEvent(external_command_stop_event_));
+  }
+  if (external_command_thread_ != nullptr) {
+    static_cast<void>(WaitForSingleObject(external_command_thread_, INFINITE));
+    CloseHandle(external_command_thread_);
+    external_command_thread_ = nullptr;
+  }
+  if (external_command_event_ != nullptr) {
+    CloseHandle(external_command_event_);
+    external_command_event_ = nullptr;
+  }
+  if (external_command_stop_event_ != nullptr) {
+    CloseHandle(external_command_stop_event_);
+    external_command_stop_event_ = nullptr;
+  }
+  external_command_queue_.ResetAfterShutdown();
+}
+
+DWORD Win32InputRuntime::RunExternalCommandWorker() noexcept {
+  const std::array<HANDLE, 2> events = {
+      external_command_stop_event_,
+      external_command_event_,
+  };
+  for (;;) {
+    const DWORD wait = WaitForMultipleObjects(
+        static_cast<DWORD>(events.size()),
+        events.data(),
+        FALSE,
+        INFINITE);
+    if (wait == WAIT_OBJECT_0) {
+      return 0;
+    }
+    if (wait != WAIT_OBJECT_0 + 1) {
+      return 1;
+    }
+
+    for (;;) {
+      auto* item = external_command_queue_.TryPeekConsumer();
+      if (item == nullptr) {
+        break;
+      }
+      if (IsDeferredTargetCurrent(
+              item->target_process_id,
+              item->target_focus_window)) {
+        static_cast<void>(LaunchExternalSnippetCommand(
+            std::u16string_view(item->payload.data(), item->payload_units),
+            item->target_process_id,
+            item->target_focus_window));
+      }
+      item->payload_units = 0;
+      item->target_process_id = 0;
+      item->target_focus_window = 0;
+      static_cast<void>(external_command_queue_.PopConsumer());
+    }
+  }
+}
+
+bool Win32InputRuntime::IsDeferredTargetCurrent(
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) const noexcept {
+  const HWND expected_focus =
+      reinterpret_cast<HWND>(target_focus_window);
+  if (target_process_id == 0 || expected_focus == nullptr ||
+      IsWindow(expected_focus) == FALSE) {
+    return false;
+  }
+  GUITHREADINFO info{};
+  info.cbSize = sizeof(info);
+  if (GetGUIThreadInfo(0, &info) == FALSE ||
+      info.hwndFocus != expected_focus) {
+    return false;
+  }
+  DWORD process_id = 0;
+  return GetWindowThreadProcessId(expected_focus, &process_id) != 0 &&
+      process_id == target_process_id;
 }
 
 bool Win32InputRuntime::LaunchExternalSnippetCommand(
@@ -1736,7 +1956,10 @@ bool Win32InputRuntime::LaunchExternalSnippetCommand(
   try {
     if (payload.empty() || payload.size() > 16 * 1024 ||
         target_process_id == 0 || target_focus_window == 0 ||
-        shell_execute_ == nullptr) {
+        shell_execute_ == nullptr ||
+        !IsDeferredTargetCurrent(
+            target_process_id,
+            target_focus_window)) {
       return false;
     }
 
@@ -1879,6 +2102,12 @@ bool Win32InputRuntime::LaunchExternalSnippetCommand(
     std::wstring arguments = L"--snippet-command-file=\"";
     arguments.append(request_path.data());
     arguments.push_back(L'\"');
+    if (!IsDeferredTargetCurrent(
+            target_process_id,
+            target_focus_window)) {
+      DeleteFileW(request_path.data());
+      return false;
+    }
     const HINSTANCE result = shell_execute_(
         window_,
         L"open",

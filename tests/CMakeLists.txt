@@ -20,6 +20,7 @@ target_include_directories(keyina_tests PRIVATE
 )
 if(WIN32)
   target_sources(keyina_tests PRIVATE
+    windows/bounded_spsc_queue_test.cpp
     windows/input_injection_test.cpp
     windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
