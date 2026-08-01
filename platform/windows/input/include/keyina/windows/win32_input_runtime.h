@@ -2,6 +2,9 @@
 
 #include <keyina/windows/bounded_spsc_queue.h>
 #include <keyina/windows/clipboard_privacy.h>
+#include <keyina/windows/keystroke_overlay_model.h>
+#include <keyina/windows/keystroke_overlay_positioner.h>
+#include <keyina/windows/keystroke_overlay_window.h>
 #include <keyina/windows/native_latency_histogram.h>
 #include <keyina/windows/resident_input_controller.h>
 #include <keyina/windows/runtime_hotkeys.h>
@@ -48,7 +51,8 @@ class Win32InputRuntime {
       bool reload_profiles = true,
       bool profile_callback_latency = false,
       ULONG_PTR accepted_input_marker = 0,
-      bool force_selection_replacement_for_self_test = false) noexcept;
+      bool force_selection_replacement_for_self_test = false,
+      KeystrokeOverlayPreferences overlay_preferences = {}) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -143,6 +147,47 @@ class Win32InputRuntime {
     return deferred_virtual_key_injection_count_;
   }
 
+  [[nodiscard]] std::uint64_t overlay_event_produced_count()
+      const noexcept {
+    return overlay_event_produced_count_;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_event_overwritten_count()
+      const noexcept {
+    return overlay_event_overwritten_count_;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_event_consumed_count()
+      const noexcept {
+    return overlay_event_consumed_count_;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_rendered_count() const noexcept {
+    return overlay_rendered_count_;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_suppressed_count() const noexcept {
+    return overlay_suppressed_count_;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_maximum_pending_depth()
+      const noexcept {
+    return overlay_maximum_pending_depth_;
+  }
+
+  [[nodiscard]] bool overlay_visible_for_testing() const noexcept {
+    return keystroke_overlay_window_.IsVisibleForTesting();
+  }
+
+  [[nodiscard]] bool overlay_hide_timer_active_for_testing() const noexcept {
+    return keystroke_overlay_hide_timer_ != 0;
+  }
+
+  [[nodiscard]] std::uint64_t overlay_last_rendered_generation_for_testing()
+      const noexcept {
+    return keystroke_overlay_window_.last_rendered_generation_for_testing();
+  }
+
   [[nodiscard]] NativeLatencySnapshot callback_latency_snapshot()
       const noexcept {
     return callback_latency_histogram_.Snapshot();
@@ -235,6 +280,20 @@ class Win32InputRuntime {
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
   void RequestSnippetOverlayUpdate() noexcept;
   void RequestTrayUpdate() noexcept;
+  [[nodiscard]] KeystrokeOverlayPrivacyDecision
+  EvaluateOverlayPrivacy(const TypingContext& context) const noexcept;
+  void PublishOverlaySuppression(const TypingContext& context) noexcept;
+  void PublishOverlayAfterKey(
+      const PhysicalKeyEvent& event,
+      const InputDecision& decision,
+      const TypingContext& context,
+      const BoundedKeystrokeOverlayText& previous_composition) noexcept;
+  void QueueKeystrokeOverlayDelivery(
+      KeystrokeOverlayDelivery delivery) noexcept;
+  void HandleKeystrokeOverlayUpdate() noexcept;
+  [[nodiscard]] KeystrokeOverlayPlacement ResolveOverlayPlacement(
+      const KeystrokeOverlayDelivery& delivery) noexcept;
+  void HideKeystrokeOverlay() noexcept;
   [[nodiscard]] bool QueueDeferredClipboardInjection(
       const InputDecision& decision,
       char32_t fallback_character,
@@ -302,6 +361,7 @@ class Win32InputRuntime {
   bool profile_callback_latency_{false};
   ULONG_PTR accepted_input_marker_{};
   bool force_selection_replacement_for_self_test_{false};
+  KeystrokeOverlayPreferences overlay_preferences_{};
   std::uint64_t performance_counter_frequency_{};
   NativeLatencyHistogram callback_latency_histogram_{};
   std::array<
@@ -341,6 +401,7 @@ class Win32InputRuntime {
   bool snippet_profile_write_time_known_{false};
   UINT_PTR profile_timer_{};
   UINT_PTR clipboard_restore_timer_{};
+  UINT_PTR keystroke_overlay_hide_timer_{};
   std::wstring pending_clipboard_text_{};
   IDataObject* pending_clipboard_data_object_{nullptr};
   DWORD pending_clipboard_sequence_{};
@@ -365,6 +426,20 @@ class Win32InputRuntime {
   bool snippet_overlay_update_posted_{false};
   bool tray_update_posted_{false};
   bool deferred_clipboard_message_posted_{false};
+  bool keystroke_overlay_update_posted_{false};
+  KeystrokeOverlayLatestSlot keystroke_overlay_slot_{};
+  KeystrokeOverlayReducer keystroke_overlay_reducer_{};
+  KeystrokeOverlayState keystroke_overlay_state_{};
+  KeystrokeOverlayWindow keystroke_overlay_window_{};
+  KeystrokeOverlayPlacement last_keystroke_overlay_placement_{};
+  ULONGLONG last_keystroke_overlay_event_tick_{};
+  std::uint64_t keystroke_overlay_generation_{};
+  std::uint64_t overlay_event_produced_count_{};
+  std::uint64_t overlay_event_overwritten_count_{};
+  std::uint64_t overlay_event_consumed_count_{};
+  std::uint64_t overlay_rendered_count_{};
+  std::uint64_t overlay_suppressed_count_{};
+  std::uint64_t overlay_maximum_pending_depth_{};
   std::atomic_uint32_t pending_snippet_actions_{};
 
   struct DeferredClipboardWorkItem {

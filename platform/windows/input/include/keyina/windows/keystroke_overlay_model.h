@@ -13,7 +13,9 @@ inline constexpr std::size_t kMaximumOverlayCodeUnits = 64;
 
 class BoundedKeystrokeOverlayText {
  public:
-  void assign(std::u16string_view text) noexcept;
+  void assign(
+      std::u16string_view text,
+      bool force_truncated = false) noexcept;
   void clear() noexcept;
 
   [[nodiscard]] std::size_t size() const noexcept { return size_; }
@@ -28,6 +30,10 @@ class BoundedKeystrokeOverlayText {
   std::uint8_t size_{};
   bool truncated_{false};
 };
+
+void AssignKeystrokeOverlayText(
+    std::u32string_view text,
+    BoundedKeystrokeOverlayText& output) noexcept;
 
 enum class KeystrokeOverlayEventKind : std::uint8_t {
   Token = 0,
@@ -104,6 +110,28 @@ struct KeystrokeOverlayEvent {
   KeystrokeOverlayEventKind kind{KeystrokeOverlayEventKind::Cleared};
   std::uint64_t generation{};
   BoundedKeystrokeOverlayText text{};
+};
+
+struct KeystrokeOverlayDelivery {
+  KeystrokeOverlayEvent event{};
+  std::uint32_t target_process_id{};
+  std::uintptr_t target_focus_window{};
+  bool rapid_input{false};
+};
+
+class KeystrokeOverlayLatestSlot {
+ public:
+  // Returns true when an older pending delivery was replaced.
+  [[nodiscard]] bool Publish(
+      const KeystrokeOverlayDelivery& delivery) noexcept;
+  [[nodiscard]] bool Consume(KeystrokeOverlayDelivery& delivery) noexcept;
+  void Reset() noexcept;
+
+  [[nodiscard]] bool has_pending() const noexcept { return pending_; }
+
+ private:
+  KeystrokeOverlayDelivery latest_{};
+  bool pending_{false};
 };
 
 struct KeystrokeOverlayState {

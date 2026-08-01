@@ -72,6 +72,15 @@ class ResidentInputController {
     return profile_;
   }
 
+  [[nodiscard]] std::u32string_view composition_visible_text()
+      const noexcept {
+    return engine_.VisibleText();
+  }
+
+  [[nodiscard]] std::u32string_view composition_raw_keys() const noexcept {
+    return engine_.RawKeys();
+  }
+
   [[nodiscard]] std::u32string_view snippet_token() const noexcept {
     return snippet_matcher_.token();
   }

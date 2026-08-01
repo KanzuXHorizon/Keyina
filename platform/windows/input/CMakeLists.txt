@@ -89,6 +89,14 @@ set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
   TIMEOUT 10
 )
 
+add_test(NAME keyina.windows.input_keystroke_overlay
+  COMMAND KeyinaInput --keystroke-overlay-self-test)
+set_tests_properties(keyina.windows.input_keystroke_overlay PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "keystroke_overlay_self_test_pass"
+  TIMEOUT 15
+)
+
 add_test(NAME keyina.windows.input_tray_resource
   COMMAND KeyinaInput --tray-resource-self-test)
 set_tests_properties(keyina.windows.input_tray_resource PROPERTIES

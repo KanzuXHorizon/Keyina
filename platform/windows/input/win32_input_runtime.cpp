@@ -1,4 +1,5 @@
 #include <keyina/windows/win32_input_runtime.h>
+#include <keyina/input_character_classification.h>
 #include <keyina/windows/input_injection.h>
 #include <keyina/windows/pointer_input.h>
 #include <keyina/windows/standard_edit_replacement.h>
@@ -34,8 +35,10 @@ constexpr UINT kSnippetOverlayUpdateMessage = WM_APP + 4;
 constexpr UINT kTrayUpdateMessage = WM_APP + 5;
 constexpr UINT kDeferredSnippetActionMessage = WM_APP + 6;
 constexpr UINT kDeferredClipboardInjectionMessage = WM_APP + 7;
+constexpr UINT kKeystrokeOverlayUpdateMessage = WM_APP + 8;
 constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
 constexpr UINT_PTR kClipboardRestoreTimerIdentifier = 2;
+constexpr UINT_PTR kKeystrokeOverlayHideTimerIdentifier = 3;
 constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
 constexpr UINT kTrayIdentifier = 1;
 constexpr wchar_t kCommandCompanionMutexName[] =
@@ -51,6 +54,13 @@ constexpr std::uint8_t kAltModifier = 1u << 2u;
 constexpr std::uint8_t kWindowsModifier = 1u << 3u;
 constexpr std::uint64_t kTenMiB = 10ULL * 1024ULL * 1024ULL;
 constexpr DWORD kClipboardPasteSettleMilliseconds = 100;
+constexpr int kOverlayWidth = 240;
+constexpr int kOverlayHeight = 52;
+constexpr int kPresentationOverlayWidth = 320;
+constexpr int kPresentationOverlayHeight = 68;
+constexpr int kOverlayMargin = 8;
+constexpr int kOverlayStabilityThreshold = 10;
+constexpr ULONGLONG kRapidOverlayInputThresholdMilliseconds = 75;
 constexpr std::uint64_t kNanosecondsPerSecond = 1000000000ULL;
 constexpr std::size_t kFastInputEventCapacity = 16;
 constexpr std::size_t kMaximumKeyboardInputEvents =
@@ -318,6 +328,48 @@ bool ReadClipboardUnicodeText(std::wstring& text, bool& present) {
   }
   GlobalUnlock(handle);
   return true;
+}
+
+void AssignOverlayText(
+    std::u32string_view value,
+    BoundedKeystrokeOverlayText& output) noexcept {
+  AssignKeystrokeOverlayText(value, output);
+}
+
+void AssignOverlayCharacter(
+    char32_t character,
+    BoundedKeystrokeOverlayText& output) noexcept {
+  const std::array<char32_t, 1> value{character};
+  AssignOverlayText(
+      std::u32string_view(value.data(), value.size()),
+      output);
+}
+
+bool IsOverlayCommitBoundary(
+    const PhysicalKeyEvent& event,
+    bool quick_telex_letters) noexcept {
+  if (event.virtual_key == VK_SPACE || event.virtual_key == VK_TAB ||
+      event.virtual_key == VK_RETURN) {
+    return true;
+  }
+  return ClassifyInputCharacter(event.character, quick_telex_letters) ==
+      InputCharacterClass::CommitBoundary;
+}
+
+bool SystemReducedMotionEnabled() noexcept {
+  BOOL animations_enabled = TRUE;
+  return SystemParametersInfoW(
+             SPI_GETCLIENTAREAANIMATION,
+             0,
+             &animations_enabled,
+             0) == FALSE ||
+      animations_enabled == FALSE;
+}
+
+bool LowPowerModeEnabled() noexcept {
+  SYSTEM_POWER_STATUS status{};
+  return GetSystemPowerStatus(&status) == FALSE ||
+      status.SystemStatusFlag == 1;
 }
 
 bool IsKeyboardMessage(WPARAM message) noexcept {
@@ -768,7 +820,8 @@ Win32InputRuntime::Win32InputRuntime(
     bool reload_profiles,
     bool profile_callback_latency,
     ULONG_PTR accepted_input_marker,
-    bool force_selection_replacement_for_self_test) noexcept
+    bool force_selection_replacement_for_self_test,
+    KeystrokeOverlayPreferences overlay_preferences) noexcept
     : profile_(profile),
       committed_vietnamese_enabled_(profile.vietnamese_enabled),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
@@ -778,7 +831,8 @@ Win32InputRuntime::Win32InputRuntime(
       accepted_input_marker_(accepted_input_marker),
       force_selection_replacement_for_self_test_(
           force_selection_replacement_for_self_test &&
-          accepted_input_marker != 0) {}
+          accepted_input_marker != 0),
+      overlay_preferences_(overlay_preferences) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
@@ -811,6 +865,18 @@ bool Win32InputRuntime::Start() noexcept {
   snippet_overlay_update_posted_ = false;
   tray_update_posted_ = false;
   deferred_clipboard_message_posted_ = false;
+  keystroke_overlay_update_posted_ = false;
+  keystroke_overlay_slot_.Reset();
+  keystroke_overlay_state_ = {};
+  last_keystroke_overlay_placement_ = {};
+  last_keystroke_overlay_event_tick_ = 0;
+  keystroke_overlay_generation_ = 0;
+  overlay_event_produced_count_ = 0;
+  overlay_event_overwritten_count_ = 0;
+  overlay_event_consumed_count_ = 0;
+  overlay_rendered_count_ = 0;
+  overlay_suppressed_count_ = 0;
+  overlay_maximum_pending_depth_ = 0;
   pending_snippet_actions_.store(0, std::memory_order_relaxed);
   deferred_clipboard_queue_->ResetAfterShutdown();
   external_command_queue_.ResetAfterShutdown();
@@ -937,6 +1003,11 @@ void Win32InputRuntime::Stop() noexcept {
     KillTimer(window_, clipboard_restore_timer_);
     clipboard_restore_timer_ = 0;
   }
+  if (keystroke_overlay_hide_timer_ != 0 && window_ != nullptr) {
+    KillTimer(window_, keystroke_overlay_hide_timer_);
+    keystroke_overlay_hide_timer_ = 0;
+  }
+  HideKeystrokeOverlay();
   if (hook_ != nullptr) {
     UnhookWindowsHookEx(hook_);
     hook_ = nullptr;
@@ -999,6 +1070,10 @@ void Win32InputRuntime::Stop() noexcept {
   snippet_overlay_update_posted_ = false;
   tray_update_posted_ = false;
   deferred_clipboard_message_posted_ = false;
+  keystroke_overlay_update_posted_ = false;
+  keystroke_overlay_slot_.Reset();
+  keystroke_overlay_state_ = {};
+  last_keystroke_overlay_placement_ = {};
   pending_snippet_actions_.store(0, std::memory_order_relaxed);
   if (preapplied_vietnamese_toggle_count_ != 0) {
     profile_.vietnamese_enabled = committed_vietnamese_enabled_;
@@ -1113,6 +1188,10 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
     case kDeferredClipboardInjectionMessage:
       HandleDeferredClipboardInjections();
       return 0;
+    case kKeystrokeOverlayUpdateMessage:
+      keystroke_overlay_update_posted_ = false;
+      HandleKeystrokeOverlayUpdate();
+      return 0;
     case WM_INPUT: {
       const bool reset = IsPointerResetPacket(
           reinterpret_cast<HRAWINPUT>(l_param));
@@ -1138,6 +1217,14 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
         }
         RestorePendingClipboard();
         RequestDeferredClipboardDrain();
+        return 0;
+      }
+      if (w_param == kKeystrokeOverlayHideTimerIdentifier) {
+        if (keystroke_overlay_hide_timer_ != 0) {
+          KillTimer(window_, keystroke_overlay_hide_timer_);
+          keystroke_overlay_hide_timer_ = 0;
+        }
+        HideKeystrokeOverlay();
         return 0;
       }
       break;
@@ -1303,6 +1390,20 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       }
     }
 
+    BoundedKeystrokeOverlayText previous_overlay_composition{};
+    bool overlay_allowed = false;
+    if (overlay_preferences_.enabled) {
+      if (EvaluateOverlayPrivacy(context) ==
+          KeystrokeOverlayPrivacyDecision::Allow) {
+        overlay_allowed = true;
+        AssignOverlayText(
+            controller_.composition_visible_text(),
+            previous_overlay_composition);
+      } else {
+        PublishOverlaySuppression(context);
+      }
+    }
+
     InputDecision decision{};
     {
       NativeCallbackLatencyScope controller_latency(
@@ -1315,6 +1416,13 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       RequestPointerRegistration(
           controller_.pointer_observation_required() &&
           !context.bypass_typing);
+    }
+    if (overlay_allowed) {
+      PublishOverlayAfterKey(
+          event,
+          decision,
+          context,
+          previous_overlay_composition);
     }
     const bool clipboard_delivery =
         profile_.clipboard_compatibility_enabled;
@@ -1954,6 +2062,270 @@ void Win32InputRuntime::RequestTrayUpdate() noexcept {
   if (PostMessageW(window_, kTrayUpdateMessage, 0, 0) != FALSE) {
     tray_update_posted_ = true;
   }
+}
+
+KeystrokeOverlayPrivacyDecision
+Win32InputRuntime::EvaluateOverlayPrivacy(
+    const TypingContext& context) const noexcept {
+  const HWND focus = reinterpret_cast<HWND>(context.focus_window);
+  const bool context_known = context.foreground_process_id != 0 &&
+      focus != nullptr && IsWindow(focus) != FALSE;
+  return EvaluateKeystrokeOverlayPrivacy({
+      .overlay_enabled = overlay_preferences_.enabled,
+      .context_known = context_known,
+      .editable = context_known && !context.bypass_typing,
+      .password = context.bypass_typing,
+      .protected_input = context.bypass_typing,
+      .secure_desktop = false,
+      .excluded_application = context.bypass_typing,
+  });
+}
+
+void Win32InputRuntime::PublishOverlaySuppression(
+    const TypingContext& context) noexcept {
+  KeystrokeOverlayDelivery delivery{};
+  delivery.event.kind = KeystrokeOverlayEventKind::Suppressed;
+  delivery.event.generation = ++keystroke_overlay_generation_;
+  delivery.target_process_id = context.foreground_process_id;
+  delivery.target_focus_window = context.focus_window;
+  QueueKeystrokeOverlayDelivery(delivery);
+}
+
+void Win32InputRuntime::PublishOverlayAfterKey(
+    const PhysicalKeyEvent& event,
+    const InputDecision& decision,
+    const TypingContext& context,
+    const BoundedKeystrokeOverlayText& previous_composition) noexcept {
+  BoundedKeystrokeOverlayText current_composition{};
+  AssignOverlayText(
+      controller_.composition_visible_text(),
+      current_composition);
+
+  KeystrokeOverlayDelivery delivery{};
+  bool publish = false;
+  if (!current_composition.empty()) {
+    if (previous_composition.empty() && !decision.suppress &&
+        event.character != U'\0') {
+      delivery.event.kind = KeystrokeOverlayEventKind::Token;
+      AssignOverlayCharacter(event.character, delivery.event.text);
+    } else {
+      delivery.event.kind =
+          KeystrokeOverlayEventKind::CompositionUpdated;
+      delivery.event.text = current_composition;
+    }
+    publish = true;
+  } else if (!previous_composition.empty()) {
+    if (IsOverlayCommitBoundary(
+            event,
+            profile_.quick_telex_letters)) {
+      delivery.event.kind =
+          KeystrokeOverlayEventKind::CompositionCommitted;
+      delivery.event.text = previous_composition;
+    } else {
+      delivery.event.kind = KeystrokeOverlayEventKind::Cleared;
+    }
+    publish = true;
+  } else if (overlay_preferences_.presentation_mode &&
+             !decision.suppress && event.character != U'\0' &&
+             !event.control && !event.alt && !event.windows) {
+    delivery.event.kind = KeystrokeOverlayEventKind::Token;
+    AssignOverlayCharacter(event.character, delivery.event.text);
+    publish = true;
+  }
+
+  if (!publish) {
+    return;
+  }
+
+  const ULONGLONG now = GetTickCount64();
+  delivery.rapid_input = last_keystroke_overlay_event_tick_ != 0 &&
+      now - last_keystroke_overlay_event_tick_ <=
+          kRapidOverlayInputThresholdMilliseconds;
+  last_keystroke_overlay_event_tick_ = now;
+  delivery.event.generation = ++keystroke_overlay_generation_;
+  delivery.target_process_id = context.foreground_process_id;
+  delivery.target_focus_window = context.focus_window;
+  QueueKeystrokeOverlayDelivery(delivery);
+}
+
+void Win32InputRuntime::QueueKeystrokeOverlayDelivery(
+    KeystrokeOverlayDelivery delivery) noexcept {
+  if (!overlay_preferences_.enabled || window_ == nullptr || stopping_) {
+    return;
+  }
+  ++overlay_event_produced_count_;
+  if (keystroke_overlay_slot_.Publish(delivery)) {
+    ++overlay_event_overwritten_count_;
+  }
+  overlay_maximum_pending_depth_ = std::max<std::uint64_t>(
+      overlay_maximum_pending_depth_, 1);
+  if (keystroke_overlay_update_posted_) {
+    return;
+  }
+  if (PostMessageW(window_, kKeystrokeOverlayUpdateMessage, 0, 0) != FALSE) {
+    keystroke_overlay_update_posted_ = true;
+  } else {
+    keystroke_overlay_slot_.Reset();
+  }
+}
+
+KeystrokeOverlayPlacement Win32InputRuntime::ResolveOverlayPlacement(
+    const KeystrokeOverlayDelivery& delivery) noexcept {
+  if (!IsDeferredTargetCurrent(
+          delivery.target_process_id,
+          delivery.target_focus_window)) {
+    return {};
+  }
+  const HWND focus =
+      reinterpret_cast<HWND>(delivery.target_focus_window);
+  const HMONITOR monitor = MonitorFromWindow(
+      focus,
+      MONITOR_DEFAULTTONEAREST);
+  if (monitor == nullptr) {
+    return {};
+  }
+  MONITORINFO monitor_info{};
+  monitor_info.cbSize = sizeof(monitor_info);
+  if (GetMonitorInfoW(monitor, &monitor_info) == FALSE) {
+    return {};
+  }
+
+  KeystrokeOverlayPlacementInput input{};
+  input.monitor_work_area = {
+      monitor_info.rcWork.left,
+      monitor_info.rcWork.top,
+      monitor_info.rcWork.right,
+      monitor_info.rcWork.bottom,
+  };
+  const int size_percent = std::clamp<int>(
+      overlay_preferences_.size_percent, 75, 150);
+  const int base_width = overlay_preferences_.presentation_mode
+      ? kPresentationOverlayWidth
+      : kOverlayWidth;
+  const int base_height = overlay_preferences_.presentation_mode
+      ? kPresentationOverlayHeight
+      : kOverlayHeight;
+  input.overlay_width = MulDiv(base_width, size_percent, 100);
+  input.overlay_height = MulDiv(base_height, size_percent, 100);
+  const UINT focus_dpi = GetDpiForWindow(focus);
+  const int effective_dpi =
+      focus_dpi == 0 ? 96 : static_cast<int>(focus_dpi);
+  input.margin = MulDiv(kOverlayMargin, effective_dpi, 96);
+  input.stability_threshold = MulDiv(
+      kOverlayStabilityThreshold,
+      effective_dpi,
+      96);
+  input.monitor_id = static_cast<std::uint64_t>(
+      reinterpret_cast<std::uintptr_t>(monitor));
+  input.fallback_corner = overlay_preferences_.fallback_corner;
+  input.has_last_stable_placement =
+      last_keystroke_overlay_placement_.valid;
+  input.last_stable_bounds = last_keystroke_overlay_placement_.bounds;
+  input.last_monitor_id = last_keystroke_overlay_placement_.monitor_id;
+
+  GUITHREADINFO information{};
+  information.cbSize = sizeof(information);
+  if (GetGUIThreadInfo(0, &information) != FALSE &&
+      information.hwndFocus == focus && information.hwndCaret != nullptr) {
+    std::array<POINT, 2> points{
+        POINT{information.rcCaret.left, information.rcCaret.top},
+        POINT{information.rcCaret.right, information.rcCaret.bottom},
+    };
+    SetLastError(ERROR_SUCCESS);
+    if (MapWindowPoints(
+            information.hwndCaret,
+            nullptr,
+            points.data(),
+            static_cast<UINT>(points.size())) != 0 ||
+        GetLastError() == ERROR_SUCCESS) {
+      input.caret_reliable = true;
+      input.caret_bounds = {
+          points[0].x,
+          points[0].y,
+          points[1].x,
+          points[1].y,
+      };
+    }
+  }
+  return ResolveKeystrokeOverlayPlacement(input);
+}
+
+void Win32InputRuntime::HandleKeystrokeOverlayUpdate() noexcept {
+  KeystrokeOverlayDelivery delivery{};
+  if (!keystroke_overlay_slot_.Consume(delivery)) {
+    return;
+  }
+  ++overlay_event_consumed_count_;
+
+  if (delivery.event.kind != KeystrokeOverlayEventKind::Suppressed &&
+      !IsDeferredTargetCurrent(
+          delivery.target_process_id,
+          delivery.target_focus_window)) {
+    delivery.event.kind = KeystrokeOverlayEventKind::Suppressed;
+    delivery.event.text.clear();
+  }
+  keystroke_overlay_state_ = keystroke_overlay_reducer_.Apply(
+      keystroke_overlay_state_,
+      delivery.event);
+  if (delivery.event.kind == KeystrokeOverlayEventKind::Suppressed) {
+    ++overlay_suppressed_count_;
+  }
+  if (!keystroke_overlay_state_.visible ||
+      keystroke_overlay_state_.suppressed) {
+    HideKeystrokeOverlay();
+  } else {
+    const KeystrokeOverlayPlacement placement =
+        ResolveOverlayPlacement(delivery);
+    if (!placement.valid ||
+        !keystroke_overlay_window_.Initialize(GetModuleHandleW(nullptr))) {
+      HideKeystrokeOverlay();
+    } else {
+      const KeystrokeOverlayMotionDecision motion =
+          ResolveKeystrokeOverlayMotion({
+              .level = overlay_preferences_.motion,
+              .system_reduced_motion = SystemReducedMotionEnabled(),
+              .rapid_input = delivery.rapid_input,
+              .low_power_mode = LowPowerModeEnabled(),
+          });
+      keystroke_overlay_window_.Present(
+          keystroke_overlay_state_,
+          placement,
+          motion);
+      last_keystroke_overlay_placement_ = placement;
+      ++overlay_rendered_count_;
+
+      if (keystroke_overlay_hide_timer_ != 0) {
+        KillTimer(window_, keystroke_overlay_hide_timer_);
+        keystroke_overlay_hide_timer_ = 0;
+      }
+      const UINT hide_delay = std::clamp<UINT>(
+          overlay_preferences_.hide_delay_milliseconds,
+          500,
+          2'000);
+      keystroke_overlay_hide_timer_ = SetTimer(
+          window_,
+          kKeystrokeOverlayHideTimerIdentifier,
+          hide_delay,
+          nullptr);
+      if (keystroke_overlay_hide_timer_ == 0) {
+        HideKeystrokeOverlay();
+      }
+    }
+  }
+
+  if (keystroke_overlay_slot_.has_pending() &&
+      !keystroke_overlay_update_posted_ && window_ != nullptr &&
+      PostMessageW(window_, kKeystrokeOverlayUpdateMessage, 0, 0) != FALSE) {
+    keystroke_overlay_update_posted_ = true;
+  }
+}
+
+void Win32InputRuntime::HideKeystrokeOverlay() noexcept {
+  if (keystroke_overlay_hide_timer_ != 0 && window_ != nullptr) {
+    KillTimer(window_, keystroke_overlay_hide_timer_);
+    keystroke_overlay_hide_timer_ = 0;
+  }
+  keystroke_overlay_window_.HideAndReleaseTransientState();
 }
 
 bool Win32InputRuntime::QueueDeferredClipboardInjection(

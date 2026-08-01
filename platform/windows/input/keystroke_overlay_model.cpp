@@ -45,19 +45,52 @@ void AppendToken(
 }  // namespace
 
 void BoundedKeystrokeOverlayText::assign(
-    std::u16string_view text) noexcept {
+    std::u16string_view text,
+    bool force_truncated) noexcept {
   const std::size_t bounded =
       std::min(text.size(), storage_.size());
   if (bounded != 0) {
     std::copy_n(text.begin(), bounded, storage_.begin());
   }
   size_ = static_cast<std::uint8_t>(bounded);
-  truncated_ = text.size() > storage_.size();
+  truncated_ = force_truncated || text.size() > storage_.size();
 }
 
 void BoundedKeystrokeOverlayText::clear() noexcept {
   size_ = 0;
   truncated_ = false;
+}
+
+void AssignKeystrokeOverlayText(
+    std::u32string_view text,
+    BoundedKeystrokeOverlayText& output) noexcept {
+  std::array<char16_t, kMaximumOverlayCodeUnits> units{};
+  std::size_t count = 0;
+  bool truncated = false;
+  for (const char32_t codepoint : text) {
+    if (codepoint <= 0xD7FF ||
+        (codepoint >= 0xE000 && codepoint <= 0xFFFF)) {
+      if (count == units.size()) {
+        truncated = true;
+        break;
+      }
+      units[count++] = static_cast<char16_t>(codepoint);
+      continue;
+    }
+    if (codepoint < 0x10000 || codepoint > 0x10FFFF) {
+      continue;
+    }
+    if (count + 2 > units.size()) {
+      truncated = true;
+      break;
+    }
+    const char32_t adjusted = codepoint - 0x10000;
+    units[count++] = static_cast<char16_t>(0xD800 + (adjusted >> 10));
+    units[count++] = static_cast<char16_t>(0xDC00 + (adjusted & 0x3FF));
+  }
+  output.assign(
+      std::u16string_view(units.data(), count),
+      truncated);
 }
 
 KeystrokeOverlayPrivacyDecision EvaluateKeystrokeOverlayPrivacy(
@@ -90,6 +123,33 @@ KeystrokeOverlayMotionDecision ResolveKeystrokeOverlayMotion(
     return {70ms, true, false};
   }
   return {140ms, true, true};
+}
+
+bool KeystrokeOverlayLatestSlot::Publish(
+    const KeystrokeOverlayDelivery& delivery) noexcept {
+  const bool replaced = pending_;
+  latest_ = delivery;
+  if (latest_.event.kind == KeystrokeOverlayEventKind::Suppressed) {
+    latest_.event.text.clear();
+  }
+  pending_ = true;
+  return replaced;
+}
+
+bool KeystrokeOverlayLatestSlot::Consume(
+    KeystrokeOverlayDelivery& delivery) noexcept {
+  if (!pending_) {
+    return false;
+  }
+  delivery = latest_;
+  latest_ = {};
+  pending_ = false;
+  return true;
+}
+
+void KeystrokeOverlayLatestSlot::Reset() noexcept {
+  latest_ = {};
+  pending_ = false;
 }
 
 KeystrokeOverlayState KeystrokeOverlayReducer::Apply(

@@ -125,6 +125,27 @@ KEYINA_TEST(keystroke_overlay_truncation_tracks_only_current_display_state) {
   KEYINA_EXPECT_EQ(state.text.view(), std::u16string_view(u"short"));
 }
 
+KEYINA_TEST(keystroke_overlay_utf32_conversion_never_splits_surrogate_pairs) {
+  keyina::windows::BoundedKeystrokeOverlayText text{};
+  std::u32string value(63, U'x');
+  value.push_back(U'😀');
+  value.push_back(U'y');
+
+  keyina::windows::AssignKeystrokeOverlayText(value, text);
+
+  KEYINA_EXPECT_EQ(text.size(), std::size_t{63});
+  KEYINA_EXPECT_TRUE(text.truncated());
+  KEYINA_EXPECT_EQ(text.view().back(), u'x');
+
+  value.assign(62, U'x');
+  value.push_back(U'😀');
+  keyina::windows::AssignKeystrokeOverlayText(value, text);
+  KEYINA_EXPECT_EQ(text.size(), std::size_t{64});
+  KEYINA_EXPECT_TRUE(!text.truncated());
+  KEYINA_EXPECT_EQ(text.view()[62], static_cast<char16_t>(0xD83D));
+  KEYINA_EXPECT_EQ(text.view()[63], static_cast<char16_t>(0xDE00));
+}
+
 KEYINA_TEST(keystroke_overlay_values_are_fixed_capacity_and_trivially_copyable) {
   KEYINA_EXPECT_TRUE(std::is_trivially_copyable_v<
       keyina::windows::BoundedKeystrokeOverlayText>);
@@ -259,6 +280,56 @@ KEYINA_TEST(keystroke_overlay_low_power_motion_avoids_translation) {
   KEYINA_EXPECT_TRUE(decision.duration > std::chrono::milliseconds{0});
   KEYINA_EXPECT_TRUE(!decision.translate);
   KEYINA_EXPECT_TRUE(!decision.emphasize_changed_glyphs);
+}
+
+KEYINA_TEST(keystroke_overlay_latest_slot_coalesces_to_one_newest_event) {
+  keyina::windows::KeystrokeOverlayLatestSlot slot;
+  keyina::windows::KeystrokeOverlayDelivery first{};
+  first.event = MakeTextEvent(
+      keyina::windows::KeystrokeOverlayEventKind::Token,
+      1,
+      u"a");
+  first.target_process_id = 10;
+  first.target_focus_window = 20;
+  KEYINA_EXPECT_TRUE(!slot.Publish(first));
+
+  auto second = first;
+  second.event = MakeTextEvent(
+      keyina::windows::KeystrokeOverlayEventKind::CompositionUpdated,
+      2,
+      u"á");
+  KEYINA_EXPECT_TRUE(slot.Publish(second));
+  KEYINA_EXPECT_TRUE(slot.has_pending());
+
+  keyina::windows::KeystrokeOverlayDelivery consumed{};
+  KEYINA_EXPECT_TRUE(slot.Consume(consumed));
+  KEYINA_EXPECT_EQ(consumed.event.generation, std::uint64_t{2});
+  KEYINA_EXPECT_EQ(consumed.event.text.view(), std::u16string_view(u"á"));
+  KEYINA_EXPECT_TRUE(!slot.has_pending());
+  KEYINA_EXPECT_TRUE(!slot.Consume(consumed));
+}
+
+KEYINA_TEST(keystroke_overlay_latest_slot_suppression_carries_no_text) {
+  keyina::windows::KeystrokeOverlayLatestSlot slot;
+  keyina::windows::KeystrokeOverlayDelivery visible{};
+  visible.event = MakeTextEvent(
+      keyina::windows::KeystrokeOverlayEventKind::CompositionUpdated,
+      3,
+      u"sensitive");
+  static_cast<void>(slot.Publish(visible));
+
+  keyina::windows::KeystrokeOverlayDelivery suppressed{};
+  suppressed.event.kind =
+      keyina::windows::KeystrokeOverlayEventKind::Suppressed;
+  suppressed.event.generation = 4;
+  KEYINA_EXPECT_TRUE(slot.Publish(suppressed));
+
+  keyina::windows::KeystrokeOverlayDelivery consumed{};
+  KEYINA_EXPECT_TRUE(slot.Consume(consumed));
+  KEYINA_EXPECT_EQ(
+      consumed.event.kind,
+      keyina::windows::KeystrokeOverlayEventKind::Suppressed);
+  KEYINA_EXPECT_TRUE(consumed.event.text.empty());
 }
 
 KEYINA_TEST(keystroke_overlay_clear_resets_tokens_and_composition) {

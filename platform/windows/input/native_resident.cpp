@@ -671,6 +671,204 @@ bool RunClipboardCommandFailOpenProbe(HWND window, HWND edit) noexcept {
   return success;
 }
 
+int RunKeystrokeOverlaySelfTest() noexcept {
+  const HWND previous_foreground = GetForegroundWindow();
+  const HINSTANCE instance = GetModuleHandleW(nullptr);
+  HWND window = CreateWindowExW(
+      WS_EX_TOOLWINDOW,
+      L"STATIC",
+      L"Keyina keystroke overlay self-test",
+      WS_OVERLAPPEDWINDOW,
+      -1200,
+      100,
+      520,
+      220,
+      nullptr,
+      nullptr,
+      instance,
+      nullptr);
+  if (window == nullptr) {
+    WriteStandardOutput(
+        "{\"result\":\"keystroke_overlay_self_test_failed\","
+        "\"error\":\"window_create_failed\"}\n");
+    return 1;
+  }
+  HWND edit = CreateWindowExW(
+      0,
+      L"EDIT",
+      L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+      12,
+      12,
+      480,
+      40,
+      window,
+      nullptr,
+      instance,
+      nullptr);
+  HWND password = CreateWindowExW(
+      0,
+      L"EDIT",
+      L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_PASSWORD,
+      12,
+      72,
+      480,
+      40,
+      window,
+      nullptr,
+      instance,
+      nullptr);
+  if (edit == nullptr || password == nullptr) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"keystroke_overlay_self_test_failed\","
+        "\"error\":\"edit_create_failed\"}\n");
+    return 1;
+  }
+
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = true;
+  keyina::windows::KeystrokeOverlayPreferences overlay{};
+  overlay.enabled = true;
+  overlay.motion = keyina::windows::KeystrokeOverlayMotionLevel::Off;
+  overlay.hide_delay_milliseconds = 500;
+  keyina::windows::Win32InputRuntime runtime(
+      profile,
+      false,
+      false,
+      true,
+      kSelfTestInputMarker,
+      false,
+      overlay);
+  if (!runtime.Start()) {
+    DestroyWindow(window);
+    WriteStandardOutput(
+        "{\"result\":\"keystroke_overlay_self_test_failed\","
+        "\"error\":\"runtime_start_failed\"}\n");
+    return 1;
+  }
+
+  runtime.PumpMessagesFor(50);
+  bool focus_ready = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(50);
+  bool success = focus_ready && GetFocus() == edit &&
+      GetForegroundWindow() == window;
+  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  constexpr std::string_view raw = "tieengs ";
+  constexpr std::wstring_view expected = L"tiếng ";
+  std::array<wchar_t, 64> text{};
+  int length = 0;
+
+  const std::uint64_t before = runtime.processed_keyboard_events();
+  const std::uint32_t sent = success
+      ? SendTestTextBatch(raw, caps_lock)
+      : 0;
+  success = success && sent != 0 &&
+      WaitForProcessedKeyboardEvents(runtime, before + sent, 2'000) &&
+      WaitForExpectedText(runtime, edit, expected, 2'000, text, length);
+  runtime.PumpMessagesFor(30);
+  const bool initial_visible = runtime.overlay_visible_for_testing();
+  const bool initial_hide_timer =
+      runtime.overlay_hide_timer_active_for_testing();
+  const std::uint64_t first_rendered_generation =
+      runtime.overlay_last_rendered_generation_for_testing();
+  success = success && initial_visible && initial_hide_timer &&
+      first_rendered_generation != 0 &&
+      runtime.overlay_event_produced_count() != 0 &&
+      runtime.overlay_event_overwritten_count() != 0 &&
+      runtime.overlay_event_consumed_count() != 0 &&
+      runtime.overlay_rendered_count() != 0 &&
+      runtime.overlay_maximum_pending_depth() == 1 &&
+      GetForegroundWindow() == window && GetFocus() == edit;
+
+  runtime.PumpMessagesFor(650);
+  const bool auto_hide_pass =
+      !runtime.overlay_visible_for_testing() &&
+      !runtime.overlay_hide_timer_active_for_testing();
+  success = success && auto_hide_pass;
+
+  SetWindowTextW(edit, L"");
+  focus_ready = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(20);
+  const std::uint64_t second_before = runtime.processed_keyboard_events();
+  const std::uint32_t second_sent = focus_ready
+      ? SendTestTextBatch(raw, caps_lock)
+      : 0;
+  success = success && second_sent != 0 &&
+      WaitForProcessedKeyboardEvents(
+          runtime, second_before + second_sent, 2'000) &&
+      WaitForExpectedText(runtime, edit, expected, 2'000, text, length);
+  runtime.PumpMessagesFor(30);
+  success = success && runtime.overlay_visible_for_testing();
+
+  const std::uint64_t suppressions_before =
+      runtime.overlay_suppressed_count();
+  focus_ready = FocusTestControl(window, password);
+  runtime.PumpMessagesFor(20);
+  const std::uint64_t password_before = runtime.processed_keyboard_events();
+  const std::uint32_t password_sent = focus_ready
+      ? SendTestTextBatch("a", caps_lock)
+      : 0;
+  success = success && password_sent != 0 &&
+      WaitForProcessedKeyboardEvents(
+          runtime, password_before + password_sent, 2'000);
+  runtime.PumpMessagesFor(50);
+  const bool privacy_pass =
+      runtime.overlay_suppressed_count() > suppressions_before &&
+      !runtime.overlay_visible_for_testing() &&
+      !runtime.overlay_hide_timer_active_for_testing() &&
+      GetForegroundWindow() == window && GetFocus() == password;
+  success = success && privacy_pass;
+
+  const std::uint64_t produced = runtime.overlay_event_produced_count();
+  const std::uint64_t overwritten =
+      runtime.overlay_event_overwritten_count();
+  const std::uint64_t consumed = runtime.overlay_event_consumed_count();
+  const std::uint64_t rendered = runtime.overlay_rendered_count();
+  const std::uint64_t suppressed = runtime.overlay_suppressed_count();
+  const std::uint64_t maximum_pending =
+      runtime.overlay_maximum_pending_depth();
+  const std::uint64_t callback_samples =
+      runtime.callback_latency_snapshot().sample_count;
+  runtime.Stop();
+  DestroyWindow(window);
+  if (previous_foreground != nullptr) {
+    SetForegroundWindow(previous_foreground);
+  }
+
+  std::array<char, 2048> json{};
+  const int json_length = sprintf_s(
+      json.data(),
+      json.size(),
+      "{\"result\":\"%s\",\"produced\":%llu,"
+      "\"overwritten\":%llu,\"consumed\":%llu,"
+      "\"rendered\":%llu,\"suppressed\":%llu,"
+      "\"maximum_pending_depth\":%llu,"
+      "\"initial_visible\":%s,\"initial_hide_timer\":%s,"
+      "\"auto_hide_pass\":%s,\"privacy_pass\":%s,"
+      "\"callback_samples\":%llu}\n",
+      success
+          ? "keystroke_overlay_self_test_pass"
+          : "keystroke_overlay_self_test_failed",
+      static_cast<unsigned long long>(produced),
+      static_cast<unsigned long long>(overwritten),
+      static_cast<unsigned long long>(consumed),
+      static_cast<unsigned long long>(rendered),
+      static_cast<unsigned long long>(suppressed),
+      static_cast<unsigned long long>(maximum_pending),
+      initial_visible ? "true" : "false",
+      initial_hide_timer ? "true" : "false",
+      auto_hide_pass ? "true" : "false",
+      privacy_pass ? "true" : "false",
+      static_cast<unsigned long long>(callback_samples));
+  if (json_length > 0) {
+    WriteStandardOutput(std::string_view(
+        json.data(), static_cast<std::size_t>(json_length)));
+  }
+  return success ? 0 : 1;
+}
+
 int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   const HWND previous_foreground = GetForegroundWindow();
   const HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -2032,6 +2230,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--transform-callback-latency-self-test");
   const bool chromium_ordering_self_test = HasArgument(
       __argc, __wargv, L"--chromium-ordering-self-test");
+  const bool keystroke_overlay_self_test = HasArgument(
+      __argc, __wargv, L"--keystroke-overlay-self-test");
   const bool open_settings = HasArgument(
       __argc, __wargv, L"--open-settings");
   const bool exit_requested = HasArgument(
@@ -2058,6 +2258,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   }
   if (chromium_ordering_self_test) {
     return RunChromiumOrderingSelfTest();
+  }
+  if (keystroke_overlay_self_test) {
+    return RunKeystrokeOverlaySelfTest();
   }
 
   HANDLE mutex = CreateMutexW(nullptr, FALSE, kMutexName);
