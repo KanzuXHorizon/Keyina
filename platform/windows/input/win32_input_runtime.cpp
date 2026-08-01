@@ -149,6 +149,17 @@ bool SendSelectionInputDecision(const InputDecision& decision) noexcept {
   return SendSelectionInputFallback(decision, required);
 }
 
+bool SendLiteralUnicodeCharacter(char32_t character) noexcept {
+  std::array<INPUT, 4> inputs;
+  const std::size_t count = BuildLiteralUnicodeInputSequence(
+      character, inputs);
+  if (count == 0) {
+    return false;
+  }
+  const UINT expected = static_cast<UINT>(count);
+  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+}
+
 #undef KEYINA_NOINLINE
 
 std::uint64_t CounterTicksToNanoseconds(
@@ -1222,18 +1233,13 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
           event.windows) {
         return CallNextHookEx(nullptr, code, message, data);
       }
-      InputDecision literal_decision{};
-      if (!BuildLiteralInputDecision(event.character, literal_decision)) {
-        return CallNextHookEx(nullptr, code, message, data);
-      }
-
       bool injected = false;
       {
         NativeCallbackLatencyScope injection_latency(
             stage_histogram(NativeCallbackLatencyStage::Injection),
             performance_counter_frequency_);
         ++suppressed_edit_count_;
-        injected = InjectWithSelectionReplacement(literal_decision);
+        injected = SendLiteralUnicodeCharacter(event.character);
       }
       if (!injected) {
         ++failed_injection_count_;

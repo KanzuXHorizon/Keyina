@@ -27,7 +27,7 @@ The owned stream is disabled when Vietnamese input is off, the target is secure/
 
 `ShouldOwnTextStream(...)` centralizes the safety guards without Win32 calls or allocation.
 
-`BuildLiteralInputDecision(...)` converts one valid Unicode scalar to one or two UTF-16 units. It rejects U+0000, surrogate code points, and values above U+10FFFF without mutating the caller's decision.
+`BuildLiteralUnicodeInputSequence(...)` converts one valid Unicode scalar directly into two or four marked Win32 Unicode events. It rejects U+0000, surrogate code points, values above U+10FFFF, and insufficient destinations without modifying the caller's buffer.
 
 ## Interactive diagnostic
 

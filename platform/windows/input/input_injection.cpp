@@ -24,29 +24,44 @@ bool ShouldOwnTextStream(
       selection_replacement_target;
 }
 
-bool BuildLiteralInputDecision(
+std::size_t BuildLiteralUnicodeInputSequence(
     char32_t character,
-    InputDecision& decision) noexcept {
+    std::span<INPUT> destination) noexcept {
   if (character == U'\0' || character > 0x10FFFF ||
       (character >= 0xD800 && character <= 0xDFFF)) {
-    return false;
+    return 0;
   }
 
-  InputDecision candidate{};
-  candidate.suppress = true;
+  std::array<WORD, 2> units{};
+  std::size_t unit_count = 1;
   if (character <= 0xFFFF) {
-    candidate.insert[0] = static_cast<wchar_t>(character);
-    candidate.insert_units = 1;
+    units[0] = static_cast<WORD>(character);
   } else {
     const char32_t adjusted = character - 0x10000;
-    candidate.insert[0] =
-        static_cast<wchar_t>(0xD800 + (adjusted >> 10));
-    candidate.insert[1] =
-        static_cast<wchar_t>(0xDC00 + (adjusted & 0x3FF));
-    candidate.insert_units = 2;
+    units[0] = static_cast<WORD>(0xD800 + (adjusted >> 10));
+    units[1] = static_cast<WORD>(0xDC00 + (adjusted & 0x3FF));
+    unit_count = 2;
   }
-  decision = candidate;
-  return true;
+
+  const std::size_t required = unit_count * 2;
+  if (destination.size() < required) {
+    return 0;
+  }
+
+  std::size_t count = 0;
+  for (std::size_t index = 0; index < unit_count; ++index) {
+    INPUT down{};
+    down.type = INPUT_KEYBOARD;
+    down.ki.wScan = units[index];
+    down.ki.dwFlags = KEYEVENTF_UNICODE;
+    down.ki.dwExtraInfo = kKeyinaInjectionMarker;
+    destination[count++] = down;
+
+    INPUT up = down;
+    up.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    destination[count++] = up;
+  }
+  return count;
 }
 
 std::size_t BuildKeyboardInputSequence(

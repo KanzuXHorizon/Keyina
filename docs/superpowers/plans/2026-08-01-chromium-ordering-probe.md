@@ -26,11 +26,11 @@
 
 **Interfaces:**
 - `bool ShouldOwnTextStream(bool vietnamese_enabled, bool bypass_typing, bool clipboard_delivery, bool selection_replacement_target) noexcept`
-- `bool BuildLiteralInputDecision(char32_t character, InputDecision& decision) noexcept`
+- `std::size_t BuildLiteralUnicodeInputSequence(char32_t character, std::span<INPUT> destination) noexcept`
 
 - [x] Test the only allowed policy combination and every rejecting guard.
-- [x] Test BMP and non-BMP UTF-16 encoding.
-- [x] Test U+0000, surrogate, and out-of-range rejection without output mutation.
+- [x] Test BMP and non-BMP Unicode event encoding.
+- [x] Test U+0000, surrogate, out-of-range, and insufficient-capacity rejection without destination mutation.
 - [x] Implement the minimal allocation-free pure functions.
 
 ### Task 2: Own Chromium literal text and releases
@@ -41,12 +41,13 @@
 
 **Interfaces:**
 - Add fixed `KeyStateSet owned_text_keys_`.
-- Consume `ShouldOwnTextStream` and `BuildLiteralInputDecision`.
+- Consume `ShouldOwnTextStream` and `BuildLiteralUnicodeInputSequence`.
 
 - [x] Clear owned-key state at start, stop, and input-profile replacement.
 - [x] Suppress and clear matching owned key-up events before context capture.
 - [x] For safe Chromium literal text, inject one marked Unicode decision and suppress the physical key-down.
 - [x] Preserve existing transformed delivery and pass through unsupported/shortcut/failure cases.
+- [x] Replace full literal `InputDecision` construction with direct marked Unicode event construction.
 
 ### Task 3: Preserve mixed Vietnamese and Latin composition
 

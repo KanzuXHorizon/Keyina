@@ -30,9 +30,9 @@ enum class TextDeliveryMode : std::uint8_t {
     bool clipboard_delivery,
     bool selection_replacement_target) noexcept;
 
-[[nodiscard]] bool BuildLiteralInputDecision(
+[[nodiscard]] std::size_t BuildLiteralUnicodeInputSequence(
     char32_t character,
-    InputDecision& decision) noexcept;
+    std::span<INPUT> destination) noexcept;
 
 [[nodiscard]] std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,

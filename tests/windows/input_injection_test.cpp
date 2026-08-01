@@ -129,47 +129,77 @@ KEYINA_TEST(native_chromium_owned_text_stream_requires_safe_selection_delivery) 
       true, false, false, false));
 }
 
-KEYINA_TEST(native_literal_input_decision_encodes_valid_unicode_only) {
-  keyina::windows::InputDecision decision{};
-  KEYINA_EXPECT_TRUE(
-      keyina::windows::BuildLiteralInputDecision(U'a', decision));
-  KEYINA_EXPECT_TRUE(decision.suppress);
-  KEYINA_EXPECT_EQ(decision.backspace_count, std::uint16_t{0});
-  KEYINA_EXPECT_EQ(decision.insert_units, std::uint16_t{1});
-  KEYINA_EXPECT_EQ(decision.insert[0], L'a');
+KEYINA_TEST(native_literal_unicode_sequence_encodes_bmp_and_non_bmp_scalars) {
+  std::array<INPUT, 4> destination;
+  std::memset(destination.data(), 0xA5, sizeof(destination));
+  for (auto& input : destination) {
+    input.type = INPUT_MOUSE;
+  }
 
-  KEYINA_EXPECT_TRUE(
-      keyina::windows::BuildLiteralInputDecision(U'😀', decision));
-  KEYINA_EXPECT_EQ(decision.insert_units, std::uint16_t{2});
+  const auto bmp_count = keyina::windows::BuildLiteralUnicodeInputSequence(
+      U'a', destination);
+  KEYINA_EXPECT_EQ(bmp_count, std::size_t{2});
+  KEYINA_EXPECT_EQ(destination[0].type, static_cast<DWORD>(INPUT_KEYBOARD));
+  KEYINA_EXPECT_EQ(destination[0].ki.wVk, static_cast<WORD>(0));
+  KEYINA_EXPECT_EQ(destination[0].ki.wScan, static_cast<WORD>(L'a'));
   KEYINA_EXPECT_EQ(
-      static_cast<std::uint16_t>(decision.insert[0]),
-      std::uint16_t{0xD83D});
+      destination[0].ki.dwFlags,
+      static_cast<DWORD>(KEYEVENTF_UNICODE));
   KEYINA_EXPECT_EQ(
-      static_cast<std::uint16_t>(decision.insert[1]),
-      std::uint16_t{0xDE00});
+      destination[1].ki.dwFlags,
+      static_cast<DWORD>(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+  KEYINA_EXPECT_EQ(
+      destination[0].ki.dwExtraInfo,
+      keyina::windows::kKeyinaInjectionMarker);
+  KEYINA_EXPECT_EQ(
+      destination[1].ki.dwExtraInfo,
+      keyina::windows::kKeyinaInjectionMarker);
+
+  const auto non_bmp_count =
+      keyina::windows::BuildLiteralUnicodeInputSequence(U'😀', destination);
+  KEYINA_EXPECT_EQ(non_bmp_count, std::size_t{4});
+  KEYINA_EXPECT_EQ(destination[0].ki.wScan, static_cast<WORD>(0xD83D));
+  KEYINA_EXPECT_EQ(destination[1].ki.wScan, static_cast<WORD>(0xD83D));
+  KEYINA_EXPECT_EQ(destination[2].ki.wScan, static_cast<WORD>(0xDE00));
+  KEYINA_EXPECT_EQ(destination[3].ki.wScan, static_cast<WORD>(0xDE00));
+  for (std::size_t index = 0; index < non_bmp_count; ++index) {
+    KEYINA_EXPECT_EQ(
+        destination[index].type,
+        static_cast<DWORD>(INPUT_KEYBOARD));
+    KEYINA_EXPECT_EQ(
+        destination[index].ki.dwExtraInfo,
+        keyina::windows::kKeyinaInjectionMarker);
+    const DWORD expected_flags = (index & 1u) == 0
+        ? static_cast<DWORD>(KEYEVENTF_UNICODE)
+        : static_cast<DWORD>(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
+    KEYINA_EXPECT_EQ(destination[index].ki.dwFlags, expected_flags);
+  }
 }
 
-KEYINA_TEST(native_literal_input_decision_rejects_invalid_scalars_without_mutation) {
-  keyina::windows::InputDecision decision{};
-  decision.suppress = true;
-  decision.backspace_count = 7;
-  decision.insert_units = 1;
-  decision.insert[0] = L'x';
-  const auto original = decision;
+KEYINA_TEST(native_literal_unicode_sequence_rejects_invalid_or_small_destination) {
+  std::array<INPUT, 3> destination;
+  std::memset(destination.data(), 0xCC, sizeof(destination));
+  for (auto& input : destination) {
+    input.type = INPUT_MOUSE;
+  }
 
-  KEYINA_EXPECT_TRUE(
-      !keyina::windows::BuildLiteralInputDecision(U'\0', decision));
-  KEYINA_EXPECT_EQ(decision.suppress, original.suppress);
-  KEYINA_EXPECT_EQ(decision.backspace_count, original.backspace_count);
-  KEYINA_EXPECT_EQ(decision.insert_units, original.insert_units);
-  KEYINA_EXPECT_EQ(decision.insert[0], original.insert[0]);
-
-  KEYINA_EXPECT_TRUE(
-      !keyina::windows::BuildLiteralInputDecision(
-          static_cast<char32_t>(0xD800), decision));
-  KEYINA_EXPECT_TRUE(
-      !keyina::windows::BuildLiteralInputDecision(
-          static_cast<char32_t>(0x110000), decision));
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildLiteralUnicodeInputSequence(U'\0', destination),
+      std::size_t{0});
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildLiteralUnicodeInputSequence(
+          static_cast<char32_t>(0xD800), destination),
+      std::size_t{0});
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildLiteralUnicodeInputSequence(
+          static_cast<char32_t>(0x110000), destination),
+      std::size_t{0});
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildLiteralUnicodeInputSequence(U'😀', destination),
+      std::size_t{0});
+  for (const auto& input : destination) {
+    KEYINA_EXPECT_EQ(input.type, static_cast<DWORD>(INPUT_MOUSE));
+  }
 }
 
 KEYINA_TEST(native_chromium_windows_require_selection_replacement) {
