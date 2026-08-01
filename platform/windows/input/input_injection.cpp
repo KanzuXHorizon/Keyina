@@ -1,5 +1,6 @@
 #include <keyina/windows/input_injection.h>
 
+#include <algorithm>
 #include <cstddef>
 
 namespace keyina::windows {
@@ -179,6 +180,53 @@ std::size_t BuildSelectionReplacementSequence(
     append(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
   }
   return count;
+}
+
+std::size_t BuildPartialInputRecoverySequence(
+    std::span<const INPUT> submitted,
+    std::size_t inserted_count,
+    std::span<INPUT> destination) noexcept {
+  const std::size_t accepted = std::min(inserted_count, submitted.size());
+  auto same_key = [](const KEYBDINPUT& left,
+                     const KEYBDINPUT& right) noexcept {
+    constexpr DWORD identity_flags = KEYEVENTF_EXTENDEDKEY |
+        KEYEVENTF_UNICODE | KEYEVENTF_SCANCODE;
+    return left.wVk == right.wVk && left.wScan == right.wScan &&
+        (left.dwFlags & identity_flags) ==
+            (right.dwFlags & identity_flags);
+  };
+
+  std::size_t active_count = 0;
+  for (std::size_t index = 0; index < accepted; ++index) {
+    const INPUT& input = submitted[index];
+    if (input.type != INPUT_KEYBOARD) {
+      continue;
+    }
+    if ((input.ki.dwFlags & KEYEVENTF_KEYUP) == 0) {
+      if (active_count == destination.size()) {
+        return 0;
+      }
+      destination[active_count++] = input;
+      continue;
+    }
+    for (std::size_t active = active_count; active > 0; --active) {
+      if (!same_key(destination[active - 1].ki, input.ki)) {
+        continue;
+      }
+      for (std::size_t move = active; move < active_count; ++move) {
+        destination[move - 1] = destination[move];
+      }
+      --active_count;
+      break;
+    }
+  }
+
+  std::reverse(destination.begin(), destination.begin() + active_count);
+  for (std::size_t index = 0; index < active_count; ++index) {
+    destination[index].ki.dwFlags |= KEYEVENTF_KEYUP;
+    destination[index].ki.dwExtraInfo = kKeyinaInjectionMarker;
+  }
+  return active_count;
 }
 
 bool ShouldRestoreClipboard(

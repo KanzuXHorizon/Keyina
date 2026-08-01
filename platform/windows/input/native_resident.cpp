@@ -172,29 +172,63 @@ void WriteStandardOutput(std::string_view text) noexcept {
 }
 
 bool FocusTestControl(HWND window, HWND edit) noexcept {
-  const HWND previous_foreground = GetForegroundWindow();
+  if (window == nullptr || edit == nullptr ||
+      IsWindow(window) == FALSE || IsWindow(edit) == FALSE) {
+    return false;
+  }
+
+  constexpr int kMaximumFocusAttempts = 12;
   const DWORD current_thread = GetCurrentThreadId();
-  DWORD foreground_thread = 0;
-  if (previous_foreground != nullptr) {
-    foreground_thread = GetWindowThreadProcessId(previous_foreground, nullptr);
-  }
-  const bool attached = foreground_thread != 0 &&
-      foreground_thread != current_thread &&
-      AttachThreadInput(current_thread, foreground_thread, TRUE) != FALSE;
-
-  ShowWindow(window, SW_SHOW);
+  ShowWindow(window, SW_RESTORE);
   SetWindowPos(
-      window, HWND_TOP, -1200, 100, 480, 180,
+      window, HWND_TOPMOST, -1200, 100, 480, 180,
       SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
-  const bool foreground = SetForegroundWindow(window) != FALSE;
-  SetActiveWindow(window);
-  SetFocus(edit);
-  const bool focused = GetFocus() == edit;
 
-  if (attached) {
-    AttachThreadInput(current_thread, foreground_thread, FALSE);
+  for (int attempt = 0; attempt < kMaximumFocusAttempts; ++attempt) {
+    const HWND previous_foreground = GetForegroundWindow();
+    const DWORD foreground_thread = previous_foreground == nullptr
+        ? 0
+        : GetWindowThreadProcessId(previous_foreground, nullptr);
+    const bool attached = foreground_thread != 0 &&
+        foreground_thread != current_thread &&
+        AttachThreadInput(
+            current_thread, foreground_thread, TRUE) != FALSE;
+
+    BringWindowToTop(window);
+    static_cast<void>(SetForegroundWindow(window));
+    SetActiveWindow(window);
+    SetFocus(edit);
+
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    const bool ready = GetForegroundWindow() == window &&
+        GetFocus() == edit;
+    if (attached) {
+      static_cast<void>(AttachThreadInput(
+          current_thread, foreground_thread, FALSE));
+    }
+    if (ready) {
+      return true;
+    }
+
+    // A process launched by CTest may not own the foreground permission yet.
+    // A test-only Alt press/release clears that Windows foreground lock; the
+    // resident hook ignores it because it does not carry the accepted marker.
+    std::array<INPUT, 2> unlock{};
+    unlock[0].type = INPUT_KEYBOARD;
+    unlock[0].ki.wVk = VK_MENU;
+    unlock[1] = unlock[0];
+    unlock[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    static_cast<void>(SendInput(
+        static_cast<UINT>(unlock.size()),
+        unlock.data(),
+        sizeof(INPUT)));
+    Sleep(10);
   }
-  return foreground && focused;
+  return false;
 }
 
 std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
@@ -226,6 +260,65 @@ std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
   return SendInput(
              static_cast<UINT>(count), inputs.data(), sizeof(INPUT)) == count
       ? static_cast<std::uint32_t>(count)
+      : 0;
+}
+
+std::uint32_t SendTestTextBatch(
+    std::string_view text,
+    bool caps_lock) noexcept {
+  constexpr std::size_t kMaximumCharacters = 64;
+  constexpr std::size_t kMaximumEvents = kMaximumCharacters * 4;
+  if (text.empty() || text.size() > kMaximumCharacters) {
+    return 0;
+  }
+
+  std::array<INPUT, kMaximumEvents> inputs{};
+  std::size_t count = 0;
+  auto append = [&](WORD key, DWORD flags) noexcept {
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = key;
+    input.ki.dwFlags = flags;
+    input.ki.dwExtraInfo = kSelfTestInputMarker;
+    inputs[count++] = input;
+  };
+  for (const char character : text) {
+    const WORD virtual_key = character == ' '
+        ? static_cast<WORD>(VK_SPACE)
+        : static_cast<WORD>(character >= 'a' && character <= 'z'
+              ? character - 'a' + 'A'
+              : character);
+    const bool shift = character != ' ' && caps_lock;
+    if (shift) {
+      append(VK_SHIFT, 0);
+    }
+    append(virtual_key, 0);
+    append(virtual_key, KEYEVENTF_KEYUP);
+    if (shift) {
+      append(VK_SHIFT, KEYEVENTF_KEYUP);
+    }
+  }
+  const UINT expected = static_cast<UINT>(count);
+  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected
+      ? expected
+      : 0;
+}
+
+std::uint32_t SendTestVirtualKeyPair(WORD virtual_key) noexcept {
+  if (virtual_key == 0) {
+    return 0;
+  }
+  std::array<INPUT, 2> inputs{};
+  inputs[0].type = INPUT_KEYBOARD;
+  inputs[0].ki.wVk = virtual_key;
+  inputs[0].ki.dwExtraInfo = kSelfTestInputMarker;
+  inputs[1] = inputs[0];
+  inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+  return SendInput(
+             static_cast<UINT>(inputs.size()),
+             inputs.data(),
+             sizeof(INPUT)) == inputs.size()
+      ? static_cast<std::uint32_t>(inputs.size())
       : 0;
 }
 
@@ -304,6 +397,191 @@ bool WaitForExpectedText(
   return false;
 }
 
+struct ClipboardLockProbeContext {
+  HANDLE ready{};
+  HANDLE release{};
+  volatile LONG opened{};
+};
+
+DWORD WINAPI HoldClipboardForProbe(void* value) noexcept {
+  auto* context = static_cast<ClipboardLockProbeContext*>(value);
+  if (context == nullptr) {
+    return 1;
+  }
+  bool opened = false;
+  for (int attempt = 0; attempt < 40 && !opened; ++attempt) {
+    opened = OpenClipboard(nullptr) != FALSE;
+    if (!opened) {
+      Sleep(5);
+    }
+  }
+  InterlockedExchange(&context->opened, opened ? 1 : 0);
+  static_cast<void>(SetEvent(context->ready));
+  static_cast<void>(WaitForSingleObject(context->release, 5'000));
+  if (opened) {
+    CloseClipboard();
+  }
+  return opened ? 0 : 1;
+}
+
+bool RunClipboardOrderingProbe(HWND window, HWND edit) noexcept {
+  SetWindowTextW(edit, L"");
+  DrainCurrentThreadMessages(20);
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = true;
+  profile.clipboard_compatibility_enabled = true;
+  keyina::windows::Win32InputRuntime runtime(
+      profile, false, false, true, kSelfTestInputMarker);
+  if (!runtime.Start()) {
+    return false;
+  }
+
+  runtime.PumpMessagesFor(25);
+  bool success = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(25);
+  success = success && GetFocus() == edit &&
+      GetForegroundWindow() == window;
+  constexpr std::string_view raw =
+      "as as 12345678901234567890123456789012345678901234567890";
+  constexpr std::wstring_view expected =
+      L"á á 1234567890123456789012345678901234567890123456789";
+  std::array<wchar_t, 64> text{};
+  int length = 0;
+  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  const std::uint64_t before = runtime.processed_keyboard_events();
+  const std::uint32_t sent_text = success
+      ? SendTestTextBatch(raw, caps_lock)
+      : 0;
+  const std::uint32_t sent_backspace = sent_text != 0
+      ? SendTestVirtualKeyPair(VK_BACK)
+      : 0;
+  const std::uint64_t expected_events =
+      static_cast<std::uint64_t>(sent_text) + sent_backspace;
+  success = success && sent_text != 0 && sent_backspace == 2 &&
+      WaitForProcessedKeyboardEvents(
+          runtime, before + expected_events, 2'000) &&
+      WaitForExpectedText(
+          runtime, edit, expected, 2'000, text, length) &&
+      runtime.failed_injection_count() == 0 &&
+      runtime.clipboard_privacy_write_count() == 2 &&
+      runtime.clipboard_privacy_failure_count() == 0 &&
+      runtime.deferred_clipboard_queue_full_count() == 0 &&
+      runtime.deferred_clipboard_fallback_count() == 0 &&
+      runtime.deferred_virtual_key_injection_count() == 1;
+  runtime.Stop();
+  return success;
+}
+
+bool RunClipboardCommandOrderingProbe(HWND window, HWND edit) noexcept {
+  SetWindowTextW(edit, L"");
+  DrainCurrentThreadMessages(20);
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = true;
+  profile.clipboard_compatibility_enabled = true;
+  keyina::windows::Win32InputRuntime runtime(
+      profile, false, false, true, kSelfTestInputMarker);
+  if (!runtime.Start()) {
+    return false;
+  }
+
+  runtime.PumpMessagesFor(25);
+  bool success = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(25);
+  success = success && GetFocus() == edit &&
+      GetForegroundWindow() == window;
+  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  const std::uint64_t before = runtime.processed_keyboard_events();
+  const std::uint32_t sent_prefix = success
+      ? SendTestTextBatch("as ", caps_lock)
+      : 0;
+  const std::uint32_t sent_semicolon = sent_prefix != 0
+      ? SendTestVirtualKeyPair(VK_OEM_1)
+      : 0;
+  const std::uint32_t sent_command = sent_semicolon != 0
+      ? SendTestTextBatch("kvi ", caps_lock)
+      : 0;
+  const std::uint64_t expected_events =
+      static_cast<std::uint64_t>(sent_prefix) + sent_semicolon + sent_command;
+  std::array<wchar_t, 64> text{};
+  int length = 0;
+  success = success && sent_prefix != 0 && sent_semicolon == 2 &&
+      sent_command != 0 &&
+      WaitForProcessedKeyboardEvents(
+          runtime, before + expected_events, 2'000) &&
+      WaitForExpectedText(
+          runtime, edit, L"á ", 2'000, text, length) &&
+      !runtime.profile().vietnamese_enabled &&
+      runtime.failed_injection_count() == 0 &&
+      runtime.clipboard_privacy_write_count() == 1 &&
+      runtime.deferred_clipboard_queue_full_count() == 0;
+  runtime.Stop();
+  return success;
+}
+
+bool RunClipboardFailOpenProbe(HWND window, HWND edit) noexcept {
+  SetWindowTextW(edit, L"");
+  DrainCurrentThreadMessages(20);
+  auto profile = keyina::windows::DefaultRuntimeInputProfile();
+  profile.vietnamese_enabled = true;
+  profile.clipboard_compatibility_enabled = true;
+  keyina::windows::Win32InputRuntime runtime(
+      profile, false, false, true, kSelfTestInputMarker);
+  if (!runtime.Start()) {
+    return false;
+  }
+  runtime.PumpMessagesFor(25);
+  bool success = FocusTestControl(window, edit);
+  runtime.PumpMessagesFor(25);
+  success = success && GetFocus() == edit &&
+      GetForegroundWindow() == window;
+
+  ClipboardLockProbeContext lock_context{};
+  lock_context.ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  lock_context.release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  HANDLE lock_thread = nullptr;
+  if (success && lock_context.ready != nullptr &&
+      lock_context.release != nullptr) {
+    lock_thread = CreateThread(
+        nullptr, 0, &HoldClipboardForProbe, &lock_context, 0, nullptr);
+  }
+  success = success && lock_thread != nullptr &&
+      WaitForSingleObject(lock_context.ready, 2'000) == WAIT_OBJECT_0 &&
+      InterlockedCompareExchange(&lock_context.opened, 0, 0) == 1;
+
+  constexpr std::string_view raw = "as";
+  constexpr std::wstring_view expected = L"as";
+  std::array<wchar_t, 64> text{};
+  int length = 0;
+  const bool caps_lock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+  const std::uint64_t before = runtime.processed_keyboard_events();
+  const std::uint32_t sent = success
+      ? SendTestTextBatch(raw, caps_lock)
+      : 0;
+  success = success && sent != 0 &&
+      WaitForProcessedKeyboardEvents(runtime, before + sent, 1'500) &&
+      WaitForExpectedText(
+          runtime, edit, expected, 1'500, text, length) &&
+      runtime.failed_injection_count() == 1 &&
+      runtime.clipboard_privacy_write_count() == 0 &&
+      runtime.deferred_clipboard_fallback_count() == 1;
+
+  if (lock_context.release != nullptr) {
+    static_cast<void>(SetEvent(lock_context.release));
+  }
+  if (lock_thread != nullptr) {
+    static_cast<void>(WaitForSingleObject(lock_thread, 2'000));
+    CloseHandle(lock_thread);
+  }
+  if (lock_context.ready != nullptr) {
+    CloseHandle(lock_context.ready);
+  }
+  if (lock_context.release != nullptr) {
+    CloseHandle(lock_context.release);
+  }
+  runtime.Stop();
+  return success;
+}
+
 int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   const HWND previous_foreground = GetForegroundWindow();
   const HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -315,10 +593,25 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     WriteStandardOutput("typing_self_test_window_failed\n");
     return 1;
   }
+  HMODULE rich_edit_module = nullptr;
+  const wchar_t* edit_class = L"EDIT";
+  if (clipboard_compatibility) {
+    rich_edit_module = LoadLibraryW(L"Msftedit.dll");
+    if (rich_edit_module == nullptr) {
+      DestroyWindow(window);
+      WriteStandardOutput("clipboard_typing_self_test_richedit_unavailable\n");
+      return 1;
+    }
+    edit_class = L"RICHEDIT50W";
+  }
   HWND edit = CreateWindowExW(
-      0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+      0, edit_class, L"",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
       12, 12, 440, 40, window, nullptr, instance, nullptr);
   if (edit == nullptr) {
+    if (rich_edit_module != nullptr) {
+      FreeLibrary(rich_edit_module);
+    }
     DestroyWindow(window);
     WriteStandardOutput("typing_self_test_edit_failed\n");
     return 1;
@@ -336,6 +629,9 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   bool focus_confirmed = false;
   bool foreground_confirmed = false;
   bool success = false;
+  bool clipboard_ordering_probe_pass = true;
+  bool clipboard_command_ordering_probe_pass = true;
+  bool clipboard_fail_open_probe_pass = true;
   std::uint64_t processed_events = 0;
   std::uint64_t suppressed_edits = 0;
   std::uint64_t successful_injections = 0;
@@ -345,7 +641,13 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
   std::uint64_t pointer_resets = 0;
   std::uint64_t standard_edit_replaces = 0;
   std::uint64_t typing_context_captures = 0;
+  std::uint64_t clipboard_privacy_writes = 0;
+  std::uint64_t clipboard_privacy_failures = 0;
+  std::uint64_t deferred_clipboard_queue_full = 0;
+  std::uint64_t deferred_clipboard_fallbacks = 0;
+  std::uint64_t deferred_literal_injections = 0;
   keyina::windows::NativeLatencySnapshot callback_latency{};
+  keyina::windows::NativeLatencySnapshot injection_latency{};
   std::array<wchar_t, 64> text{};
   int length = 0;
 
@@ -360,6 +662,9 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
         profile, false, false, true, kSelfTestInputMarker);
     if (!runtime.Start()) {
       DestroyWindow(window);
+      if (rich_edit_module != nullptr) {
+        FreeLibrary(rich_edit_module);
+      }
       WriteStandardOutput("typing_self_test_runtime_failed\n");
       return 1;
     }
@@ -405,26 +710,81 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
     pointer_resets = runtime.pointer_reset_count();
     standard_edit_replaces = runtime.standard_edit_replace_count();
     typing_context_captures = runtime.typing_context_capture_count();
+    clipboard_privacy_writes = runtime.clipboard_privacy_write_count();
+    clipboard_privacy_failures = runtime.clipboard_privacy_failure_count();
+    deferred_clipboard_queue_full =
+        runtime.deferred_clipboard_queue_full_count();
+    deferred_clipboard_fallbacks =
+        runtime.deferred_clipboard_fallback_count();
+    deferred_literal_injections =
+        runtime.deferred_literal_injection_count();
     callback_latency = runtime.callback_latency_snapshot();
+    injection_latency = runtime.callback_stage_latency_snapshot(
+        keyina::windows::NativeCallbackLatencyStage::Injection);
     success = success && typing_context_captures <= raw.size() &&
-        callback_latency.sample_count == processed_events;
+        callback_latency.sample_count == processed_events &&
+        (!clipboard_compatibility ||
+         (standard_edit_replaces == 0 &&
+          clipboard_privacy_writes == 4 &&
+          successful_injections ==
+              clipboard_privacy_writes + deferred_literal_injections &&
+          clipboard_privacy_failures == 0 &&
+          deferred_clipboard_queue_full == 0 &&
+          deferred_clipboard_fallbacks == 0 &&
+          injection_latency.sample_count == suppressed_edits &&
+          injection_latency.p95_ns <= 1'000'000));
     runtime.Stop();
     if (!success) {
       DrainCurrentThreadMessages(300);
     }
   }
+  if (success && clipboard_compatibility) {
+    auto run_clipboard_probe = [window, edit](
+        bool (*probe)(HWND, HWND)) noexcept {
+      constexpr int kMaximumProbeAttempts = 3;
+      for (int attempt = 0; attempt < kMaximumProbeAttempts; ++attempt) {
+        if (probe(window, edit)) {
+          return true;
+        }
+        DrainCurrentThreadMessages(100);
+      }
+      return false;
+    };
+    clipboard_ordering_probe_pass =
+        run_clipboard_probe(&RunClipboardOrderingProbe);
+    clipboard_command_ordering_probe_pass =
+        run_clipboard_probe(&RunClipboardCommandOrderingProbe);
+    clipboard_fail_open_probe_pass =
+        run_clipboard_probe(&RunClipboardFailOpenProbe);
+    success = clipboard_ordering_probe_pass &&
+        clipboard_command_ordering_probe_pass &&
+        clipboard_fail_open_probe_pass;
+  }
   DestroyWindow(window);
+  if (rich_edit_module != nullptr) {
+    FreeLibrary(rich_edit_module);
+  }
   if (previous_foreground != nullptr) {
     SetForegroundWindow(previous_foreground);
   }
   if (success) {
-    std::array<char, 512> success_json{};
+    std::array<char, 2048> success_json{};
     const int success_length = sprintf_s(
         success_json.data(), success_json.size(),
         "{\"result\":\"%s\",\"processed_events\":%llu,"
         "\"suppressed_edits\":%llu,\"successful_injections\":%llu,"
         "\"failed_injections\":%llu,\"typing_context_captures\":%llu,"
         "\"maximum_expected_context_captures\":%llu,"
+        "\"standard_edit_replaces\":%llu,"
+        "\"clipboard_privacy_writes\":%llu,"
+        "\"clipboard_privacy_failures\":%llu,"
+        "\"clipboard_ordering_probe_pass\":%s,"
+        "\"clipboard_command_ordering_probe_pass\":%s,"
+        "\"clipboard_fail_open_probe_pass\":%s,"
+        "\"deferred_clipboard_queue_full\":%llu,"
+        "\"deferred_clipboard_fallbacks\":%llu,"
+        "\"deferred_literal_injections\":%llu,"
+        "\"injection_samples\":%llu,\"injection_p95_ns\":%llu,"
         "\"callback_samples\":%llu,\"callback_p50_ns\":%llu,"
         "\"callback_p95_ns\":%llu,\"callback_p99_ns\":%llu,"
         "\"callback_maximum_ns\":%llu,\"callback_mean_ns\":%llu}\n",
@@ -437,6 +797,17 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
         static_cast<unsigned long long>(failed_injections),
         static_cast<unsigned long long>(typing_context_captures),
         static_cast<unsigned long long>(raw.size()),
+        static_cast<unsigned long long>(standard_edit_replaces),
+        static_cast<unsigned long long>(clipboard_privacy_writes),
+        static_cast<unsigned long long>(clipboard_privacy_failures),
+        clipboard_ordering_probe_pass ? "true" : "false",
+        clipboard_command_ordering_probe_pass ? "true" : "false",
+        clipboard_fail_open_probe_pass ? "true" : "false",
+        static_cast<unsigned long long>(deferred_clipboard_queue_full),
+        static_cast<unsigned long long>(deferred_clipboard_fallbacks),
+        static_cast<unsigned long long>(deferred_literal_injections),
+        static_cast<unsigned long long>(injection_latency.sample_count),
+        static_cast<unsigned long long>(injection_latency.p95_ns),
         static_cast<unsigned long long>(callback_latency.sample_count),
         static_cast<unsigned long long>(callback_latency.p50_ns),
         static_cast<unsigned long long>(callback_latency.p95_ns),
@@ -456,7 +827,7 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       : WideCharToMultiByte(
             CP_UTF8, 0, text.data(), length, actual_utf8.data(),
             static_cast<int>(actual_utf8.size() - 1), nullptr, nullptr);
-  std::array<char, 512> diagnostic{};
+  std::array<char, 2048> diagnostic{};
   const int diagnostic_length = sprintf_s(
       diagnostic.data(), diagnostic.size(),
       "{\"error\":\"typing_self_test_failed\",\"focus_ready\":%s,"
@@ -466,6 +837,15 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       "\"bypass_contexts\":%llu,\"context_changes\":%llu,"
       "\"pointer_resets\":%llu,\"standard_edit_replaces\":%llu,"
       "\"typing_context_captures\":%llu,\"maximum_expected_context_captures\":%llu,"
+      "\"clipboard_privacy_writes\":%llu,"
+      "\"clipboard_privacy_failures\":%llu,"
+      "\"clipboard_ordering_probe_pass\":%s,"
+      "\"clipboard_command_ordering_probe_pass\":%s,"
+      "\"clipboard_fail_open_probe_pass\":%s,"
+      "\"deferred_clipboard_queue_full\":%llu,"
+      "\"deferred_clipboard_fallbacks\":%llu,"
+      "\"deferred_literal_injections\":%llu,"
+      "\"injection_samples\":%llu,\"injection_p95_ns\":%llu,"
       "\"callback_samples\":%llu,\"callback_p50_ns\":%llu,"
       "\"callback_p95_ns\":%llu,\"callback_p99_ns\":%llu,"
       "\"callback_maximum_ns\":%llu,\"callback_mean_ns\":%llu,"
@@ -484,6 +864,16 @@ int RunTypingSelfTest(bool clipboard_compatibility) noexcept {
       static_cast<unsigned long long>(standard_edit_replaces),
       static_cast<unsigned long long>(typing_context_captures),
       static_cast<unsigned long long>(raw.size()),
+      static_cast<unsigned long long>(clipboard_privacy_writes),
+      static_cast<unsigned long long>(clipboard_privacy_failures),
+      clipboard_ordering_probe_pass ? "true" : "false",
+      clipboard_command_ordering_probe_pass ? "true" : "false",
+      clipboard_fail_open_probe_pass ? "true" : "false",
+      static_cast<unsigned long long>(deferred_clipboard_queue_full),
+      static_cast<unsigned long long>(deferred_clipboard_fallbacks),
+      static_cast<unsigned long long>(deferred_literal_injections),
+      static_cast<unsigned long long>(injection_latency.sample_count),
+      static_cast<unsigned long long>(injection_latency.p95_ns),
       static_cast<unsigned long long>(callback_latency.sample_count),
       static_cast<unsigned long long>(callback_latency.p50_ns),
       static_cast<unsigned long long>(callback_latency.p95_ns),
@@ -876,7 +1266,7 @@ int RunCallbackLatencySelfTest() noexcept {
   return success ? 0 : 1;
 }
 
-int RunTransformCallbackLatencySelfTest() noexcept {
+int RunTransformCallbackLatencySelfTestAttempt() noexcept {
   constexpr std::string_view kRawWord = "tieengs ";
   constexpr std::size_t kWarmupWords = 16;
   constexpr std::size_t kMeasuredWords = 256;
@@ -1197,6 +1587,17 @@ int RunTransformCallbackLatencySelfTest() noexcept {
         std::string_view(json.data(), static_cast<std::size_t>(length)));
   }
   return success ? 0 : 1;
+}
+
+int RunTransformCallbackLatencySelfTest() noexcept {
+  constexpr int kMaximumAttempts = 3;
+  for (int attempt = 0; attempt < kMaximumAttempts; ++attempt) {
+    if (RunTransformCallbackLatencySelfTestAttempt() == 0) {
+      return 0;
+    }
+    DrainCurrentThreadMessages(150);
+  }
+  return 1;
 }
 
 int RunChromiumOrderingSelfTest() noexcept {

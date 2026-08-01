@@ -1,4 +1,5 @@
 add_library(keyina_windows_input STATIC
+  clipboard_privacy.cpp
   input_injection.cpp
   native_latency_histogram.cpp
   pointer_input.cpp
@@ -7,6 +8,7 @@ add_library(keyina_windows_input STATIC
   runtime_profile.cpp
   runtime_snippet_matcher.cpp
   runtime_snippet_profile.cpp
+  standard_edit_replacement.cpp
 )
 add_library(keyina::windows_input ALIAS keyina_windows_input)
 
@@ -20,7 +22,11 @@ target_compile_definitions(keyina_windows_input PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
 )
-target_link_libraries(keyina_windows_input PUBLIC keyina::core)
+target_link_libraries(keyina_windows_input PUBLIC
+  keyina::core
+  ole32
+  uuid
+)
 keyina_configure_target(keyina_windows_input)
 
 add_executable(KeyinaInput WIN32

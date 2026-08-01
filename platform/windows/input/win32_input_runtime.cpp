@@ -1,6 +1,7 @@
 #include <keyina/windows/win32_input_runtime.h>
 #include <keyina/windows/input_injection.h>
 #include <keyina/windows/pointer_input.h>
+#include <keyina/windows/standard_edit_replacement.h>
 
 #include <psapi.h>
 #include <shellapi.h>
@@ -14,6 +15,7 @@
 #include <cstring>
 #include <cwchar>
 #include <limits>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -31,6 +33,7 @@ constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
 constexpr UINT kSnippetOverlayUpdateMessage = WM_APP + 4;
 constexpr UINT kTrayUpdateMessage = WM_APP + 5;
 constexpr UINT kDeferredSnippetActionMessage = WM_APP + 6;
+constexpr UINT kDeferredClipboardInjectionMessage = WM_APP + 7;
 constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
 constexpr UINT_PTR kClipboardRestoreTimerIdentifier = 2;
 constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
@@ -54,6 +57,8 @@ constexpr std::size_t kMaximumKeyboardInputEvents =
     ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
 constexpr std::size_t kMaximumSelectionInputEvents =
     2 + (kMaxActiveKeys * 2) + (kMaximumInputInsertUnits * 2);
+constexpr std::size_t kMaximumClipboardInputEvents =
+    ((kMaxActiveKeys + 1) * 2) + 6;
 constexpr std::uint32_t kPendingToggleVietnameseAction = 1u << 0u;
 constexpr std::uint32_t kPendingToggleDictationAction = 1u << 1u;
 constexpr SIZE_T kExternalCommandWorkerStackReservation = 256 * 1024;
@@ -79,6 +84,38 @@ std::size_t RequiredSelectionInputEvents(
       (static_cast<std::size_t>(decision.insert_units) * 2);
 }
 
+struct InputSubmissionResult {
+  bool complete{false};
+  UINT inserted{};
+};
+
+template <std::size_t Capacity>
+InputSubmissionResult SubmitInputSequence(
+    std::span<INPUT> sequence) noexcept {
+  if (sequence.empty() || sequence.size() >
+      static_cast<std::size_t>(std::numeric_limits<UINT>::max())) {
+    return {};
+  }
+  const UINT expected = static_cast<UINT>(sequence.size());
+  const UINT inserted = SendInput(expected, sequence.data(), sizeof(INPUT));
+  if (inserted == expected) {
+    return {true, inserted};
+  }
+
+  std::array<INPUT, Capacity> recovery{};
+  const std::size_t recovery_count = BuildPartialInputRecoverySequence(
+      sequence,
+      inserted,
+      recovery);
+  if (recovery_count != 0) {
+    static_cast<void>(SendInput(
+        static_cast<UINT>(recovery_count),
+        recovery.data(),
+        sizeof(INPUT)));
+  }
+  return {false, inserted};
+}
+
 template <std::size_t Capacity>
 bool BuildAndSendKeyboardInput(
     const InputDecision& decision,
@@ -94,8 +131,8 @@ bool BuildAndSendKeyboardInput(
   if (count != required) {
     return false;
   }
-  const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  return SubmitInputSequence<Capacity>(
+      std::span<INPUT>(inputs.data(), count)).complete;
 }
 
 template <std::size_t Capacity>
@@ -113,8 +150,8 @@ bool BuildAndSendSelectionInput(
   if (count != required) {
     return false;
   }
-  const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  return SubmitInputSequence<Capacity>(
+      std::span<INPUT>(inputs.data(), count)).complete;
 }
 
 KEYINA_NOINLINE bool SendKeyboardInputFallback(
@@ -155,15 +192,34 @@ bool SendSelectionInputDecision(const InputDecision& decision) noexcept {
   return SendSelectionInputFallback(decision, required);
 }
 
-bool SendLiteralUnicodeCharacter(char32_t character) noexcept {
+InputSubmissionResult SubmitLiteralUnicodeCharacter(
+    char32_t character) noexcept {
   std::array<INPUT, 4> inputs;
   const std::size_t count = BuildLiteralUnicodeInputSequence(
       character, inputs);
   if (count == 0) {
-    return false;
+    return {};
   }
-  const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+  return SubmitInputSequence<4>(
+      std::span<INPUT>(inputs.data(), count));
+}
+
+bool SendLiteralUnicodeCharacter(char32_t character) noexcept {
+  return SubmitLiteralUnicodeCharacter(character).complete;
+}
+
+InputSubmissionResult SubmitVirtualKeyPair(
+    std::uint16_t virtual_key) noexcept {
+  if (virtual_key == 0) {
+    return {};
+  }
+  std::array<INPUT, 2> inputs{};
+  inputs[0].type = INPUT_KEYBOARD;
+  inputs[0].ki.wVk = virtual_key;
+  inputs[0].ki.dwExtraInfo = kKeyinaInjectionMarker;
+  inputs[1] = inputs[0];
+  inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+  return SubmitInputSequence<2>(inputs);
 }
 
 #undef KEYINA_NOINLINE
@@ -225,14 +281,8 @@ class NativeCallbackLatencyScope {
   LARGE_INTEGER started_{};
 };
 
-bool OpenClipboardWithRetry(HWND owner) noexcept {
-  for (int attempt = 0; attempt < 5; ++attempt) {
-    if (OpenClipboard(owner) != FALSE) {
-      return true;
-    }
-    Sleep(2);
-  }
-  return false;
+bool TryOpenClipboard(HWND owner) noexcept {
+  return OpenClipboard(owner) != FALSE;
 }
 
 bool ClipboardContainsOnlyRestorableText() noexcept {
@@ -270,58 +320,6 @@ bool ReadClipboardUnicodeText(std::wstring& text, bool& present) {
   return true;
 }
 
-bool SetClipboardUnicodeText(std::wstring_view text) noexcept {
-  const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-  if (memory == nullptr) {
-    return false;
-  }
-  void* destination = GlobalLock(memory);
-  if (destination == nullptr) {
-    GlobalFree(memory);
-    return false;
-  }
-  std::memcpy(destination, text.data(), text.size() * sizeof(wchar_t));
-  static_cast<wchar_t*>(destination)[text.size()] = L'\0';
-  GlobalUnlock(memory);
-  if (EmptyClipboard() == FALSE ||
-      SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
-    GlobalFree(memory);
-    return false;
-  }
-  return true;
-}
-
-bool TryPasteIntoStandardEdit(
-    HWND focus,
-    std::uint16_t erase_codepoints,
-    std::wstring_view replacement) noexcept {
-  if (focus == nullptr || replacement.empty()) {
-    return false;
-  }
-  std::array<wchar_t, 32> class_name{};
-  const int class_length = GetClassNameW(
-      focus, class_name.data(), static_cast<int>(class_name.size()));
-  if (class_length <= 0 ||
-      !IsStandardEditableWindowClass(std::wstring_view(
-          class_name.data(), static_cast<std::size_t>(class_length)))) {
-    return false;
-  }
-  const LRESULT selection = SendMessageW(focus, EM_GETSEL, 0, 0);
-  const DWORD start = LOWORD(selection);
-  const DWORD end = HIWORD(selection);
-  const DWORD replacement_start =
-      start >= erase_codepoints ? start - erase_codepoints : 0;
-  static_cast<void>(SendMessageW(
-      focus, EM_SETSEL,
-      static_cast<WPARAM>(replacement_start),
-      static_cast<LPARAM>(end)));
-  static_cast<void>(SendMessageW(
-      focus, EM_REPLACESEL, TRUE,
-      reinterpret_cast<LPARAM>(replacement.data())));
-  return true;
-}
-
 bool IsKeyboardMessage(WPARAM message) noexcept {
   return message == WM_KEYDOWN || message == WM_KEYUP ||
          message == WM_SYSKEYDOWN || message == WM_SYSKEYUP;
@@ -337,6 +335,28 @@ bool IsModifierKey(std::uint16_t key) noexcept {
          key == VK_LCONTROL || key == VK_RCONTROL ||
          key == VK_LMENU || key == VK_RMENU ||
          key == VK_LWIN || key == VK_RWIN;
+}
+
+bool IsDeferredOrderingVirtualKey(std::uint16_t key) noexcept {
+  switch (key) {
+    case VK_BACK:
+    case VK_TAB:
+    case VK_RETURN:
+    case VK_ESCAPE:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_END:
+    case VK_HOME:
+    case VK_LEFT:
+    case VK_UP:
+    case VK_RIGHT:
+    case VK_DOWN:
+    case VK_INSERT:
+    case VK_DELETE:
+      return true;
+    default:
+      return false;
+  }
 }
 
 void AppendUtf32ToWide(std::u32string_view value, std::wstring& output) {
@@ -768,6 +788,15 @@ bool Win32InputRuntime::Start() noexcept {
     return false;
   }
 
+  if (deferred_clipboard_queue_ == nullptr) {
+    deferred_clipboard_queue_.reset(
+        new (std::nothrow) DeferredClipboardQueue());
+    if (deferred_clipboard_queue_ == nullptr) {
+      startup_error_ = ERROR_NOT_ENOUGH_MEMORY;
+      return false;
+    }
+  }
+
   stopping_ = false;
   if (!ole_initialized_) {
     const HRESULT ole_result = OleInitialize(nullptr);
@@ -780,8 +809,17 @@ bool Win32InputRuntime::Start() noexcept {
   toggle_chord_contaminated_ = false;
   snippet_overlay_update_posted_ = false;
   tray_update_posted_ = false;
+  deferred_clipboard_message_posted_ = false;
   pending_snippet_actions_.store(0, std::memory_order_relaxed);
+  deferred_clipboard_queue_->ResetAfterShutdown();
   external_command_queue_.ResetAfterShutdown();
+  deferred_clipboard_queue_full_count_ = 0;
+  deferred_clipboard_fallback_count_ = 0;
+  deferred_literal_injection_count_ = 0;
+  deferred_virtual_key_injection_count_ = 0;
+  clipboard_privacy_write_count_ = 0;
+  clipboard_privacy_failure_count_ = 0;
+  clipboard_privacy_formats_ = RegisterClipboardPrivacyFormats();
   startup_stage_ = NativeRuntimeStartupStage::None;
   startup_error_ = ERROR_SUCCESS;
   ClearCallbackLatency();
@@ -896,7 +934,18 @@ void Win32InputRuntime::Stop() noexcept {
     KillTimer(window_, clipboard_restore_timer_);
     clipboard_restore_timer_ = 0;
   }
-  RestorePendingClipboard();
+  if (hook_ != nullptr) {
+    UnhookWindowsHookEx(hook_);
+    hook_ = nullptr;
+  }
+  for (int attempt = 0;
+       attempt < 50 && pending_clipboard_sequence_ != 0;
+       ++attempt) {
+    RestorePendingClipboard();
+    if (pending_clipboard_sequence_ != 0) {
+      Sleep(2);
+    }
+  }
   if (pending_clipboard_data_object_ != nullptr) {
     pending_clipboard_data_object_->Release();
     pending_clipboard_data_object_ = nullptr;
@@ -907,10 +956,6 @@ void Win32InputRuntime::Stop() noexcept {
   }
   pointer_registration_desired_ = false;
   ApplyPointerRegistration();
-  if (hook_ != nullptr) {
-    UnhookWindowsHookEx(hook_);
-    hook_ = nullptr;
-  }
   StopExternalCommandWorker();
   if (tray_added_ && shell_notify_icon_ != nullptr) {
     shell_notify_icon_(NIM_DELETE, &tray_data_);
@@ -950,7 +995,11 @@ void Win32InputRuntime::Stop() noexcept {
   toggle_chord_contaminated_ = false;
   snippet_overlay_update_posted_ = false;
   tray_update_posted_ = false;
+  deferred_clipboard_message_posted_ = false;
   pending_snippet_actions_.store(0, std::memory_order_relaxed);
+  if (deferred_clipboard_queue_ != nullptr) {
+    deferred_clipboard_queue_->ResetAfterShutdown();
+  }
   external_command_queue_.ResetAfterShutdown();
   controller_.Reset();
 }
@@ -1053,6 +1102,9 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
     case kDeferredSnippetActionMessage:
       HandleDeferredSnippetActions();
       return 0;
+    case kDeferredClipboardInjectionMessage:
+      HandleDeferredClipboardInjections();
+      return 0;
     case WM_INPUT: {
       const bool reset = IsPointerResetPacket(
           reinterpret_cast<HRAWINPUT>(l_param));
@@ -1077,6 +1129,7 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
           clipboard_restore_timer_ = 0;
         }
         RestorePendingClipboard();
+        RequestDeferredClipboardDrain();
         return 0;
       }
       break;
@@ -1263,7 +1316,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
           !context.bypass_typing);
     }
     const bool clipboard_delivery =
-        profile_.clipboard_compatibility_enabled && reload_profiles_;
+        profile_.clipboard_compatibility_enabled;
     const bool selection_replacement_target =
         !context.bypass_typing && profile_.vietnamese_enabled &&
         RequiresSelectionReplacementTarget(context.focus_window);
@@ -1272,6 +1325,59 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         context.bypass_typing,
         clipboard_delivery,
         selection_replacement_target);
+    const bool deferred_barrier_active = clipboard_delivery &&
+        (deferred_clipboard_message_posted_ ||
+         pending_clipboard_sequence_ != 0 ||
+         (deferred_clipboard_queue_ != nullptr &&
+          !deferred_clipboard_queue_->empty()));
+    const bool decision_inserts_text =
+        decision.insert_units != 0 || !decision.extended_insert.empty();
+
+    const bool defer_command =
+        decision.snippet_command != RuntimeSnippetCommand::None;
+    const bool defer_literal = event.character != U'\0' &&
+        !event.control && !event.alt && !event.windows;
+    const bool defer_virtual_key = event.character == U'\0' &&
+        !event.shift && !event.control && !event.alt && !event.windows &&
+        IsDeferredOrderingVirtualKey(virtual_key);
+    if (deferred_barrier_active && !decision_inserts_text &&
+        (defer_command || defer_literal || defer_virtual_key)) {
+      bool queued = false;
+      {
+        NativeCallbackLatencyScope injection_latency(
+            stage_histogram(NativeCallbackLatencyStage::Injection),
+            performance_counter_frequency_);
+        ++suppressed_edit_count_;
+        if (defer_command) {
+          queued = QueueDeferredCommandInjection(
+              decision,
+              event.character,
+              virtual_key,
+              context);
+        } else if (defer_literal) {
+          queued = QueueDeferredLiteralInjection(
+              event.character,
+              virtual_key,
+              context);
+        } else {
+          queued = QueueDeferredVirtualKeyInjection(virtual_key, context);
+        }
+      }
+      if (queued) {
+        owned_text_keys_.Set(virtual_key, true);
+        if (decision.suppress) {
+          controller_.Reset();
+          RequestPointerRegistration(false);
+          RequestSnippetOverlayUpdate();
+        }
+        return 1;
+      }
+      ++failed_injection_count_;
+      controller_.Reset();
+      RequestPointerRegistration(false);
+      deferred_clipboard_queue_->CancelProducer();
+      return CallNextHookEx(nullptr, code, message, data);
+    }
 
     if (!decision.suppress && !own_text_stream) {
       return CallNextHookEx(nullptr, code, message, data);
@@ -1301,6 +1407,33 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return 1;
     }
 
+    const TextDeliveryMode delivery_mode = ChooseTextDeliveryMode(
+        clipboard_delivery,
+        selection_replacement_target);
+    if (delivery_mode == TextDeliveryMode::Clipboard &&
+        decision_inserts_text) {
+      bool queued = false;
+      {
+        NativeCallbackLatencyScope injection_latency(
+            stage_histogram(NativeCallbackLatencyStage::Injection),
+            performance_counter_frequency_);
+        ++suppressed_edit_count_;
+        queued = QueueDeferredClipboardInjection(
+            decision,
+            event.character,
+            virtual_key,
+            context);
+      }
+      if (!queued) {
+        ++failed_injection_count_;
+        controller_.Reset();
+        RequestPointerRegistration(false);
+        deferred_clipboard_queue_->CancelProducer();
+        return CallNextHookEx(nullptr, code, message, data);
+      }
+      return 1;
+    }
+
     if (!PrepareDeferredSnippetCommand(decision)) {
       ++failed_injection_count_;
       controller_.Reset();
@@ -1308,41 +1441,35 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       return CallNextHookEx(nullptr, code, message, data);
     }
 
-    bool injection_failed = false;
+    bool injected = false;
     {
       NativeCallbackLatencyScope injection_latency(
           stage_histogram(NativeCallbackLatencyStage::Injection),
           performance_counter_frequency_);
       ++suppressed_edit_count_;
-      const TextDeliveryMode delivery_mode = ChooseTextDeliveryMode(
-          clipboard_delivery,
-          selection_replacement_target);
-      bool injected = false;
       switch (delivery_mode) {
         case TextDeliveryMode::Keyboard:
-          injected = Inject(decision, context.focus_window);
+          injected = Inject(decision);
           break;
         case TextDeliveryMode::SelectionReplacement:
           injected = InjectWithSelectionReplacement(decision);
           break;
         case TextDeliveryMode::Clipboard:
-          injected = InjectViaClipboard(decision, context.focus_window);
+          // Command-only decisions erase their trigger without touching the
+          // clipboard. Text-bearing decisions were queued above.
+          injected = Inject(decision);
           break;
       }
-      if (!injected) {
-        ++failed_injection_count_;
-        controller_.Reset();
-        RequestPointerRegistration(false);
-        external_command_queue_.CancelProducer();
-        injection_failed = true;
-      } else {
-        ++successful_injection_count_;
-        CommitDeferredSnippetCommand(decision.snippet_command);
-      }
     }
-    if (injection_failed) {
+    if (!injected) {
+      ++failed_injection_count_;
+      controller_.Reset();
+      RequestPointerRegistration(false);
+      external_command_queue_.CancelProducer();
       return CallNextHookEx(nullptr, code, message, data);
     }
+    ++successful_injection_count_;
+    CommitDeferredSnippetCommand(decision.snippet_command);
     return 1;
   } catch (...) {
     controller_.Reset();
@@ -1426,12 +1553,7 @@ bool Win32InputRuntime::RequiresSelectionReplacementTarget(
 }
 
 bool Win32InputRuntime::Inject(
-    const InputDecision& decision,
-    std::uintptr_t target_focus_window) noexcept {
-  if (profile_.clipboard_compatibility_enabled &&
-      (decision.insert_units != 0 || !decision.extended_insert.empty())) {
-    return InjectViaClipboard(decision, target_focus_window);
-  }
+    const InputDecision& decision) noexcept {
   if (decision.extended_insert.empty()) {
     return SendKeyboardInputDecision(decision);
   }
@@ -1490,14 +1612,13 @@ bool Win32InputRuntime::InjectWithSelectionReplacement(
   return true;
 }
 
-bool Win32InputRuntime::InjectViaClipboard(
+Win32InputRuntime::TargetInjectionResult
+Win32InputRuntime::InjectViaClipboard(
     const InputDecision& decision,
+    std::uint32_t target_process_id,
     std::uintptr_t target_focus_window) noexcept {
   if (pending_clipboard_sequence_ != 0) {
-    RestorePendingClipboard();
-    if (pending_clipboard_sequence_ != 0) {
-      return false;
-    }
+    return TargetInjectionResult::FailedBeforeMutation;
   }
 
   std::wstring replacement;
@@ -1510,74 +1631,125 @@ bool Win32InputRuntime::InjectViaClipboard(
       replacement.assign(decision.insert.data(), decision.insert_units);
     }
   } catch (...) {
-    return false;
+    return TargetInjectionResult::FailedBeforeMutation;
   }
   if (replacement.empty()) {
-    return false;
+    return TargetInjectionResult::FailedBeforeMutation;
   }
-  HWND standard_edit_target =
-      reinterpret_cast<HWND>(target_focus_window);
-  if (standard_edit_target == nullptr ||
-      IsWindow(standard_edit_target) == FALSE) {
-    GUITHREADINFO info{};
-    info.cbSize = sizeof(info);
-    if (GetGUIThreadInfo(0, &info)) {
-      standard_edit_target = info.hwndFocus;
-    }
-  }
-  if (TryPasteIntoStandardEdit(
-          standard_edit_target,
+
+  const HWND target = reinterpret_cast<HWND>(target_focus_window);
+  const StandardEditReplacementResult edit_result =
+      TryReplaceFocusedStandardEdit(
+          target,
+          target_process_id,
           decision.backspace_count,
-          replacement)) {
+          replacement);
+  if (edit_result == StandardEditReplacementResult::Replaced) {
     ++standard_edit_replace_count_;
-    return true;
+    return TargetInjectionResult::Succeeded;
   }
+  if (edit_result != StandardEditReplacementResult::UnsupportedControl) {
+    return StandardEditTargetMayBeMutated(edit_result)
+        ? TargetInjectionResult::FailedAfterPossibleMutation
+        : TargetInjectionResult::FailedBeforeMutation;
+  }
+  if (!IsDeferredTargetCurrent(target_process_id, target_focus_window)) {
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+
   IDataObject* previous_data_object = nullptr;
   const bool captured_all_formats =
       ole_initialized_ && SUCCEEDED(OleGetClipboard(&previous_data_object)) &&
       previous_data_object != nullptr;
-  if (!OpenClipboardWithRetry(window_)) {
-    if (previous_data_object != nullptr) {
-      previous_data_object->Release();
+  IDataObject* private_previous_data_object = nullptr;
+  if (captured_all_formats) {
+    private_previous_data_object = CreatePrivateClipboardDataObject(
+        previous_data_object,
+        clipboard_privacy_formats_);
+    previous_data_object->Release();
+    previous_data_object = nullptr;
+    if (private_previous_data_object == nullptr) {
+      ++clipboard_privacy_failure_count_;
+      return TargetInjectionResult::FailedBeforeMutation;
     }
-    return false;
+  }
+  if (!TryOpenClipboard(window_)) {
+    if (private_previous_data_object != nullptr) {
+      private_previous_data_object->Release();
+    }
+    return TargetInjectionResult::FailedBeforeMutation;
   }
 
   std::wstring previous_text;
   bool previous_text_present = false;
   const bool clipboard_safe =
       ReadClipboardUnicodeText(previous_text, previous_text_present) &&
-      (captured_all_formats || ClipboardContainsOnlyRestorableText());
+      (private_previous_data_object != nullptr ||
+       ClipboardContainsOnlyRestorableText());
   if (!clipboard_safe) {
-    if (previous_data_object != nullptr) {
-      previous_data_object->Release();
+    if (private_previous_data_object != nullptr) {
+      private_previous_data_object->Release();
     }
     CloseClipboard();
-    return false;
+    return TargetInjectionResult::FailedBeforeMutation;
   }
-  if (!SetClipboardUnicodeText(replacement)) {
-    if (previous_data_object != nullptr) {
-      previous_data_object->Release();
+
+  auto restore_captured_clipboard = [&]() noexcept {
+    if (private_previous_data_object != nullptr) {
+      CloseClipboard();
+      const HRESULT set_result =
+          OleSetClipboard(private_previous_data_object);
+      if (SUCCEEDED(set_result)) {
+        static_cast<void>(OleFlushClipboard());
+      }
+      private_previous_data_object->Release();
+      private_previous_data_object = nullptr;
+      return;
     }
     if (previous_text_present) {
-      static_cast<void>(SetClipboardUnicodeText(previous_text));
+      static_cast<void>(SetPrivateClipboardUnicodeText(
+          previous_text,
+          clipboard_privacy_formats_));
     } else {
       static_cast<void>(EmptyClipboard());
     }
     CloseClipboard();
-    return false;
+  };
+
+  if (!SetPrivateClipboardUnicodeText(
+          replacement,
+          clipboard_privacy_formats_)) {
+    ++clipboard_privacy_failure_count_;
+    restore_captured_clipboard();
+    return TargetInjectionResult::FailedBeforeMutation;
   }
+  ++clipboard_privacy_write_count_;
   const DWORD owned_sequence = GetClipboardSequenceNumber();
   CloseClipboard();
   if (owned_sequence == 0) {
-    if (previous_data_object != nullptr) {
-      previous_data_object->Release();
+    ++clipboard_privacy_failure_count_;
+    if (private_previous_data_object != nullptr) {
+      const HRESULT set_result =
+          OleSetClipboard(private_previous_data_object);
+      if (SUCCEEDED(set_result)) {
+        static_cast<void>(OleFlushClipboard());
+      }
+      private_previous_data_object->Release();
+    } else if (TryOpenClipboard(window_)) {
+      if (previous_text_present) {
+        static_cast<void>(SetPrivateClipboardUnicodeText(
+            previous_text,
+            clipboard_privacy_formats_));
+      } else {
+        static_cast<void>(EmptyClipboard());
+      }
+      CloseClipboard();
     }
-    return false;
+    return TargetInjectionResult::FailedBeforeMutation;
   }
 
   pending_clipboard_text_ = std::move(previous_text);
-  pending_clipboard_data_object_ = previous_data_object;
+  pending_clipboard_data_object_ = private_previous_data_object;
   pending_clipboard_text_present_ = previous_text_present;
   pending_clipboard_sequence_ = owned_sequence;
   clipboard_restore_timer_ = SetTimer(
@@ -1587,22 +1759,39 @@ bool Win32InputRuntime::InjectViaClipboard(
       nullptr);
   if (clipboard_restore_timer_ == 0) {
     RestorePendingClipboard();
-    return false;
+    return TargetInjectionResult::FailedBeforeMutation;
   }
-
-  constexpr std::size_t kMaximumClipboardEvents =
-      ((kMaxActiveKeys + 1) * 2) + 6;
-  std::array<INPUT, kMaximumClipboardEvents> inputs{};
-  const std::size_t count = BuildClipboardPasteSequence(decision, inputs);
-  const UINT expected = static_cast<UINT>(count);
-  const bool sent = count != 0 &&
-      SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
-  if (!sent) {
+  if (!IsDeferredTargetCurrent(target_process_id, target_focus_window)) {
     KillTimer(window_, clipboard_restore_timer_);
     clipboard_restore_timer_ = 0;
     RestorePendingClipboard();
+    return TargetInjectionResult::FailedBeforeMutation;
   }
-  return sent;
+
+  std::array<INPUT, kMaximumClipboardInputEvents> inputs{};
+  const std::size_t count = BuildClipboardPasteSequence(decision, inputs);
+  if (count == 0) {
+    KillTimer(window_, clipboard_restore_timer_);
+    clipboard_restore_timer_ = 0;
+    RestorePendingClipboard();
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+  const InputSubmissionResult submission =
+      SubmitInputSequence<kMaximumClipboardInputEvents>(
+          std::span<INPUT>(inputs.data(), count));
+  if (submission.complete) {
+    return TargetInjectionResult::Succeeded;
+  }
+  if (submission.inserted == 0) {
+    KillTimer(window_, clipboard_restore_timer_);
+    clipboard_restore_timer_ = 0;
+    RestorePendingClipboard();
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+  // Some selection/paste events reached the target. Keep the private clipboard
+  // alive until the settle timer fires, because restoring it immediately could
+  // make an accepted Ctrl+V paste the previous clipboard contents.
+  return TargetInjectionResult::FailedAfterPossibleMutation;
 }
 
 void Win32InputRuntime::RestorePendingClipboard() noexcept {
@@ -1621,8 +1810,8 @@ void Win32InputRuntime::RestorePendingClipboard() noexcept {
     pending_clipboard_sequence_ = 0;
     return;
   }
-  if (!OpenClipboardWithRetry(window_)) {
-    if (window_ != nullptr && clipboard_restore_timer_ == 0) {
+  if (!TryOpenClipboard(window_)) {
+    if (!stopping_ && window_ != nullptr && clipboard_restore_timer_ == 0) {
       clipboard_restore_timer_ = SetTimer(
           window_,
           kClipboardRestoreTimerIdentifier,
@@ -1633,19 +1822,38 @@ void Win32InputRuntime::RestorePendingClipboard() noexcept {
   }
   const bool still_owned = ShouldRestoreClipboard(
       pending_clipboard_sequence_, GetClipboardSequenceNumber());
+  bool restored = true;
   if (still_owned) {
     if (pending_clipboard_data_object_ != nullptr) {
       CloseClipboard();
-      static_cast<void>(OleSetClipboard(pending_clipboard_data_object_));
+      const HRESULT set_result =
+          OleSetClipboard(pending_clipboard_data_object_);
+      restored = SUCCEEDED(set_result);
+      if (restored && FAILED(OleFlushClipboard())) {
+        ++clipboard_privacy_failure_count_;
+      }
     } else if (pending_clipboard_text_present_) {
-      static_cast<void>(SetClipboardUnicodeText(pending_clipboard_text_));
+      restored = SetPrivateClipboardUnicodeText(
+          pending_clipboard_text_,
+          clipboard_privacy_formats_);
       CloseClipboard();
     } else {
-      static_cast<void>(EmptyClipboard());
+      restored = EmptyClipboard() != FALSE;
       CloseClipboard();
     }
   } else {
     CloseClipboard();
+  }
+  if (!restored) {
+    ++clipboard_privacy_failure_count_;
+    if (!stopping_ && window_ != nullptr && clipboard_restore_timer_ == 0) {
+      clipboard_restore_timer_ = SetTimer(
+          window_,
+          kClipboardRestoreTimerIdentifier,
+          kClipboardPasteSettleMilliseconds,
+          nullptr);
+    }
+    return;
   }
   pending_clipboard_text_.clear();
   if (pending_clipboard_data_object_ != nullptr) {
@@ -1754,6 +1962,474 @@ void Win32InputRuntime::RequestTrayUpdate() noexcept {
   }
 }
 
+bool Win32InputRuntime::QueueDeferredClipboardInjection(
+    const InputDecision& decision,
+    char32_t fallback_character,
+    std::uint16_t source_virtual_key,
+    const TypingContext& context) noexcept {
+  if (deferred_clipboard_queue_ == nullptr) {
+    return false;
+  }
+  deferred_clipboard_queue_->CancelProducer();
+  if (window_ == nullptr || context.bypass_typing ||
+      context.foreground_process_id == 0 || context.focus_window == 0 ||
+      decision.snippet_command == RuntimeSnippetCommand::ExternalOutput) {
+    return false;
+  }
+
+  const std::size_t text_units = decision.extended_insert.empty()
+      ? static_cast<std::size_t>(decision.insert_units)
+      : decision.extended_insert.size();
+  if (text_units == 0 ||
+      text_units > kMaximumRuntimeSnippetExpansionUtf8Bytes) {
+    return false;
+  }
+
+  auto* item = deferred_clipboard_queue_->TryReserveProducer();
+  if (item == nullptr) {
+    ++deferred_clipboard_queue_full_count_;
+    return false;
+  }
+  if (decision.extended_insert.empty()) {
+    for (std::size_t index = 0; index < text_units; ++index) {
+      item->text_storage[index] =
+          static_cast<char16_t>(decision.insert[index]);
+    }
+  } else {
+    std::copy(
+        decision.extended_insert.begin(),
+        decision.extended_insert.end(),
+        item->text_storage.begin());
+  }
+  item->kind = DeferredClipboardWorkKind::Transform;
+  item->text_units = text_units;
+  item->backspace_count = decision.backspace_count;
+  item->source_virtual_key = source_virtual_key;
+  item->fallback_character = fallback_character;
+  item->target_process_id = context.foreground_process_id;
+  item->target_focus_window = context.focus_window;
+  item->snippet_command = decision.snippet_command;
+
+  const bool needs_message = !deferred_clipboard_message_posted_ &&
+      pending_clipboard_sequence_ == 0;
+  if (needs_message &&
+      PostMessageW(
+          window_, kDeferredClipboardInjectionMessage, 0, 0) == FALSE) {
+    deferred_clipboard_queue_->CancelProducer();
+    return false;
+  }
+  if (!deferred_clipboard_queue_->CommitProducer()) {
+    return false;
+  }
+  if (needs_message) {
+    deferred_clipboard_message_posted_ = true;
+  }
+  return true;
+}
+
+bool Win32InputRuntime::QueueDeferredLiteralInjection(
+    char32_t character,
+    std::uint16_t source_virtual_key,
+    const TypingContext& context) noexcept {
+  if (deferred_clipboard_queue_ == nullptr) {
+    return false;
+  }
+  deferred_clipboard_queue_->CancelProducer();
+  if (window_ == nullptr || context.bypass_typing || character == U'\0' ||
+      character > 0x10FFFF ||
+      (character >= 0xD800 && character <= 0xDFFF) ||
+      context.foreground_process_id == 0 || context.focus_window == 0) {
+    return false;
+  }
+
+  auto* item = deferred_clipboard_queue_->TryReserveProducer();
+  if (item == nullptr) {
+    ++deferred_clipboard_queue_full_count_;
+    return false;
+  }
+  item->kind = DeferredClipboardWorkKind::Literal;
+  if (character <= 0xFFFF) {
+    item->text_storage[0] = static_cast<char16_t>(character);
+    item->text_units = 1;
+  } else {
+    const char32_t adjusted = character - 0x10000;
+    item->text_storage[0] = static_cast<char16_t>(
+        0xD800 + (adjusted >> 10));
+    item->text_storage[1] = static_cast<char16_t>(
+        0xDC00 + (adjusted & 0x3FF));
+    item->text_units = 2;
+  }
+  item->backspace_count = 0;
+  item->source_virtual_key = source_virtual_key;
+  item->fallback_character = character;
+  item->target_process_id = context.foreground_process_id;
+  item->target_focus_window = context.focus_window;
+  item->snippet_command = RuntimeSnippetCommand::None;
+
+  const bool needs_message = !deferred_clipboard_message_posted_ &&
+      pending_clipboard_sequence_ == 0;
+  if (needs_message &&
+      PostMessageW(
+          window_, kDeferredClipboardInjectionMessage, 0, 0) == FALSE) {
+    deferred_clipboard_queue_->CancelProducer();
+    return false;
+  }
+  if (!deferred_clipboard_queue_->CommitProducer()) {
+    return false;
+  }
+  if (needs_message) {
+    deferred_clipboard_message_posted_ = true;
+  }
+  return true;
+}
+
+bool Win32InputRuntime::QueueDeferredVirtualKeyInjection(
+    std::uint16_t virtual_key,
+    const TypingContext& context) noexcept {
+  if (deferred_clipboard_queue_ == nullptr ||
+      !IsDeferredOrderingVirtualKey(virtual_key)) {
+    return false;
+  }
+  deferred_clipboard_queue_->CancelProducer();
+  if (window_ == nullptr || context.bypass_typing ||
+      context.foreground_process_id == 0 || context.focus_window == 0) {
+    return false;
+  }
+
+  auto* item = deferred_clipboard_queue_->TryReserveProducer();
+  if (item == nullptr) {
+    ++deferred_clipboard_queue_full_count_;
+    return false;
+  }
+  item->kind = DeferredClipboardWorkKind::VirtualKey;
+  item->text_units = 0;
+  item->backspace_count = 0;
+  item->source_virtual_key = virtual_key;
+  item->fallback_character = U'\0';
+  item->target_process_id = context.foreground_process_id;
+  item->target_focus_window = context.focus_window;
+  item->snippet_command = RuntimeSnippetCommand::None;
+
+  const bool needs_message = !deferred_clipboard_message_posted_ &&
+      pending_clipboard_sequence_ == 0;
+  if (needs_message &&
+      PostMessageW(
+          window_, kDeferredClipboardInjectionMessage, 0, 0) == FALSE) {
+    deferred_clipboard_queue_->CancelProducer();
+    return false;
+  }
+  if (!deferred_clipboard_queue_->CommitProducer()) {
+    return false;
+  }
+  if (needs_message) {
+    deferred_clipboard_message_posted_ = true;
+  }
+  return true;
+}
+
+bool Win32InputRuntime::QueueDeferredCommandInjection(
+    const InputDecision& decision,
+    char32_t fallback_character,
+    std::uint16_t source_virtual_key,
+    const TypingContext& context) noexcept {
+  if (deferred_clipboard_queue_ == nullptr ||
+      decision.snippet_command == RuntimeSnippetCommand::None ||
+      !decision.extended_insert.empty() || decision.insert_units != 0) {
+    return false;
+  }
+  const std::size_t payload_units =
+      decision.snippet_command_payload.size();
+  if (payload_units > kMaximumRuntimeSnippetExpansionUtf8Bytes ||
+      (decision.snippet_command == RuntimeSnippetCommand::ExternalOutput &&
+       payload_units == 0)) {
+    return false;
+  }
+
+  deferred_clipboard_queue_->CancelProducer();
+  if (window_ == nullptr || context.bypass_typing ||
+      context.foreground_process_id == 0 || context.focus_window == 0) {
+    return false;
+  }
+  auto* item = deferred_clipboard_queue_->TryReserveProducer();
+  if (item == nullptr) {
+    ++deferred_clipboard_queue_full_count_;
+    return false;
+  }
+  if (payload_units != 0) {
+    std::copy(
+        decision.snippet_command_payload.begin(),
+        decision.snippet_command_payload.end(),
+        item->text_storage.begin());
+  }
+  item->kind = DeferredClipboardWorkKind::Command;
+  item->text_units = payload_units;
+  item->backspace_count = decision.backspace_count;
+  item->source_virtual_key = source_virtual_key;
+  item->fallback_character = fallback_character;
+  item->target_process_id = context.foreground_process_id;
+  item->target_focus_window = context.focus_window;
+  item->snippet_command = decision.snippet_command;
+
+  const bool needs_message = !deferred_clipboard_message_posted_ &&
+      pending_clipboard_sequence_ == 0;
+  if (needs_message &&
+      PostMessageW(
+          window_, kDeferredClipboardInjectionMessage, 0, 0) == FALSE) {
+    deferred_clipboard_queue_->CancelProducer();
+    return false;
+  }
+  if (!deferred_clipboard_queue_->CommitProducer()) {
+    return false;
+  }
+  if (needs_message) {
+    deferred_clipboard_message_posted_ = true;
+  }
+  return true;
+}
+
+void Win32InputRuntime::RequestDeferredClipboardDrain() noexcept {
+  if (stopping_ || window_ == nullptr ||
+      deferred_clipboard_message_posted_ ||
+      pending_clipboard_sequence_ != 0 ||
+      deferred_clipboard_queue_ == nullptr ||
+      deferred_clipboard_queue_->empty()) {
+    return;
+  }
+  if (PostMessageW(
+          window_, kDeferredClipboardInjectionMessage, 0, 0) != FALSE) {
+    deferred_clipboard_message_posted_ = true;
+  }
+}
+
+Win32InputRuntime::TargetInjectionResult
+Win32InputRuntime::InjectDeferredFallback(
+    char32_t fallback_character,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
+  if (fallback_character == U'\0' ||
+      !IsDeferredTargetCurrent(
+          target_process_id,
+          target_focus_window)) {
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+  const InputSubmissionResult submission =
+      SubmitLiteralUnicodeCharacter(fallback_character);
+  if (submission.complete) {
+    return TargetInjectionResult::Succeeded;
+  }
+  return submission.inserted == 0
+      ? TargetInjectionResult::FailedBeforeMutation
+      : TargetInjectionResult::FailedAfterPossibleMutation;
+}
+
+Win32InputRuntime::TargetInjectionResult
+Win32InputRuntime::InjectDeferredVirtualKey(
+    std::uint16_t virtual_key,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
+  if (!IsDeferredOrderingVirtualKey(virtual_key) ||
+      !IsDeferredTargetCurrent(
+          target_process_id,
+          target_focus_window)) {
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+  const InputSubmissionResult submission =
+      SubmitVirtualKeyPair(virtual_key);
+  if (submission.complete) {
+    return TargetInjectionResult::Succeeded;
+  }
+  return submission.inserted == 0
+      ? TargetInjectionResult::FailedBeforeMutation
+      : TargetInjectionResult::FailedAfterPossibleMutation;
+}
+
+Win32InputRuntime::TargetInjectionResult
+Win32InputRuntime::InjectDeferredCommand(
+    RuntimeSnippetCommand command,
+    std::uint16_t backspace_count,
+    std::u16string_view payload,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
+  if (command == RuntimeSnippetCommand::None ||
+      !IsDeferredTargetCurrent(
+          target_process_id,
+          target_focus_window)) {
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+
+  const bool external = command == RuntimeSnippetCommand::ExternalOutput;
+  if (external && !ReserveExternalSnippetCommand(
+          payload, target_process_id, target_focus_window)) {
+    return TargetInjectionResult::FailedBeforeMutation;
+  }
+
+  InputDecision erase{};
+  erase.suppress = true;
+  erase.backspace_count = backspace_count;
+  const std::size_t required = RequiredKeyboardInputEvents(erase);
+  InputSubmissionResult submission{true, 0};
+  if (required != 0) {
+    if (required > kMaximumKeyboardInputEvents) {
+      if (external) {
+        external_command_queue_.CancelProducer();
+      }
+      return TargetInjectionResult::FailedBeforeMutation;
+    }
+    std::array<INPUT, kMaximumKeyboardInputEvents> inputs{};
+    const std::size_t count = BuildKeyboardInputSequence(
+        erase,
+        std::span<INPUT>(inputs.data(), required));
+    if (count != required) {
+      if (external) {
+        external_command_queue_.CancelProducer();
+      }
+      return TargetInjectionResult::FailedBeforeMutation;
+    }
+    submission = SubmitInputSequence<kMaximumKeyboardInputEvents>(
+        std::span<INPUT>(inputs.data(), count));
+  }
+
+  if (!submission.complete) {
+    if (external) {
+      external_command_queue_.CancelProducer();
+    }
+    return submission.inserted == 0
+        ? TargetInjectionResult::FailedBeforeMutation
+        : TargetInjectionResult::FailedAfterPossibleMutation;
+  }
+
+  if (external) {
+    CommitDeferredSnippetCommand(command);
+  } else {
+    ExecuteSnippetAction(command);
+  }
+  return TargetInjectionResult::Succeeded;
+}
+
+void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
+  deferred_clipboard_message_posted_ = false;
+  if (pending_clipboard_sequence_ != 0 ||
+      deferred_clipboard_queue_ == nullptr) {
+    return;
+  }
+  bool transform_state_valid = true;
+  bool raw_fallback_safe = true;
+
+  for (;;) {
+    auto* item = deferred_clipboard_queue_->TryPeekConsumer();
+    if (item == nullptr) {
+      break;
+    }
+
+    const bool transform_item =
+        item->kind == DeferredClipboardWorkKind::Transform;
+    const bool literal_item =
+        item->kind == DeferredClipboardWorkKind::Literal;
+    const bool command_item =
+        item->kind == DeferredClipboardWorkKind::Command;
+    auto inject_degraded_item = [&]() noexcept {
+      return item->kind == DeferredClipboardWorkKind::VirtualKey
+          ? InjectDeferredVirtualKey(
+                item->source_virtual_key,
+                item->target_process_id,
+                item->target_focus_window)
+          : InjectDeferredFallback(
+                item->fallback_character,
+                item->target_process_id,
+                item->target_focus_window);
+    };
+
+    if (transform_state_valid) {
+      TargetInjectionResult result =
+          TargetInjectionResult::FailedBeforeMutation;
+      if (transform_item) {
+        InputDecision decision{};
+        decision.suppress = true;
+        decision.backspace_count = item->backspace_count;
+        decision.extended_insert = std::u16string_view(
+            item->text_storage.data(), item->text_units);
+        result = InjectViaClipboard(
+            decision,
+            item->target_process_id,
+            item->target_focus_window);
+      } else if (command_item) {
+        result = InjectDeferredCommand(
+            item->snippet_command,
+            item->backspace_count,
+            std::u16string_view(
+                item->text_storage.data(), item->text_units),
+            item->target_process_id,
+            item->target_focus_window);
+      } else {
+        result = inject_degraded_item();
+      }
+
+      if (result == TargetInjectionResult::Succeeded) {
+        ++successful_injection_count_;
+        if (transform_item) {
+          ExecuteSnippetAction(item->snippet_command);
+        } else if (literal_item) {
+          ++deferred_literal_injection_count_;
+        } else if (!command_item) {
+          ++deferred_virtual_key_injection_count_;
+        }
+      } else {
+        ++failed_injection_count_;
+        transform_state_valid = false;
+        raw_fallback_safe =
+            result == TargetInjectionResult::FailedBeforeMutation;
+        controller_.Reset();
+        RequestPointerRegistration(false);
+        RequestSnippetOverlayUpdate();
+        if (pressed_keys_.Get(item->source_virtual_key)) {
+          owned_text_keys_.Set(item->source_virtual_key, true);
+        }
+        if ((transform_item || command_item) && raw_fallback_safe) {
+          const TargetInjectionResult fallback_result =
+              inject_degraded_item();
+          if (fallback_result == TargetInjectionResult::Succeeded) {
+            ++deferred_clipboard_fallback_count_;
+          } else {
+            raw_fallback_safe = false;
+          }
+        } else {
+          raw_fallback_safe = false;
+        }
+      }
+    } else {
+      ++failed_injection_count_;
+      if (pressed_keys_.Get(item->source_virtual_key)) {
+        owned_text_keys_.Set(item->source_virtual_key, true);
+      }
+      if (raw_fallback_safe) {
+        const TargetInjectionResult fallback_result =
+            inject_degraded_item();
+        if (fallback_result == TargetInjectionResult::Succeeded) {
+          ++deferred_clipboard_fallback_count_;
+        } else {
+          raw_fallback_safe = false;
+        }
+      }
+    }
+
+    item->kind = DeferredClipboardWorkKind::Transform;
+    item->text_units = 0;
+    item->backspace_count = 0;
+    item->source_virtual_key = 0;
+    item->fallback_character = U'\0';
+    item->target_process_id = 0;
+    item->target_focus_window = 0;
+    item->snippet_command = RuntimeSnippetCommand::None;
+    static_cast<void>(deferred_clipboard_queue_->PopConsumer());
+    if (pending_clipboard_sequence_ != 0) {
+      // Ctrl+V is asynchronous. Do not replace/restore the clipboard for the
+      // next transaction until the settle timer confirms the first paste had
+      // a chance to consume its private payload.
+      return;
+    }
+  }
+}
+
 bool Win32InputRuntime::PrepareDeferredSnippetCommand(
     const InputDecision& decision) noexcept {
   external_command_queue_.CancelProducer();
@@ -1776,13 +2452,20 @@ bool Win32InputRuntime::PrepareDeferredSnippetCommand(
       return false;
   }
 
+  return ReserveExternalSnippetCommand(
+      decision.snippet_command_payload,
+      decision.snippet_target_process_id,
+      decision.snippet_target_focus_window);
+}
+
+bool Win32InputRuntime::ReserveExternalSnippetCommand(
+    std::u16string_view payload,
+    std::uint32_t target_process_id,
+    std::uintptr_t target_focus_window) noexcept {
   if (external_command_thread_ == nullptr ||
-      external_command_event_ == nullptr ||
-      decision.snippet_command_payload.empty() ||
-      decision.snippet_command_payload.size() >
-          kMaximumRuntimeSnippetExpansionUtf8Bytes ||
-      decision.snippet_target_process_id == 0 ||
-      decision.snippet_target_focus_window == 0 ||
+      external_command_event_ == nullptr || payload.empty() ||
+      payload.size() > kMaximumRuntimeSnippetExpansionUtf8Bytes ||
+      target_process_id == 0 || target_focus_window == 0 ||
       shell_execute_ == nullptr) {
     return false;
   }
@@ -1792,14 +2475,10 @@ bool Win32InputRuntime::PrepareDeferredSnippetCommand(
     dropped_external_command_count_.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
-
-  std::copy(
-      decision.snippet_command_payload.begin(),
-      decision.snippet_command_payload.end(),
-      item->payload.begin());
-  item->payload_units = decision.snippet_command_payload.size();
-  item->target_process_id = decision.snippet_target_process_id;
-  item->target_focus_window = decision.snippet_target_focus_window;
+  std::copy(payload.begin(), payload.end(), item->payload.begin());
+  item->payload_units = payload.size();
+  item->target_process_id = target_process_id;
+  item->target_focus_window = target_focus_window;
   return true;
 }
 
@@ -1831,17 +2510,33 @@ void Win32InputRuntime::HandleDeferredSnippetActions() noexcept {
   const std::uint32_t actions =
       pending_snippet_actions_.exchange(0, std::memory_order_acq_rel);
   if ((actions & kPendingToggleVietnameseAction) != 0) {
-    profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
-    controller_.ApplyProfile(profile_);
-    RequestPointerRegistration(false);
-    UpdateTray();
-    static_cast<void>(QueueManagedCommand(
-        profile_.vietnamese_enabled
-            ? RuntimeCommand::SetVietnameseEnabled
-            : RuntimeCommand::SetVietnameseDisabled));
+    ExecuteSnippetAction(RuntimeSnippetCommand::ToggleVietnamese);
   }
   if ((actions & kPendingToggleDictationAction) != 0) {
-    static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+    ExecuteSnippetAction(RuntimeSnippetCommand::ToggleDictation);
+  }
+}
+
+void Win32InputRuntime::ExecuteSnippetAction(
+    RuntimeSnippetCommand command) noexcept {
+  switch (command) {
+    case RuntimeSnippetCommand::ToggleVietnamese:
+      profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+      controller_.ApplyProfile(profile_);
+      RequestPointerRegistration(false);
+      UpdateTray();
+      static_cast<void>(QueueManagedCommand(
+          profile_.vietnamese_enabled
+              ? RuntimeCommand::SetVietnameseEnabled
+              : RuntimeCommand::SetVietnameseDisabled));
+      break;
+    case RuntimeSnippetCommand::ToggleDictation:
+      static_cast<void>(QueueManagedCommand(RuntimeCommand::ToggleDictation));
+      break;
+    case RuntimeSnippetCommand::None:
+    case RuntimeSnippetCommand::ExternalOutput:
+    default:
+      break;
   }
 }
 

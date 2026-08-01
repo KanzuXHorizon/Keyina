@@ -46,6 +46,14 @@ enum class TextDeliveryMode : std::uint8_t {
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept;
 
+// Builds best-effort key-up events for every keyboard key-down accepted by a
+// partial SendInput call. The sequence is reversed so ordinary keys are
+// released before their modifiers.
+[[nodiscard]] std::size_t BuildPartialInputRecoverySequence(
+    std::span<const INPUT> submitted,
+    std::size_t inserted_count,
+    std::span<INPUT> destination) noexcept;
+
 [[nodiscard]] bool ShouldRestoreClipboard(
     DWORD owned_sequence,
     DWORD current_sequence) noexcept;

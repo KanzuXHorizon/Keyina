@@ -1,6 +1,7 @@
 #pragma once
 
 #include <keyina/windows/bounded_spsc_queue.h>
+#include <keyina/windows/clipboard_privacy.h>
 #include <keyina/windows/native_latency_histogram.h>
 #include <keyina/windows/resident_input_controller.h>
 #include <keyina/windows/runtime_hotkeys.h>
@@ -13,6 +14,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace keyina::windows {
@@ -111,6 +113,36 @@ class Win32InputRuntime {
     return dropped_external_command_count_.load(std::memory_order_relaxed);
   }
 
+  [[nodiscard]] std::uint64_t clipboard_privacy_write_count()
+      const noexcept {
+    return clipboard_privacy_write_count_;
+  }
+
+  [[nodiscard]] std::uint64_t clipboard_privacy_failure_count()
+      const noexcept {
+    return clipboard_privacy_failure_count_;
+  }
+
+  [[nodiscard]] std::uint64_t deferred_clipboard_queue_full_count()
+      const noexcept {
+    return deferred_clipboard_queue_full_count_;
+  }
+
+  [[nodiscard]] std::uint64_t deferred_clipboard_fallback_count()
+      const noexcept {
+    return deferred_clipboard_fallback_count_;
+  }
+
+  [[nodiscard]] std::uint64_t deferred_literal_injection_count()
+      const noexcept {
+    return deferred_literal_injection_count_;
+  }
+
+  [[nodiscard]] std::uint64_t deferred_virtual_key_injection_count()
+      const noexcept {
+    return deferred_virtual_key_injection_count_;
+  }
+
   [[nodiscard]] NativeLatencySnapshot callback_latency_snapshot()
       const noexcept {
     return callback_latency_histogram_.Snapshot();
@@ -136,6 +168,19 @@ class Win32InputRuntime {
   }
 
  private:
+  enum class TargetInjectionResult : std::uint8_t {
+    Succeeded = 0,
+    FailedBeforeMutation,
+    FailedAfterPossibleMutation,
+  };
+
+  enum class DeferredClipboardWorkKind : std::uint8_t {
+    Transform = 0,
+    Literal,
+    VirtualKey,
+    Command,
+  };
+
   class KeyStateSet {
    public:
     [[nodiscard]] bool Get(std::uint16_t key) const noexcept;
@@ -161,12 +206,26 @@ class Win32InputRuntime {
   [[nodiscard]] bool RequiresSelectionReplacementTarget(
       std::uintptr_t focus_window) noexcept;
   [[nodiscard]] bool Inject(
-      const InputDecision& decision,
-      std::uintptr_t target_focus_window = 0) noexcept;
+      const InputDecision& decision) noexcept;
   [[nodiscard]] bool InjectWithSelectionReplacement(
       const InputDecision& decision) noexcept;
-  [[nodiscard]] bool InjectViaClipboard(
+  [[nodiscard]] TargetInjectionResult InjectViaClipboard(
       const InputDecision& decision,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
+  [[nodiscard]] TargetInjectionResult InjectDeferredFallback(
+      char32_t fallback_character,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
+  [[nodiscard]] TargetInjectionResult InjectDeferredVirtualKey(
+      std::uint16_t virtual_key,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
+  [[nodiscard]] TargetInjectionResult InjectDeferredCommand(
+      RuntimeSnippetCommand command,
+      std::uint16_t backspace_count,
+      std::u16string_view payload,
+      std::uint32_t target_process_id,
       std::uintptr_t target_focus_window) noexcept;
   void RestorePendingClipboard() noexcept;
   [[nodiscard]] bool IsPointerResetPacket(HRAWINPUT input) noexcept;
@@ -175,11 +234,35 @@ class Win32InputRuntime {
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
   void RequestSnippetOverlayUpdate() noexcept;
   void RequestTrayUpdate() noexcept;
+  [[nodiscard]] bool QueueDeferredClipboardInjection(
+      const InputDecision& decision,
+      char32_t fallback_character,
+      std::uint16_t source_virtual_key,
+      const TypingContext& context) noexcept;
+  [[nodiscard]] bool QueueDeferredLiteralInjection(
+      char32_t character,
+      std::uint16_t source_virtual_key,
+      const TypingContext& context) noexcept;
+  [[nodiscard]] bool QueueDeferredVirtualKeyInjection(
+      std::uint16_t virtual_key,
+      const TypingContext& context) noexcept;
+  [[nodiscard]] bool QueueDeferredCommandInjection(
+      const InputDecision& decision,
+      char32_t fallback_character,
+      std::uint16_t source_virtual_key,
+      const TypingContext& context) noexcept;
+  void RequestDeferredClipboardDrain() noexcept;
+  void HandleDeferredClipboardInjections() noexcept;
   [[nodiscard]] bool PrepareDeferredSnippetCommand(
       const InputDecision& decision) noexcept;
+  [[nodiscard]] bool ReserveExternalSnippetCommand(
+      std::u16string_view payload,
+      std::uint32_t target_process_id,
+      std::uintptr_t target_focus_window) noexcept;
   void CommitDeferredSnippetCommand(
       RuntimeSnippetCommand command) noexcept;
   void HandleDeferredSnippetActions() noexcept;
+  void ExecuteSnippetAction(RuntimeSnippetCommand command) noexcept;
   [[nodiscard]] bool StartExternalCommandWorker() noexcept;
   void StopExternalCommandWorker() noexcept;
   DWORD RunExternalCommandWorker() noexcept;
@@ -267,9 +350,38 @@ class Win32InputRuntime {
   std::uint64_t pointer_reset_count_{};
   std::uint64_t standard_edit_replace_count_{};
   std::uint64_t typing_context_capture_count_{};
+  std::uint64_t clipboard_privacy_write_count_{};
+  std::uint64_t clipboard_privacy_failure_count_{};
+  ClipboardPrivacyFormats clipboard_privacy_formats_{};
   bool snippet_overlay_update_posted_{false};
   bool tray_update_posted_{false};
+  bool deferred_clipboard_message_posted_{false};
   std::atomic_uint32_t pending_snippet_actions_{};
+
+  struct DeferredClipboardWorkItem {
+    std::array<char16_t, kMaximumRuntimeSnippetExpansionUtf8Bytes>
+        text_storage{};
+    DeferredClipboardWorkKind kind{DeferredClipboardWorkKind::Transform};
+    std::size_t text_units{};
+    std::uint16_t backspace_count{};
+    std::uint16_t source_virtual_key{};
+    char32_t fallback_character{};
+    std::uint32_t target_process_id{};
+    std::uintptr_t target_focus_window{};
+    RuntimeSnippetCommand snippet_command{RuntimeSnippetCommand::None};
+  };
+  // Sixty-four queued keystrokes cover large SendInput bursts before the
+  // posted transaction message runs. The queue is heap-backed once at Start,
+  // so this adds no callback allocation and stays within the 10 MiB budget.
+  static constexpr std::size_t kDeferredClipboardQueueStorage = 65;
+  using DeferredClipboardQueue = BoundedSpscQueue<
+      DeferredClipboardWorkItem,
+      kDeferredClipboardQueueStorage>;
+  std::unique_ptr<DeferredClipboardQueue> deferred_clipboard_queue_{};
+  std::uint64_t deferred_clipboard_queue_full_count_{};
+  std::uint64_t deferred_clipboard_fallback_count_{};
+  std::uint64_t deferred_literal_injection_count_{};
+  std::uint64_t deferred_virtual_key_injection_count_{};
 
   struct ExternalSnippetWorkItem {
     std::array<char16_t, kMaximumRuntimeSnippetExpansionUtf8Bytes> payload{};

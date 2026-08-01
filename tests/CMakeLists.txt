@@ -21,6 +21,7 @@ target_include_directories(keyina_tests PRIVATE
 if(WIN32)
   target_sources(keyina_tests PRIVATE
     windows/bounded_spsc_queue_test.cpp
+    windows/clipboard_privacy_test.cpp
     windows/input_injection_test.cpp
     windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
@@ -29,6 +30,7 @@ if(WIN32)
     windows/runtime_profile_test.cpp
     windows/runtime_snippet_matcher_test.cpp
     windows/runtime_snippet_profile_test.cpp
+    windows/standard_edit_replacement_test.cpp
   )
   target_link_libraries(keyina_tests PRIVATE keyina::windows_input)
 endif()

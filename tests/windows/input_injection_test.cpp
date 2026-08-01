@@ -93,6 +93,55 @@ KEYINA_TEST(native_chromium_replacement_selects_text_before_inserting_unicode) {
                    static_cast<DWORD>(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
 }
 
+KEYINA_TEST(native_partial_input_recovery_releases_only_unmatched_keys) {
+  keyina::windows::InputDecision decision{};
+  decision.suppress = true;
+  decision.backspace_count = 2;
+  decision.insert_units = 1;
+  decision.insert[0] = L'x';
+  std::array<INPUT, 16> submitted{};
+  const std::size_t submitted_count =
+      keyina::windows::BuildClipboardPasteSequence(decision, submitted);
+  KEYINA_EXPECT_EQ(submitted_count, std::size_t{10});
+
+  std::array<INPUT, 16> recovery{};
+  const std::size_t recovery_count =
+      keyina::windows::BuildPartialInputRecoverySequence(
+          std::span<const INPUT>(submitted.data(), submitted_count),
+          8,
+          recovery);
+
+  KEYINA_EXPECT_EQ(recovery_count, std::size_t{2});
+  KEYINA_EXPECT_EQ(recovery[0].ki.wVk, static_cast<WORD>('V'));
+  KEYINA_EXPECT_EQ(recovery[1].ki.wVk, static_cast<WORD>(VK_CONTROL));
+  for (std::size_t index = 0; index < recovery_count; ++index) {
+    KEYINA_EXPECT_TRUE(
+        (recovery[index].ki.dwFlags & KEYEVENTF_KEYUP) != 0);
+    KEYINA_EXPECT_EQ(
+        recovery[index].ki.dwExtraInfo,
+        keyina::windows::kKeyinaInjectionMarker);
+  }
+}
+
+KEYINA_TEST(native_partial_input_recovery_handles_unicode_key_down) {
+  std::array<INPUT, 4> submitted{};
+  const std::size_t submitted_count =
+      keyina::windows::BuildLiteralUnicodeInputSequence(U'😀', submitted);
+  KEYINA_EXPECT_EQ(submitted_count, std::size_t{4});
+
+  std::array<INPUT, 4> recovery{};
+  const std::size_t recovery_count =
+      keyina::windows::BuildPartialInputRecoverySequence(
+          std::span<const INPUT>(submitted.data(), submitted_count),
+          3,
+          recovery);
+  KEYINA_EXPECT_EQ(recovery_count, std::size_t{1});
+  KEYINA_EXPECT_EQ(recovery[0].ki.wScan, static_cast<WORD>(0xDE00));
+  KEYINA_EXPECT_EQ(
+      recovery[0].ki.dwFlags,
+      static_cast<DWORD>(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+}
+
 KEYINA_TEST(native_clipboard_restore_requires_the_same_clipboard_sequence) {
   KEYINA_EXPECT_TRUE(keyina::windows::ShouldRestoreClipboard(42, 42));
   KEYINA_EXPECT_TRUE(!keyina::windows::ShouldRestoreClipboard(42, 43));
