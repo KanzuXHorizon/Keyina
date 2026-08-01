@@ -1,8 +1,11 @@
 #include <keyina/windows/resident_input_controller.h>
 
+#include <keyina/input_character_classification.h>
+
 #include "../test_support.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -323,6 +326,79 @@ KEYINA_TEST(resident_input_controller_disarms_pointer_observation_on_boundary) {
   Type(controller, visible, U" ");
   KEYINA_EXPECT_EQ(visible, std::u16string{u"á "});
   KEYINA_EXPECT_TRUE(!controller.pointer_observation_required());
+}
+
+KEYINA_TEST(resident_input_controller_classifies_literal_text_boundaries) {
+  constexpr std::array<char32_t, 31> boundaries = {
+      U'0', U'9', U'/', U'\\', U'-', U'_', U'@', U'#', U'$', U'%',
+      U'^', U'&', U'*', U'(', U'[', U'{', U'\'', U'`', U'+', U'=',
+      U'<', U'>', U'|', U'~', U'.', U',', U':', U';', U'!', U'?',
+      U'é',
+  };
+
+  for (const char32_t boundary : boundaries) {
+    KEYINA_EXPECT_EQ(
+        keyina::ClassifyInputCharacter(boundary, false),
+        keyina::InputCharacterClass::CommitBoundary);
+  }
+}
+
+KEYINA_TEST(resident_input_controller_preserves_boundary_token_integrity) {
+  struct BoundaryCase {
+    std::u32string_view raw;
+    std::u16string_view expected;
+  };
+  constexpr std::array<BoundaryCase, 11> cases = {{
+      {U"as/s", u"as/s"},
+      {U"as-s", u"á-s"},
+      {U"as_1", u"as_1"},
+      {U"as@example.com", u"as@example.com"},
+      {U"as\\path", u"as\\path"},
+      {U"as/path", u"as/path"},
+      {U"as#tag", u"á#tag"},
+      {U"as(abc)", u"á(abc)"},
+      {U"as'quoted", u"á'quoted"},
+      {U"as`code", u"á`code"},
+      {U"as=value", u"as=value"},
+  }};
+
+  for (const auto& test : cases) {
+    ResidentInputController controller(
+        keyina::windows::DefaultRuntimeInputProfile());
+    std::u16string visible;
+    Type(controller, visible, test.raw);
+    KEYINA_EXPECT_EQ(visible, std::u16string{test.expected});
+  }
+}
+
+KEYINA_TEST(resident_input_controller_does_not_restore_stale_composition_after_raw_boundary) {
+  ResidentInputController controller(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(controller, visible, U"as/");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"as/"});
+
+  PhysicalKeyEvent backspace{};
+  backspace.virtual_key = 0x08;
+  backspace.key_down = true;
+  KEYINA_EXPECT_TRUE(
+      !controller.Process(backspace, kOrdinaryContext).suppress);
+  visible.pop_back();
+
+  Type(controller, visible, U"s");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"ass"});
+}
+
+KEYINA_TEST(resident_input_controller_preserves_quick_telex_across_boundaries) {
+  auto profile = RuntimeInputProfile{};
+  profile.quick_telex_letters = true;
+  ResidentInputController controller(profile);
+  std::u16string visible;
+
+  Type(controller, visible, U"[/]");
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"ư/ơ"});
 }
 
 KEYINA_TEST(resident_input_controller_restores_word_after_deleting_boundary) {

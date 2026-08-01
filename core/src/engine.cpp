@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <keyina/context_guard.h>
+#include <keyina/input_character_classification.h>
 #include <keyina/vietnamese.h>
 #include <keyina/vietnamese_syllable.h>
 
@@ -549,10 +550,35 @@ TextEditView Engine::ProcessView(const KeyEvent& event) {
     return {};
   }
   if (event.kind == KeyKind::CommitBoundary) {
-    // Match established Vietnamese IME behavior: separators only commit the
-    // current composition. They must never rewrite the word that the user has
-    // already seen, because that feels like autocorrect and makes Space
-    // destructive.
+    // Ordinary separators only commit the current composition. Technical
+    // separators are different: together with the raw keys they can reveal
+    // that the token is an identifier, path, URL, email, version, or shell
+    // token. Restore that raw token before committing so a partially composed
+    // Vietnamese syllable never corrupts technical text.
+    const bool contains_quick_telex_character =
+        config_.quick_telex_letters &&
+        std::any_of(
+            raw_keys_.begin(),
+            raw_keys_.end(),
+            IsQuickTelexCompositionCharacter);
+    if (!contains_quick_telex_character &&
+        !raw_keys_.empty() && event.character != U'\0') {
+      literal_text_buffer_.assign(raw_keys_);
+      literal_text_buffer_.push_back(event.character);
+      const GuardResult guard = ClassifyToken(literal_text_buffer_, {});
+      if (!guard.transform && visible_text_ != raw_keys_) {
+        const std::size_t erase_codepoints = visible_text_.size();
+        edit_buffer_.assign(raw_keys_);
+        edit_buffer_.push_back(event.character);
+        ResetCompositionState();
+        return {
+            erase_codepoints,
+            edit_buffer_,
+            true,
+            false,
+        };
+      }
+    }
     ResetCompositionState();
     return {};
   }

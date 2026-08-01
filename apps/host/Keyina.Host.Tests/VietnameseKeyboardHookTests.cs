@@ -322,6 +322,41 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("hâhhâhhâhh.", injector.Text);
     }
 
+    [KeyinaTest("resident hook preserves literal token boundaries")]
+    private static void HookPreservesLiteralTokenBoundaries()
+    {
+        (string Raw, string Expected)[] cases =
+        [
+            ("as/s", "as/s"),
+            ("as-s", "á-s"),
+            ("as_1", "as_1"),
+            ("as@example.com", "as@example.com"),
+            ("as\\path", "as\\path"),
+            ("as/path", "as/path"),
+            ("as#tag", "á#tag"),
+            ("as(abc)", "á(abc)"),
+            ("as'quoted", "á'quoted"),
+            ("as`code", "á`code"),
+            ("as=value", "as=value"),
+        ];
+
+        foreach (var testCase in cases)
+        {
+            var native = new FakeHookNativeApi();
+            var injector = new TextModelInjector();
+            native.Target = injector;
+            using var hook = new VietnameseKeyboardHook(
+                new NativeEngineClient(),
+                injector,
+                native);
+            hook.Start(enabledInitially: true);
+
+            Type(native, testCase.Raw);
+
+            AssertEx.Equal(testCase.Expected, injector.Text);
+        }
+    }
+
     [KeyinaTest("resident hook preserves Caps Lock casing while applying Telex")]
     private static void CapsLockCasingIsStable()
     {

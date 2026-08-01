@@ -483,8 +483,7 @@ int wmain(int argc, wchar_t** argv) {
       Fail(L"Context Guard did not restore raw technical-token keys");
       break;
     }
-    if (!SendKey(key_sink, context, VK_SPACE) ||
-        !HasActiveComposition(context, false)) {
+    if (!HasActiveComposition(context, false)) {
       Fail(L"technical token boundary did not end composition");
       break;
     }
@@ -512,7 +511,7 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     BSTR empty_suffix = SysAllocStringLen(nullptr, 0);
-    BSTR final_text = SysAllocString(L"xin chào");
+    BSTR final_text = SysAllocString(L" xin chào");
     result = test_control->ApplyExternalText(
         focus_generation, empty_suffix, final_text);
     SysFreeString(empty_suffix);

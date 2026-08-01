@@ -720,6 +720,22 @@ HRESULT TextService::ApplyRoute(ITfContext* context,
   }
 
   if (route.kind == KeyRouteKind::Boundary) {
+    const std::u32string previous_visible{engine_.VisibleText()};
+    const TextEdit boundary_edit = engine_.Process(
+        KeyEvent{KeyKind::CommitBoundary, route.character});
+    if (boundary_edit.consumed) {
+      HRESULT result = ApplyEngineEdit(
+          context,
+          edit_cookie,
+          boundary_edit,
+          previous_visible);
+      if (FAILED(result)) {
+        engine_.Reset();
+        return result;
+      }
+      return EndComposition(edit_cookie);
+    }
+
     HRESULT result = EndComposition(edit_cookie);
     engine_.Reset();
     if (FAILED(result)) {

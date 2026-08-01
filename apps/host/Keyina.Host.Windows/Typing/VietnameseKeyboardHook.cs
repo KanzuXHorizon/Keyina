@@ -582,8 +582,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
     }
 
     private static bool IsCommitBoundaryCharacter(Rune character) =>
-        character.Value is '.' or ',' or ';' or ':' or '!' or '?' or
-            ')' or ']' or '}' or '"';
+        character.Value != 0 && !IsSupportedCharacter(character);
 
     private static bool IsResetBoundary(int virtualKey) => virtualKey is
         0x09 or 0x0D or 0x1B or 0x21 or 0x22 or 0x23 or 0x24 or

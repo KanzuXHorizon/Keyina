@@ -2,12 +2,24 @@
 
 #include <windows.h>
 
+#include <keyina/input_character_classification.h>
+
 #include <array>
 
 namespace keyina::tsf {
 namespace {
 
 constexpr KeyRoute PassThrough() noexcept { return {}; }
+
+constexpr KeyRoute RouteTextCharacter(char32_t character) noexcept {
+  return {
+      ClassifyInputCharacter(character, false) ==
+              InputCharacterClass::Composition
+          ? KeyRouteKind::Character
+          : KeyRouteKind::Boundary,
+      character,
+  };
+}
 
 constexpr KeyRoute OwnedOnly(KeyRoute route,
                              bool active_composition) noexcept {
@@ -50,13 +62,11 @@ constexpr KeyRoute RouteBoundary(std::uint32_t virtual_key,
     case VK_RETURN:
       return {KeyRouteKind::Boundary, U'\n'};
     case VK_OEM_COMMA:
-      return {KeyRouteKind::Boundary, shift ? U'<' : U','};
+      return RouteTextCharacter(shift ? U'<' : U',');
     case VK_OEM_1:
-      return shift ? KeyRoute{KeyRouteKind::Character, U':'}
-                   : KeyRoute{KeyRouteKind::Boundary, U';'};
+      return RouteTextCharacter(shift ? U':' : U';');
     case VK_OEM_2:
-      return shift ? KeyRoute{KeyRouteKind::Boundary, U'?'}
-                   : KeyRoute{KeyRouteKind::Character, U'/'};
+      return RouteTextCharacter(shift ? U'?' : U'/');
     default:
       return PassThrough();
   }
@@ -66,31 +76,31 @@ constexpr KeyRoute RouteTechnical(std::uint32_t virtual_key,
                                   bool shift) noexcept {
   switch (virtual_key) {
     case VK_ADD:
-      return {KeyRouteKind::Character, U'+'};
+      return RouteTextCharacter(U'+');
     case VK_SUBTRACT:
-      return {KeyRouteKind::Character, U'-'};
+      return RouteTextCharacter(U'-');
     case VK_MULTIPLY:
-      return {KeyRouteKind::Character, U'*'};
+      return RouteTextCharacter(U'*');
     case VK_DIVIDE:
-      return {KeyRouteKind::Character, U'/'};
+      return RouteTextCharacter(U'/');
     case VK_DECIMAL:
-      return {KeyRouteKind::Character, U'.'};
+      return RouteTextCharacter(U'.');
     case VK_OEM_MINUS:
-      return {KeyRouteKind::Character, shift ? U'_' : U'-'};
+      return RouteTextCharacter(shift ? U'_' : U'-');
     case VK_OEM_PLUS:
-      return {KeyRouteKind::Character, shift ? U'+' : U'='};
+      return RouteTextCharacter(shift ? U'+' : U'=');
     case VK_OEM_PERIOD:
-      return {KeyRouteKind::Character, shift ? U'>' : U'.'};
+      return RouteTextCharacter(shift ? U'>' : U'.');
     case VK_OEM_3:
-      return {KeyRouteKind::Character, shift ? U'~' : U'`'};
+      return RouteTextCharacter(shift ? U'~' : U'`');
     case VK_OEM_4:
-      return {KeyRouteKind::Character, shift ? U'{' : U'['};
+      return RouteTextCharacter(shift ? U'{' : U'[');
     case VK_OEM_5:
-      return {KeyRouteKind::Character, shift ? U'|' : U'\\'};
+      return RouteTextCharacter(shift ? U'|' : U'\\');
     case VK_OEM_6:
-      return {KeyRouteKind::Character, shift ? U'}' : U']'};
+      return RouteTextCharacter(shift ? U'}' : U']');
     case VK_OEM_7:
-      return {KeyRouteKind::Character, shift ? U'"' : U'\''};
+      return RouteTextCharacter(shift ? U'"' : U'\'');
     default:
       return PassThrough();
   }
@@ -129,7 +139,7 @@ KeyRoute RouteKey(const KeyRoutingInput& input) noexcept {
   if (input.virtual_key >= VK_NUMPAD0 && input.virtual_key <= VK_NUMPAD9) {
     const char32_t character =
         U'0' + static_cast<char32_t>(input.virtual_key - VK_NUMPAD0);
-    return OwnedOnly({KeyRouteKind::Character, character},
+    return OwnedOnly(RouteTextCharacter(character),
                      input.active_composition);
   }
 
@@ -138,14 +148,7 @@ KeyRoute RouteKey(const KeyRoutingInput& input) noexcept {
     const char32_t character =
         input.shift ? ShiftedDigit(input.virtual_key)
                     : static_cast<char32_t>(input.virtual_key);
-    if (input.shift &&
-        (input.virtual_key == static_cast<std::uint32_t>('1') ||
-         input.virtual_key == static_cast<std::uint32_t>('9') ||
-         input.virtual_key == static_cast<std::uint32_t>('0'))) {
-      return OwnedOnly({KeyRouteKind::Boundary, character},
-                       input.active_composition);
-    }
-    return OwnedOnly({KeyRouteKind::Character, character},
+    return OwnedOnly(RouteTextCharacter(character),
                      input.active_composition);
   }
 

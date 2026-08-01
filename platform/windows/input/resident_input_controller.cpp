@@ -1,5 +1,7 @@
 #include <keyina/windows/resident_input_controller.h>
 
+#include <keyina/input_character_classification.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -14,9 +16,9 @@ constexpr std::uint16_t kTab = 0x09;
 constexpr std::uint16_t kEnter = 0x0D;
 constexpr std::uint16_t kSpace = 0x20;
 
-bool IsCommitBoundaryCharacter(char32_t character) noexcept;
-
-char32_t DelimiterForEvent(const PhysicalKeyEvent& event) noexcept {
+char32_t DelimiterForEvent(
+    const PhysicalKeyEvent& event,
+    InputCharacterClass character_class) noexcept {
   switch (event.virtual_key) {
     case kSpace:
       return U' ';
@@ -25,7 +27,7 @@ char32_t DelimiterForEvent(const PhysicalKeyEvent& event) noexcept {
     case kEnter:
       return U'\n';
     default:
-      return IsCommitBoundaryCharacter(event.character)
+      return character_class == InputCharacterClass::CommitBoundary
                  ? event.character
                  : U'\0';
   }
@@ -41,34 +43,6 @@ EngineConfig ToEngineConfig(const RuntimeInputProfile& profile) noexcept {
       .quick_telex_letters = profile.quick_telex_letters,
       .standalone_w_to_u_horn = profile.standalone_w_to_u_horn,
   };
-}
-
-bool IsSupportedCharacter(char32_t character) noexcept {
-  return (character >= U'A' && character <= U'Z') ||
-         (character >= U'a' && character <= U'z');
-}
-
-bool IsQuickTelexCharacter(char32_t character) noexcept {
-  return character == U'[' || character == U']' ||
-         character == U'{' || character == U'}';
-}
-
-bool IsCommitBoundaryCharacter(char32_t character) noexcept {
-  switch (character) {
-    case U'.':
-    case U',':
-    case U';':
-    case U':':
-    case U'!':
-    case U'?':
-    case U')':
-    case U']':
-    case U'}':
-    case U'"':
-      return true;
-    default:
-      return false;
-  }
 }
 
 bool IsResetBoundary(std::uint16_t virtual_key) noexcept {
@@ -254,7 +228,10 @@ InputDecision ResidentInputController::ProcessKeyDown(
     return {};
   }
 
-  const char32_t delimiter = DelimiterForEvent(event);
+  const InputCharacterClass character_class = ClassifyInputCharacter(
+      event.character,
+      profile_.quick_telex_letters);
+  const char32_t delimiter = DelimiterForEvent(event, character_class);
   if (delimiter != U'\0' && snippet_matcher_.active()) {
     const auto match = snippet_matcher_.ProcessDelimiter(
         delimiter,
@@ -292,8 +269,9 @@ InputDecision ResidentInputController::ProcessKeyDown(
 
   TextEditView edit{};
   const bool quick_telex_character =
-      profile_.quick_telex_letters && IsQuickTelexCharacter(event.character);
-  if (quick_telex_character || IsSupportedCharacter(event.character)) {
+      profile_.quick_telex_letters &&
+      IsQuickTelexCompositionCharacter(event.character);
+  if (character_class == InputCharacterClass::Composition) {
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::Character,
         event.character,
@@ -303,7 +281,7 @@ InputDecision ResidentInputController::ProcessKeyDown(
     });
     pointer_observation_required_ = true;
   } else if (event.virtual_key == kSpace ||
-             IsCommitBoundaryCharacter(event.character)) {
+             character_class == InputCharacterClass::CommitBoundary) {
     RememberCommittedComposition();
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::CommitBoundary,
@@ -321,8 +299,13 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   auto decision = BuildDecision(edit, event.character);
+  if (character_class == InputCharacterClass::CommitBoundary &&
+      edit.consumed) {
+    ClearCommittedComposition();
+  }
   if (boundary_backspace_recovery_available_ &&
-      (IsSupportedCharacter(event.character) || quick_telex_character)) {
+      (IsAsciiCompositionCharacter(event.character) ||
+       quick_telex_character)) {
     if (IsLiteralPassThrough(edit, event.character)) {
       constexpr std::size_t kMaximumRecoverableLiteralSuffix = 32;
       if (post_boundary_literal_codepoints_ <

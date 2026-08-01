@@ -73,7 +73,7 @@ KEYINA_TEST(routes_numpad_digits_while_composing) {
     const auto active = keyina::tsf::RouteKey(
         {.virtual_key = VK_NUMPAD0 + offset,
          .active_composition = true});
-    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Character);
+    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Boundary);
     KEYINA_EXPECT_EQ(active.character,
                      static_cast<char32_t>(U'0' + offset));
   }
@@ -102,7 +102,7 @@ KEYINA_TEST(routes_technical_token_characters_while_composing) {
         {.virtual_key = test.virtual_key,
          .shift = test.shift,
          .active_composition = true});
-    KEYINA_EXPECT_EQ(route.kind, KeyRouteKind::Character);
+    KEYINA_EXPECT_EQ(route.kind, KeyRouteKind::Boundary);
     KEYINA_EXPECT_EQ(route.character, test.expected);
   }
 }
@@ -127,7 +127,7 @@ KEYINA_TEST(routes_numpad_operators_while_composing) {
 
     const auto active = keyina::tsf::RouteKey(
         {.virtual_key = test.virtual_key, .active_composition = true});
-    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Character);
+    KEYINA_EXPECT_EQ(active.kind, KeyRouteKind::Boundary);
     KEYINA_EXPECT_EQ(active.character, test.expected);
   }
 }
