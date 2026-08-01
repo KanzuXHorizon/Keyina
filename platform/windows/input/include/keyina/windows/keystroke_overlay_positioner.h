@@ -2,8 +2,6 @@
 
 #include <keyina/windows/keystroke_overlay_model.h>
 
-#include <cstdint>
-
 namespace keyina::windows {
 
 struct OverlayRectangle {
@@ -12,39 +10,42 @@ struct OverlayRectangle {
   int right{};
   int bottom{};
 
-  [[nodiscard]] bool operator==(const OverlayRectangle&) const noexcept =
-      default;
+  [[nodiscard]] int Width() const noexcept { return right - left; }
+  [[nodiscard]] int Height() const noexcept { return bottom - top; }
+  [[nodiscard]] bool IsValid() const noexcept {
+    return right > left && bottom > top;
+  }
 };
 
-enum class KeystrokeOverlayPlacementSource : std::uint8_t {
-  Caret = 0,
-  StableAnchor,
-  FallbackCorner,
+struct OverlaySize {
+  int width{};
+  int height{};
+};
+
+struct OverlayPoint {
+  int x{};
+  int y{};
 };
 
 struct KeystrokeOverlayPlacementInput {
-  bool caret_reliable{false};
-  OverlayRectangle caret_bounds{};
   OverlayRectangle monitor_work_area{};
-  int overlay_width{};
-  int overlay_height{};
-  int margin{8};
-  int stability_threshold{10};
-  std::uint64_t monitor_id{};
-  bool has_last_stable_placement{false};
-  OverlayRectangle last_stable_bounds{};
-  std::uint64_t last_monitor_id{};
+  OverlayRectangle caret{};
+  OverlayPoint last_stable_anchor{};
+  OverlaySize overlay_size{};
   KeystrokeOverlayFallbackCorner fallback_corner{
       KeystrokeOverlayFallbackCorner::BottomRight};
+  int margin{12};
+  int stability_threshold{8};
+  bool caret_reliable{};
+  bool has_last_stable_anchor{};
+  bool monitor_changed{};
 };
 
 struct KeystrokeOverlayPlacement {
   OverlayRectangle bounds{};
-  KeystrokeOverlayPlacementSource source{
-      KeystrokeOverlayPlacementSource::FallbackCorner};
-  std::uint64_t monitor_id{};
-  bool placed_above{false};
-  bool valid{false};
+  OverlayPoint stable_anchor{};
+  bool used_fallback{};
+  bool placed_above{};
 };
 
 [[nodiscard]] KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(

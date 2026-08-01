@@ -1,6 +1,7 @@
 using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Overlay;
 using Keyina.Host.Core.Snippets;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Core.Translation;
@@ -127,6 +128,9 @@ public sealed record KeyinaConfiguration(
 
     public ApplicationPreferences Applications { get; init; } = ApplicationPreferences.Default;
 
+    public KeystrokeOverlayPreferences KeystrokeOverlay { get; init; } =
+        KeystrokeOverlayPreferences.Default;
+
     public static KeyinaConfiguration Default { get; } = new(
         CurrentSchemaVersion,
         VietnameseEnabled: true,
@@ -207,6 +211,18 @@ public sealed record KeyinaConfiguration(
         {
             throw new ConfigurationValidationException(
                 "Configuration contains invalid application preferences.",
+                exception);
+        }
+        try
+        {
+            (KeystrokeOverlay ?? throw new ArgumentException(
+                "Keystroke overlay preferences must not be null.",
+                nameof(KeystrokeOverlay))).Validate();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ConfigurationValidationException(
+                "Configuration contains invalid keystroke overlay preferences.",
                 exception);
         }
         if (Snippets is null)

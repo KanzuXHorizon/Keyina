@@ -8,6 +8,7 @@ using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Ipc;
+using Keyina.Host.Core.Overlay;
 using Keyina.Host.Core.Snippets;
 using Keyina.Host.Core.Speech;
 using Keyina.Host.Core.Translation;
@@ -942,6 +943,16 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         {
             ClipboardCompatibilityEnabled = enabled,
         };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetKeystrokeOverlayPreferences(
+        KeystrokeOverlayPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        preferences.Validate();
+        configuration = configuration with { KeystrokeOverlay = preferences };
         _ = SaveConfigurationSafelyAsync();
         RefreshVisualState();
     }
@@ -1940,6 +1951,8 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         ExportSettings = ExportPortableSettings,
         ImportSettings = ImportPortableSettings,
         SetApplicationPreferences = SetApplicationPreferences,
+        SetKeystrokeOverlayPreferences = SetKeystrokeOverlayPreferences,
+        PreviewKeystrokeOverlay = RefreshVisualState,
         SetSnippets = SetSnippets,
         GetForegroundApplicationName = () =>
             lastExternalApplicationName ??
@@ -2071,6 +2084,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationTargetLanguage = configuration.TranslationTargetLanguage,
             Hotkeys = configuration.Hotkeys,
             Applications = configuration.Applications,
+            KeystrokeOverlay = configuration.KeystrokeOverlay,
             Snippets = configuration.Snippets,
         };
     }

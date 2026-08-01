@@ -239,6 +239,7 @@ public sealed partial class SettingsForm : Form
         {
             Interval = 120,
         };
+        InitializeKeystrokeOverlayControls();
         feedbackMode = CreateFeedbackModeSelector();
         previewFeedback = CreateButton(
             "previewFeedback",
@@ -582,6 +583,7 @@ public sealed partial class SettingsForm : Form
             }
         };
         previewFeedback.Click += (_, _) => actions.PreviewFeedback();
+        WireKeystrokeOverlayEvents();
         speechApiKey.TextChanged += (_, _) => saveSpeechKey.Enabled =
             !string.IsNullOrWhiteSpace(speechApiKey.Text);
         speechApiKey.KeyDown += (_, eventArgs) =>
@@ -711,6 +713,7 @@ public sealed partial class SettingsForm : Form
             startupToggle.Checked = snapshot.StartupEnabled;
             typingLatencyToggle.Checked = TypingLatencyProfiler.IsEnabled;
             feedbackMode.SelectedIndex = FeedbackModeToIndex(snapshot.FeedbackMode);
+            ApplyKeystrokeOverlaySnapshot(snapshot.KeystrokeOverlay);
             if (!applicationRulesDirty)
             {
                 UpdateApplicationRulesDisplay(snapshot.Applications);
@@ -1309,6 +1312,7 @@ public sealed partial class SettingsForm : Form
             "Chạy host nhẹ cho tài khoản Windows hiện tại.",
             "Người dùng hiện tại",
             startupToggle));
+        stack.Controls.Add(CreateKeystrokeOverlayCard());
 
         var testCard = CreateCard("typingTestCard", 248);
         var testLayout = new TableLayoutPanel

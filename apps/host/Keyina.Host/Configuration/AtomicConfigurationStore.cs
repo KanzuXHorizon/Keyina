@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
+using Keyina.Host.Core.Overlay;
 
 namespace Keyina.Host.Configuration;
 
@@ -131,6 +132,8 @@ public sealed class AtomicConfigurationStore
                 Keyina.Host.Core.Applications.ApplicationPreferences.Default).Normalize(),
             TranslationProviders = (configuration.TranslationProviders ??
                 Keyina.Host.Core.Translation.TranslationProviderPreferences.Default).Normalize(),
+            KeystrokeOverlay = configuration.KeystrokeOverlay ??
+                KeystrokeOverlayPreferences.Default,
         };
         _ = configuration.ValidateAndCreateSnippets();
         return configuration;

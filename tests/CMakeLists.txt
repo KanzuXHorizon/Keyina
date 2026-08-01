@@ -25,6 +25,7 @@ if(WIN32)
     windows/input_injection_test.cpp
     windows/keystroke_overlay_model_test.cpp
     windows/keystroke_overlay_positioner_test.cpp
+    windows/keystroke_overlay_sound_test.cpp
     windows/keystroke_overlay_window_test.cpp
     windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
@@ -35,12 +36,7 @@ if(WIN32)
     windows/runtime_snippet_profile_test.cpp
     windows/standard_edit_replacement_test.cpp
   )
-  target_link_libraries(keyina_tests PRIVATE
-    keyina::windows_input
-    d2d1
-    dwrite
-    dwmapi
-  )
+  target_link_libraries(keyina_tests PRIVATE keyina::windows_input)
 endif()
 
 if(WIN32 AND KEYINA_BUILD_TSF)

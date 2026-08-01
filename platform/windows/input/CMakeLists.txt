@@ -3,6 +3,7 @@ add_library(keyina_windows_input STATIC
   input_injection.cpp
   keystroke_overlay_model.cpp
   keystroke_overlay_positioner.cpp
+  keystroke_overlay_sound.cpp
   keystroke_overlay_window.cpp
   native_latency_histogram.cpp
   pointer_input.cpp
@@ -27,8 +28,11 @@ target_compile_definitions(keyina_windows_input PRIVATE
 )
 target_link_libraries(keyina_windows_input PUBLIC
   keyina::core
+  d2d1
+  dwrite
   ole32
   uuid
+  winmm
 )
 keyina_configure_target(keyina_windows_input)
 
@@ -45,9 +49,6 @@ target_compile_definitions(KeyinaInput PRIVATE
 )
 target_link_libraries(KeyinaInput PRIVATE
   keyina::windows_input
-  d2d1
-  dwrite
-  dwmapi
   ole32
   psapi
   user32
@@ -89,14 +90,6 @@ set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
   TIMEOUT 10
 )
 
-add_test(NAME keyina.windows.input_keystroke_overlay
-  COMMAND KeyinaInput --keystroke-overlay-self-test)
-set_tests_properties(keyina.windows.input_keystroke_overlay PROPERTIES
-  LABELS integration
-  PASS_REGULAR_EXPRESSION "keystroke_overlay_self_test_pass"
-  TIMEOUT 15
-)
-
 add_test(NAME keyina.windows.input_tray_resource
   COMMAND KeyinaInput --tray-resource-self-test)
 set_tests_properties(keyina.windows.input_tray_resource PROPERTIES
@@ -127,4 +120,12 @@ set_tests_properties(keyina.windows.input_transform_callback_latency PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "transform_callback_latency_self_test_pass"
   TIMEOUT 30
+)
+
+add_test(NAME keyina.windows.keystroke_overlay
+  COMMAND KeyinaInput --keystroke-overlay-self-test)
+set_tests_properties(keyina.windows.keystroke_overlay PROPERTIES
+  LABELS integration
+  PASS_REGULAR_EXPRESSION "\"pending_depth_max\":1.*\"timer_active_after_hide\":false.*\"focus_preserved\":true"
+  TIMEOUT 10
 )

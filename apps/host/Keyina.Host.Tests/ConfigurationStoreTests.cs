@@ -3,6 +3,7 @@ using Keyina.Host.Configuration;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Overlay;
 
 namespace Keyina.Host.Tests;
 
@@ -21,6 +22,16 @@ internal static class ConfigurationStoreTests
             Theme = KeyinaTheme.Dark,
             TranslationEnabled = true,
             TranslationTargetLanguage = "JA",
+            KeystrokeOverlay = new KeystrokeOverlayPreferences(
+                Enabled: true,
+                Motion: KeystrokeOverlayMotionLevel.Reduced,
+                SizePercent: 125,
+                OpacityPercent: 80,
+                HideDelayMilliseconds: 1_400,
+                FallbackCorner: KeystrokeOverlayFallbackCorner.TopLeft,
+                PresentationMode: true,
+                PerKeySoundEnabled: true,
+                SoundVolumePercent: 35),
             Hotkeys = HotkeyPreferences.Default with
             {
                 TranslateSelection = HotkeyPreferences.Default.TranslateSelection with
@@ -55,6 +66,7 @@ internal static class ConfigurationStoreTests
         AssertEx.Equal(configuration.TranslationEnabled, loaded.TranslationEnabled);
         AssertEx.Equal(configuration.TranslationTargetLanguage, loaded.TranslationTargetLanguage);
         AssertEx.Equal(configuration.Hotkeys, loaded.Hotkeys);
+        AssertEx.Equal(configuration.KeystrokeOverlay, loaded.KeystrokeOverlay);
         AssertEx.Equal(configuration.Feedback, loaded.Feedback);
         AssertEx.Equal(configuration.Snippets.Length, loaded.Snippets.Length);
         AssertEx.Equal(configuration.Snippets[0].Trigger, loaded.Snippets[0].Trigger);
@@ -130,6 +142,9 @@ internal static class ConfigurationStoreTests
 
         AssertEx.False(loaded.TranslationEnabled, "Translation must remain opt-in.");
         AssertEx.Equal("VI", loaded.TranslationTargetLanguage);
+        AssertEx.Equal(
+            KeystrokeOverlayPreferences.Default,
+            loaded.KeystrokeOverlay);
     }
 
     [KeyinaTest("schema one existing configuration skips first-run onboarding")]

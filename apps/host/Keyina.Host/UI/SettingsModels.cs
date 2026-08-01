@@ -2,6 +2,7 @@ using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Overlay;
 using Keyina.Host.Core.Translation;
 using Keyina.Host.Windows.Typing;
 
@@ -58,6 +59,9 @@ public sealed record SettingsSnapshot(
     public HotkeyPreferences Hotkeys { get; init; } = HotkeyPreferences.Default;
 
     public ApplicationPreferences Applications { get; init; } = ApplicationPreferences.Default;
+
+    public KeystrokeOverlayPreferences KeystrokeOverlay { get; init; } =
+        KeystrokeOverlayPreferences.Default;
 
     public IReadOnlyList<SnippetConfiguration> Snippets { get; init; } = Array.Empty<SnippetConfiguration>();
 
@@ -147,6 +151,10 @@ public sealed record SettingsActions(
     public Action<string> ImportSettings { get; init; } = _ => { };
 
     public Action<ApplicationPreferences> SetApplicationPreferences { get; init; } = _ => { };
+
+    public Action<KeystrokeOverlayPreferences> SetKeystrokeOverlayPreferences { get; init; } = _ => { };
+
+    public Action PreviewKeystrokeOverlay { get; init; } = () => { };
 
     public Action<IReadOnlyList<SnippetConfiguration>> SetSnippets { get; init; } = _ => { };
 

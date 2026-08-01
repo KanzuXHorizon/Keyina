@@ -1,5 +1,7 @@
 #pragma once
 
+#include <keyina/windows/keystroke_overlay_model.h>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +9,8 @@
 
 namespace keyina::windows {
 
-inline constexpr std::size_t kRuntimeInputProfileSize = 36;
+inline constexpr std::size_t kLegacyRuntimeInputProfileSize = 36;
+inline constexpr std::size_t kRuntimeInputProfileSize = 40;
 inline constexpr std::size_t kRuntimeHotkeyCount = 6;
 
 enum class RuntimeHotkeyGesture : std::uint8_t {
@@ -47,6 +50,7 @@ struct RuntimeInputProfile {
   bool clipboard_compatibility_enabled{false};
   std::int32_t source_schema_version{1};
   std::array<RuntimeHotkeyBinding, kRuntimeHotkeyCount> hotkeys{};
+  KeystrokeOverlayPreferences keystroke_overlay{};
 };
 
 struct RuntimeInputProfileResult {

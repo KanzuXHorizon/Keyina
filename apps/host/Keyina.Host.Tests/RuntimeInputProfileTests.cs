@@ -1,13 +1,17 @@
 using System.Buffers.Binary;
 using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Overlay;
 
 namespace Keyina.Host.Tests;
 
 internal static class RuntimeInputProfileTests
 {
-    private static readonly byte[] DefaultVector = Convert.FromHexString(
+    private static readonly byte[] LegacyDefaultVector = Convert.FromHexString(
         "4B4952500224110602030001052000055600055400055A00001B000001000000B6CD5DCA");
+
+    private static readonly byte[] DefaultVector = Convert.FromHexString(
+        "4B4952500328110602030001052000055600055400055A00001B0064010000005C84031EE68FA6BC");
 
     [KeyinaTest("runtime input profile encodes the exact default cross-language vector")]
     private static void DefaultProfileMatchesExactVector()
@@ -18,9 +22,14 @@ internal static class RuntimeInputProfileTests
         AssertEx.True(
             encoded.AsSpan().SequenceEqual(DefaultVector),
             $"Unexpected runtime profile bytes: {Convert.ToHexString(encoded)}");
+        var decoded = RuntimeInputProfileCodec.Decode(encoded);
         AssertEx.True(
-            RuntimeInputProfileCodec.Decode(encoded).RestoreInvalidWord,
+            decoded.RestoreInvalidWord,
             "The default native typing profile must restore invalid Latin tokens.");
+        AssertEx.Equal(KeystrokeOverlayPreferences.Default, decoded.KeystrokeOverlay);
+        AssertEx.Equal(
+            KeystrokeOverlayPreferences.Default,
+            RuntimeInputProfileCodec.Decode(LegacyDefaultVector).KeystrokeOverlay);
     }
 
     [KeyinaTest("runtime input profile round trips configured state and hotkeys")]
@@ -35,6 +44,16 @@ internal static class RuntimeInputProfileTests
             QuickTelexLetters = true,
             StandaloneWToUHorn = false,
             ClipboardCompatibilityEnabled = true,
+            KeystrokeOverlay = KeystrokeOverlayPreferences.Default with
+            {
+                Enabled = true,
+                Motion = KeystrokeOverlayMotionLevel.Reduced,
+                SizePercent = 125,
+                OpacityPercent = 80,
+                HideDelayMilliseconds = 1_250,
+                FallbackCorner = KeystrokeOverlayFallbackCorner.TopLeft,
+                PresentationMode = true,
+            },
             Hotkeys = HotkeyPreferences.Default
                 .WithChord(
                     HotkeyCommand.ToggleVietnamese,
@@ -66,6 +85,7 @@ internal static class RuntimeInputProfileTests
         AssertEx.True(decoded.ClipboardCompatibilityEnabled, "Clipboard compatibility mode changed during profile round trip.");
         AssertEx.Equal(configuration.SchemaVersion, decoded.SourceSchemaVersion);
         AssertEx.Equal(configuration.Hotkeys, decoded.Hotkeys);
+        AssertEx.Equal(configuration.KeystrokeOverlay, decoded.KeystrokeOverlay);
     }
 
     [KeyinaTest("runtime input profile rejects checksum version and gesture corruption")]
@@ -76,7 +96,7 @@ internal static class RuntimeInputProfileTests
         AssertInvalid(checksumCorrupt, "checksum corruption");
 
         var unknownVersion = DefaultVector.ToArray();
-        unknownVersion[4] = 3;
+        unknownVersion[4] = 99;
         RewriteChecksum(unknownVersion);
         AssertInvalid(unknownVersion, "unknown version");
 
@@ -96,10 +116,10 @@ internal static class RuntimeInputProfileTests
         RewriteChecksum(invalidMagic);
         AssertInvalid(invalidMagic, "invalid magic");
 
-        var reservedByte = DefaultVector.ToArray();
-        reservedByte[26] = 1;
-        RewriteChecksum(reservedByte);
-        AssertInvalid(reservedByte, "reserved byte");
+        var invalidSoundVolume = DefaultVector.ToArray();
+        invalidSoundVolume[35] = 127;
+        RewriteChecksum(invalidSoundVolume);
+        AssertInvalid(invalidSoundVolume, "invalid sound volume");
     }
 
     private static void AssertInvalid(byte[] bytes, string scenario)
@@ -118,9 +138,12 @@ internal static class RuntimeInputProfileTests
 
     private static void RewriteChecksum(byte[] bytes)
     {
-        var checksum = ComputeFnv1a(bytes.AsSpan(0, RuntimeInputProfileCodec.ChecksumOffset));
+        var checksumOffset = bytes.Length == RuntimeInputProfileCodec.LegacyEncodedLength
+            ? 32
+            : RuntimeInputProfileCodec.ChecksumOffset;
+        var checksum = ComputeFnv1a(bytes.AsSpan(0, checksumOffset));
         BinaryPrimitives.WriteUInt32LittleEndian(
-            bytes.AsSpan(RuntimeInputProfileCodec.ChecksumOffset, sizeof(uint)),
+            bytes.AsSpan(checksumOffset, sizeof(uint)),
             checksum);
     }
 

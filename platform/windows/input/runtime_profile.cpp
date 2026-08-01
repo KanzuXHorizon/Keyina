@@ -9,9 +9,18 @@ namespace {
 
 constexpr std::array<std::byte, 4> kMagic{
     std::byte{'K'}, std::byte{'I'}, std::byte{'R'}, std::byte{'P'}};
-constexpr std::uint8_t kFormatVersion = 2;
+constexpr std::uint8_t kLegacyFormatVersion = 2;
+constexpr std::uint8_t kFormatVersion = 3;
 constexpr std::uint8_t kBindingCount = 6;
-constexpr std::size_t kChecksumOffset = 32;
+constexpr std::size_t kLegacyChecksumOffset = 32;
+constexpr std::size_t kChecksumOffset = 36;
+constexpr std::uint8_t kOverlayEnabledFlag = 1u << 0u;
+constexpr std::uint8_t kOverlayMotionMask = 0b00000110u;
+constexpr std::uint8_t kOverlayCornerMask = 0b00011000u;
+constexpr std::uint8_t kOverlayPresentationFlag = 1u << 5u;
+constexpr std::uint8_t kKnownOverlayFlags =
+    kOverlayEnabledFlag | kOverlayMotionMask | kOverlayCornerMask |
+    kOverlayPresentationFlag;
 constexpr std::uint8_t kVietnameseEnabledFlag = 1u << 0u;
 constexpr std::uint8_t kSpeechEnabledFlag = 1u << 1u;
 constexpr std::uint8_t kTranslationEnabledFlag = 1u << 2u;
@@ -35,6 +44,12 @@ constexpr std::uint8_t kKnownModifiers =
 std::uint8_t ByteAt(std::span<const std::byte> bytes,
                     std::size_t index) noexcept {
   return std::to_integer<std::uint8_t>(bytes[index]);
+}
+
+std::uint16_t ReadUInt16LittleEndian(std::span<const std::byte> bytes,
+                                     std::size_t offset) noexcept {
+  return static_cast<std::uint16_t>(ByteAt(bytes, offset)) |
+         (static_cast<std::uint16_t>(ByteAt(bytes, offset + 1)) << 8u);
 }
 
 std::uint32_t ReadUInt32LittleEndian(std::span<const std::byte> bytes,
@@ -164,7 +179,8 @@ RuntimeInputProfile DefaultRuntimeInputProfile() noexcept {
 RuntimeInputProfileResult DecodeRuntimeInputProfile(
     std::span<const std::byte> bytes) noexcept {
   RuntimeInputProfileResult result{};
-  if (bytes.size() != kRuntimeInputProfileSize) {
+  if (bytes.size() != kLegacyRuntimeInputProfileSize &&
+      bytes.size() != kRuntimeInputProfileSize) {
     result.error = RuntimeInputProfileError::InvalidLength;
     return result;
   }
@@ -174,20 +190,29 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
       return result;
     }
   }
-  if (ByteAt(bytes, 4) != kFormatVersion) {
+
+  const auto version = ByteAt(bytes, 4);
+  const bool legacy = version == kLegacyFormatVersion;
+  if (!legacy && version != kFormatVersion) {
     result.error = RuntimeInputProfileError::UnsupportedVersion;
     return result;
   }
+  const auto expected_size = legacy ? kLegacyRuntimeInputProfileSize
+                                    : kRuntimeInputProfileSize;
+  const auto checksum_offset = legacy ? kLegacyChecksumOffset
+                                      : kChecksumOffset;
   const auto flags = ByteAt(bytes, 6);
-  if (ByteAt(bytes, 5) != kRuntimeInputProfileSize ||
-      ByteAt(bytes, 7) != kBindingCount ||
-      (flags & ~kKnownFlags) != 0 || ByteAt(bytes, 26) != 0 ||
-      ByteAt(bytes, 27) != 0) {
+  if (bytes.size() != expected_size || ByteAt(bytes, 5) != expected_size ||
+      ByteAt(bytes, 7) != kBindingCount || (flags & ~kKnownFlags) != 0) {
     result.error = RuntimeInputProfileError::InvalidHeader;
     return result;
   }
-  if (ReadUInt32LittleEndian(bytes, kChecksumOffset) !=
-      ComputeFnv1a(bytes.first(kChecksumOffset))) {
+  if (legacy && (ByteAt(bytes, 26) != 0 || ByteAt(bytes, 27) != 0)) {
+    result.error = RuntimeInputProfileError::InvalidHeader;
+    return result;
+  }
+  if (ReadUInt32LittleEndian(bytes, checksum_offset) !=
+      ComputeFnv1a(bytes.first(checksum_offset))) {
     result.error = RuntimeInputProfileError::InvalidChecksum;
     return result;
   }
@@ -212,6 +237,35 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
       (flags & kRestoreInvalidWordFlag) != 0;
   result.profile.clipboard_compatibility_enabled =
       (flags & kClipboardCompatibilityFlag) != 0;
+
+  if (!legacy) {
+    const auto overlay_flags = ByteAt(bytes, 26);
+    if ((overlay_flags & ~kKnownOverlayFlags) != 0) {
+      result.error = RuntimeInputProfileError::InvalidHeader;
+      return result;
+    }
+    result.profile.keystroke_overlay.enabled =
+        (overlay_flags & kOverlayEnabledFlag) != 0;
+    result.profile.keystroke_overlay.motion =
+        static_cast<KeystrokeOverlayMotionLevel>((overlay_flags >> 1u) & 0x03u);
+    result.profile.keystroke_overlay.fallback_corner =
+        static_cast<KeystrokeOverlayFallbackCorner>((overlay_flags >> 3u) & 0x03u);
+    result.profile.keystroke_overlay.presentation_mode =
+        (overlay_flags & kOverlayPresentationFlag) != 0;
+    result.profile.keystroke_overlay.size_percent = ByteAt(bytes, 27);
+    result.profile.keystroke_overlay.opacity_percent = ByteAt(bytes, 32);
+    result.profile.keystroke_overlay.hide_delay_milliseconds =
+        ReadUInt16LittleEndian(bytes, 33);
+    result.profile.keystroke_overlay.per_key_sound_enabled =
+        (ByteAt(bytes, 35) & 0x80u) != 0;
+    result.profile.keystroke_overlay.sound_volume_percent =
+        ByteAt(bytes, 35) & 0x7Fu;
+    if (!result.profile.keystroke_overlay.IsValid()) {
+      result.error = RuntimeInputProfileError::InvalidHeader;
+      return result;
+    }
+  }
+
   result.error = DecodeBindings(bytes, result.profile);
   return result;
 }

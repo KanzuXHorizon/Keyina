@@ -4,6 +4,7 @@
 #include <keyina/windows/clipboard_privacy.h>
 #include <keyina/windows/keystroke_overlay_model.h>
 #include <keyina/windows/keystroke_overlay_positioner.h>
+#include <keyina/windows/keystroke_overlay_sound.h>
 #include <keyina/windows/keystroke_overlay_window.h>
 #include <keyina/windows/native_latency_histogram.h>
 #include <keyina/windows/resident_input_controller.h>
@@ -51,8 +52,7 @@ class Win32InputRuntime {
       bool reload_profiles = true,
       bool profile_callback_latency = false,
       ULONG_PTR accepted_input_marker = 0,
-      bool force_selection_replacement_for_self_test = false,
-      KeystrokeOverlayPreferences overlay_preferences = {}) noexcept;
+      bool force_selection_replacement_for_self_test = false) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -147,47 +147,6 @@ class Win32InputRuntime {
     return deferred_virtual_key_injection_count_;
   }
 
-  [[nodiscard]] std::uint64_t overlay_event_produced_count()
-      const noexcept {
-    return overlay_event_produced_count_;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_event_overwritten_count()
-      const noexcept {
-    return overlay_event_overwritten_count_;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_event_consumed_count()
-      const noexcept {
-    return overlay_event_consumed_count_;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_rendered_count() const noexcept {
-    return overlay_rendered_count_;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_suppressed_count() const noexcept {
-    return overlay_suppressed_count_;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_maximum_pending_depth()
-      const noexcept {
-    return overlay_maximum_pending_depth_;
-  }
-
-  [[nodiscard]] bool overlay_visible_for_testing() const noexcept {
-    return keystroke_overlay_window_.IsVisibleForTesting();
-  }
-
-  [[nodiscard]] bool overlay_hide_timer_active_for_testing() const noexcept {
-    return keystroke_overlay_hide_timer_ != 0;
-  }
-
-  [[nodiscard]] std::uint64_t overlay_last_rendered_generation_for_testing()
-      const noexcept {
-    return keystroke_overlay_window_.last_rendered_generation_for_testing();
-  }
-
   [[nodiscard]] NativeLatencySnapshot callback_latency_snapshot()
       const noexcept {
     return callback_latency_histogram_.Snapshot();
@@ -268,7 +227,6 @@ class Win32InputRuntime {
       std::uintptr_t target_focus_window) noexcept;
   [[nodiscard]] TargetInjectionResult InjectDeferredCommand(
       RuntimeSnippetCommand command,
-      bool state_preapplied,
       std::uint16_t backspace_count,
       std::u16string_view payload,
       std::uint32_t target_process_id,
@@ -279,21 +237,22 @@ class Win32InputRuntime {
   void ApplyPointerRegistration() noexcept;
   void ProcessToggleGesture(const PhysicalKeyEvent& event) noexcept;
   void RequestSnippetOverlayUpdate() noexcept;
-  void RequestTrayUpdate() noexcept;
-  [[nodiscard]] KeystrokeOverlayPrivacyDecision
-  EvaluateOverlayPrivacy(const TypingContext& context) const noexcept;
-  void PublishOverlaySuppression(const TypingContext& context) noexcept;
-  void PublishOverlayAfterKey(
+  void PublishKeystrokeOverlayEvent(
+      const KeystrokeOverlayEvent& event) noexcept;
+  void PublishKeystrokeOverlayEvent(
+      KeystrokeOverlayEventKind kind,
+      std::u16string_view text,
+      char16_t token,
+      std::uint64_t generation) noexcept;
+  void RequestKeystrokeOverlayUpdate() noexcept;
+  void UpdateKeystrokeOverlay() noexcept;
+  void SuppressKeystrokeOverlay() noexcept;
+  void UpdateKeystrokeOverlayComposition(
       const PhysicalKeyEvent& event,
-      const InputDecision& decision,
       const TypingContext& context,
-      const BoundedKeystrokeOverlayText& previous_composition) noexcept;
-  void QueueKeystrokeOverlayDelivery(
-      KeystrokeOverlayDelivery delivery) noexcept;
-  void HandleKeystrokeOverlayUpdate() noexcept;
-  [[nodiscard]] KeystrokeOverlayPlacement ResolveOverlayPlacement(
-      const KeystrokeOverlayDelivery& delivery) noexcept;
-  void HideKeystrokeOverlay() noexcept;
+      const InputDecision& decision) noexcept;
+  [[nodiscard]] KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacementForCurrentContext() noexcept;
+  void RequestTrayUpdate() noexcept;
   [[nodiscard]] bool QueueDeferredClipboardInjection(
       const InputDecision& decision,
       char32_t fallback_character,
@@ -322,13 +281,7 @@ class Win32InputRuntime {
   void CommitDeferredSnippetCommand(
       RuntimeSnippetCommand command) noexcept;
   void HandleDeferredSnippetActions() noexcept;
-  [[nodiscard]] bool PreapplySnippetState(
-      RuntimeSnippetCommand command) noexcept;
-  void RollbackPreappliedSnippetState(
-      RuntimeSnippetCommand command) noexcept;
-  void ExecuteSnippetAction(
-      RuntimeSnippetCommand command,
-      bool state_preapplied = false) noexcept;
+  void ExecuteSnippetAction(RuntimeSnippetCommand command) noexcept;
   [[nodiscard]] bool StartExternalCommandWorker() noexcept;
   void StopExternalCommandWorker() noexcept;
   DWORD RunExternalCommandWorker() noexcept;
@@ -352,8 +305,6 @@ class Win32InputRuntime {
   void RequestExit() noexcept;
 
   RuntimeInputProfile profile_{};
-  bool committed_vietnamese_enabled_{true};
-  std::uint32_t preapplied_vietnamese_toggle_count_{};
   ResidentInputController controller_;
   RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
@@ -361,7 +312,6 @@ class Win32InputRuntime {
   bool profile_callback_latency_{false};
   ULONG_PTR accepted_input_marker_{};
   bool force_selection_replacement_for_self_test_{false};
-  KeystrokeOverlayPreferences overlay_preferences_{};
   std::uint64_t performance_counter_frequency_{};
   NativeLatencyHistogram callback_latency_histogram_{};
   std::array<
@@ -371,6 +321,17 @@ class Win32InputRuntime {
   HWND window_{nullptr};
   HWND snippet_overlay_window_{nullptr};
   bool snippet_overlay_visible_{false};
+  KeystrokeOverlayReducer keystroke_overlay_reducer_{};
+  KeystrokeOverlayWindow keystroke_overlay_window_{};
+  KeystrokeOverlaySoundPlayer keystroke_overlay_sound_{};
+  KeystrokeOverlayState keystroke_overlay_state_{};
+  KeystrokeOverlayEvent pending_keystroke_overlay_event_{};
+  std::u16string keystroke_overlay_composition_{};
+  OverlayPoint keystroke_overlay_stable_anchor_{};
+  std::uint64_t keystroke_overlay_generation_{};
+  UINT_PTR keystroke_overlay_hide_timer_{};
+  bool keystroke_overlay_update_posted_{false};
+  bool keystroke_overlay_has_stable_anchor_{false};
   HHOOK hook_{nullptr};
   HICON active_icon_{nullptr};
   HICON inactive_icon_{nullptr};
@@ -401,7 +362,6 @@ class Win32InputRuntime {
   bool snippet_profile_write_time_known_{false};
   UINT_PTR profile_timer_{};
   UINT_PTR clipboard_restore_timer_{};
-  UINT_PTR keystroke_overlay_hide_timer_{};
   std::wstring pending_clipboard_text_{};
   IDataObject* pending_clipboard_data_object_{nullptr};
   DWORD pending_clipboard_sequence_{};
@@ -426,20 +386,6 @@ class Win32InputRuntime {
   bool snippet_overlay_update_posted_{false};
   bool tray_update_posted_{false};
   bool deferred_clipboard_message_posted_{false};
-  bool keystroke_overlay_update_posted_{false};
-  KeystrokeOverlayLatestSlot keystroke_overlay_slot_{};
-  KeystrokeOverlayReducer keystroke_overlay_reducer_{};
-  KeystrokeOverlayState keystroke_overlay_state_{};
-  KeystrokeOverlayWindow keystroke_overlay_window_{};
-  KeystrokeOverlayPlacement last_keystroke_overlay_placement_{};
-  ULONGLONG last_keystroke_overlay_event_tick_{};
-  std::uint64_t keystroke_overlay_generation_{};
-  std::uint64_t overlay_event_produced_count_{};
-  std::uint64_t overlay_event_overwritten_count_{};
-  std::uint64_t overlay_event_consumed_count_{};
-  std::uint64_t overlay_rendered_count_{};
-  std::uint64_t overlay_suppressed_count_{};
-  std::uint64_t overlay_maximum_pending_depth_{};
   std::atomic_uint32_t pending_snippet_actions_{};
 
   struct DeferredClipboardWorkItem {
@@ -453,7 +399,6 @@ class Win32InputRuntime {
     std::uint32_t target_process_id{};
     std::uintptr_t target_focus_window{};
     RuntimeSnippetCommand snippet_command{RuntimeSnippetCommand::None};
-    bool snippet_state_preapplied{false};
   };
   // Sixty-four queued keystrokes cover large SendInput bursts before the
   // posted transaction message runs. The queue is heap-backed once at Start,
