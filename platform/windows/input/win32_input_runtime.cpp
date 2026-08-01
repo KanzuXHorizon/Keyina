@@ -756,8 +756,10 @@ Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
 bool Win32InputRuntime::Start() noexcept {
   stopping_ = false;
-  const HRESULT ole_result = OleInitialize(nullptr);
-  ole_initialized_ = SUCCEEDED(ole_result);
+  if (!ole_initialized_) {
+    const HRESULT ole_result = OleInitialize(nullptr);
+    ole_initialized_ = SUCCEEDED(ole_result);
+  }
   pressed_keys_.Clear();
   owned_text_keys_.Clear();
   hotkey_router_.Reset();

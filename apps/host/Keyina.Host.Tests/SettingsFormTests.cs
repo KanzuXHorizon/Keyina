@@ -312,14 +312,24 @@ internal static class SettingsFormTests
             SetQuickTelexLetters = quickValues.Add,
             SetStandaloneWToUHorn = standaloneValues.Add,
         };
-        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample with { TraditionalTonePlacement = true },
+            actions);
 
-        ((CheckBox)form.Controls.Find("traditionalTonePlacementToggle", true).Single()).Checked = true;
+        var modernTonePlacementToggle = (CheckBox)form.Controls.Find(
+            "traditionalTonePlacementToggle",
+            true).Single();
+        modernTonePlacementToggle.Checked = true;
         ((CheckBox)form.Controls.Find("quickTelexLettersToggle", true).Single()).Checked = true;
         ((CheckBox)form.Controls.Find("standaloneWToUHornToggle", true).Single()).Checked = false;
 
-        AssertEx.True(traditionalValues.SequenceEqual([true]),
-            "Traditional tone placement toggle was not bound.");
+        AssertEx.True(traditionalValues.SequenceEqual([false]),
+            "Modern tone placement toggle did not disable traditional placement.");
+        AssertEx.True(
+            modernTonePlacementToggle.AccessibleName?.Contains(
+                "oà",
+                StringComparison.Ordinal) == true,
+            "Tone placement choice did not expose an unambiguous example.");
         AssertEx.True(quickValues.SequenceEqual([true]),
             "Quick Telex toggle was not bound.");
         AssertEx.True(standaloneValues.SequenceEqual([false]),

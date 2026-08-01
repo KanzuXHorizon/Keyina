@@ -10,6 +10,10 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        var includeInteractive = args.Any(argument => string.Equals(
+            argument,
+            "--interactive",
+            StringComparison.OrdinalIgnoreCase));
         var tests = Assembly.GetExecutingAssembly()
             .GetTypes()
             .SelectMany(type => type.GetMethods(
@@ -20,7 +24,7 @@ internal static class Program
                 Attribute = method.GetCustomAttribute<KeyinaTestAttribute>(),
             })
             .Where(item => item.Attribute is not null)
-            .Where(item => !IsInteractive(item.Method))
+            .Where(item => includeInteractive || !IsInteractive(item.Method))
             .Select(item => new TestCase(item.Attribute!.Name, item.Method))
             .OrderBy(test => test.Name, StringComparer.Ordinal)
             .ToArray();

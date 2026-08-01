@@ -161,7 +161,7 @@ public sealed partial class SettingsForm : Form
         vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
         traditionalTonePlacementToggle = CreateToggle(
             "traditionalTonePlacementToggle",
-            "Dùng vị trí dấu kiểu truyền thống");
+            "Đặt dấu kiểu mới (oà, uý)");
         quickTelexLettersToggle = CreateToggle(
             "quickTelexLettersToggle",
             "Bật phím tắt [ ] cho ư ơ");
@@ -499,7 +499,7 @@ public sealed partial class SettingsForm : Form
             if (!applyingSnapshot)
             {
                 actions.SetTraditionalTonePlacement(
-                    traditionalTonePlacementToggle.Checked);
+                    !traditionalTonePlacementToggle.Checked);
             }
         };
         quickTelexLettersToggle.CheckedChanged += (_, _) =>
@@ -695,7 +695,7 @@ public sealed partial class SettingsForm : Form
         try
         {
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
-            traditionalTonePlacementToggle.Checked = snapshot.TraditionalTonePlacement;
+            traditionalTonePlacementToggle.Checked = !snapshot.TraditionalTonePlacement;
             quickTelexLettersToggle.Checked = snapshot.QuickTelexLetters;
             standaloneWToUHornToggle.Checked = snapshot.StandaloneWToUHorn;
             clipboardCompatibilityToggle.Checked = snapshot.ClipboardCompatibilityEnabled;
