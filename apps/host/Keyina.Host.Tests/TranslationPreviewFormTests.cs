@@ -39,7 +39,8 @@ internal static class TranslationPreviewFormTests
         AssertEx.Equal(1, form.Controls.Find("closeTranslationPreview", true).Length);
         AssertEx.True(form.MinimumSize.Width >= 460,
             "Translation reader minimum width is too narrow for readable text.");
-        AssertEx.Equal(0, form.Controls.Find("translationPreviewOriginal", true).Length);
+        AssertEx.Equal(1, form.Controls.Find("translationPreviewSourceCard", true).Length);
+        AssertEx.Equal("Xin chào", ((Label)form.Controls.Find("translationPreviewSource", true).Single()).Text);
         var reader = (RichTextBox)form.Controls
             .Find("translationPreviewTranslated", true).Single();
         AssertEx.Equal("Hello", reader.Text);
@@ -91,7 +92,8 @@ internal static class TranslationPreviewFormTests
         var reader = form.Controls.Find("translationPreviewReaderCard", true).Single();
 
         AssertEx.True(hint.Width >= 120, "Shortcut hint collapsed at the minimum size.");
-        AssertEx.True(reader.Height >= 140, "Reader content area became too short at minimum size.");
+        AssertEx.True(reader.Height >= 48, "Reader content area became too short at minimum size.");
+        AssertEx.Equal(1, form.Controls.Find("translationPreviewSourceCard", true).Length);
         foreach (var control in new[] { hint, replace, copy, cancel })
         {
             var bounds = form.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));

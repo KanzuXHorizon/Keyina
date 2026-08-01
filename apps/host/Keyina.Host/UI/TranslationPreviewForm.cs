@@ -76,11 +76,12 @@ public sealed class TranslationPreviewForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(24, 18, 24, 18),
             Margin = Padding.Empty,
         };
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
         Controls.Add(shell);
@@ -169,6 +170,51 @@ public sealed class TranslationPreviewForm : Form
         zoomActions.Controls.Add(increaseZoomButton);
         zoomActions.Controls.Add(decreaseZoomButton);
 
+        var sourceCard = new FluentCard
+        {
+            Name = "translationPreviewSourceCard",
+            AccessibleName = "Văn bản gốc",
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 0, 0, 12),
+            Padding = new Padding(16, 10, 16, 10),
+            Palette = palette,
+            UseSecondarySurface = true,
+        };
+        var sourceLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+        };
+        sourceLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+        sourceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        sourceCard.Controls.Add(sourceLayout);
+        sourceLayout.Controls.Add(new Label
+        {
+            Name = "translationPreviewSourceLabel",
+            Text = "VĂN BẢN GỐC",
+            AccessibleName = "Nhãn văn bản gốc",
+            Dock = DockStyle.Fill,
+            Font = FluentTypography.Create(FluentTypography.CaptionSize),
+            ForeColor = palette.TextTertiary,
+            TextAlign = ContentAlignment.MiddleLeft,
+        }, 0, 0);
+        sourceLayout.Controls.Add(new Label
+        {
+            Name = "translationPreviewSource",
+            Text = preview.OriginalText,
+            AccessibleName = "Nội dung gốc",
+            AccessibleDescription = "Văn bản được chọn trước khi dịch.",
+            Dock = DockStyle.Fill,
+            AutoEllipsis = true,
+            Font = FluentTypography.Create(FluentTypography.BodySize),
+            ForeColor = palette.TextSecondary,
+            TextAlign = ContentAlignment.TopLeft,
+        }, 0, 1);
+        shell.Controls.Add(sourceCard, 0, 1);
+
         var readerCard = new FluentCard
         {
             Name = "translationPreviewReaderCard",
@@ -177,7 +223,7 @@ public sealed class TranslationPreviewForm : Form
             Padding = new Padding(18, 16, 12, 16),
             Palette = palette,
         };
-        shell.Controls.Add(readerCard, 0, 1);
+        shell.Controls.Add(readerCard, 0, 2);
 
         translatedReader = new RichTextBox
         {
@@ -287,7 +333,7 @@ public sealed class TranslationPreviewForm : Form
         actions.Controls.Add(replaceButton);
         actions.Controls.Add(copyButton);
         actions.Controls.Add(cancelButton);
-        shell.Controls.Add(footer, 0, 2);
+        shell.Controls.Add(footer, 0, 3);
 
         AcceptButton = replaceButton;
         CancelButton = cancelButton;

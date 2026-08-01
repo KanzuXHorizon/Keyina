@@ -71,6 +71,26 @@ internal static class DictationOverlayFormTests
             "The OS ellipsis path can hide the newest words and must remain disabled.");
     }
 
+    [KeyinaTest("dictation overlay exposes a visible semantic error state")]
+    private static void OverlayPresentsErrorState()
+    {
+        using var form = new DictationOverlayForm();
+        form.Present(new DictationState(
+            DictationStatus.Error,
+            PartialText: string.Empty,
+            CommittedText: string.Empty,
+            FinalSegments: 0,
+            ErrorCode: "microphone_unavailable"));
+
+        AssertEx.Equal("Không thể nhập giọng nói",
+            ((Label)form.Controls.Find("dictationOverlayStatus", true).Single()).Text);
+        AssertEx.True(
+            ((Label)form.Controls.Find("dictationOverlayTranscript", true).Single()).Text.Contains("microphone_unavailable", StringComparison.Ordinal),
+            "Error details were not visible in the overlay.");
+        AssertEx.True(!string.IsNullOrWhiteSpace(((Label)form.Controls.Find("dictationOverlayStateIndicator", true).Single()).Text),
+            "Error state did not expose a non-color indicator.");
+    }
+
     [KeyinaTest("large Fluent surfaces use square corners")]
     private static void LargeSurfacesAreSquare()
     {

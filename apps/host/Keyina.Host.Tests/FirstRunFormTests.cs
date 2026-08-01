@@ -23,14 +23,28 @@ internal static class FirstRunFormTests
         foreach (var name in new[]
                  {
                      "firstRunTyping",
+                     "firstRunTypingInput",
+                     "firstRunTypingState",
                      "firstRunSpeech",
+                     "firstRunSpeechBadge",
                      "firstRunTranslation",
+                     "firstRunTranslationBadge",
                      "completeFirstRun",
                      "skipFirstRun",
                  })
         {
             AssertEx.Equal(1, form.Controls.Find(name, true).Length);
         }
+
+        var typingInput = (TextBox)form.Controls.Find("firstRunTypingInput", true).Single();
+        var typingState = (Label)form.Controls.Find("firstRunTypingState", true).Single();
+        AssertEx.True(typingInput.TabIndex <= ((Button)form.Controls.Find("firstRunSpeech", true).Single()).TabIndex,
+            "Typing verification should appear before optional setup actions.");
+        typingInput.Text = "tiếng Việt";
+        AssertEx.Equal("Đã gõ thử", typingState.Text);
+        AssertEx.True(
+            ((Label)form.Controls.Find("firstRunSpeechBadge", true).Single()).Text.Contains("Tùy chọn", StringComparison.Ordinal),
+            "Speech setup was not marked optional.");
 
         InvokeClick((Button)form.Controls.Find("firstRunSpeech", true).Single());
         AssertEx.True(openedSections.SequenceEqual(["speech"]),

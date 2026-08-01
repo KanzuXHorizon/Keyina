@@ -16,6 +16,7 @@ public sealed class DictationOverlayForm : Form
     private static readonly IntPtr TopMostWindow = new(-1);
 
     private readonly FluentThemePalette palette = FluentTheme.Current;
+    private readonly Label stateIndicator;
     private readonly Label statusLabel;
     private readonly Label shortcutLabel;
     private readonly Label transcriptLabel;
@@ -63,15 +64,30 @@ public sealed class DictationOverlayForm : Form
         var header = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
             BackColor = palette.Surface,
         };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28F));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.Controls.Add(header, 0, 0);
+
+        stateIndicator = new Label
+        {
+            Name = "dictationOverlayStateIndicator",
+            AccessibleName = "Trạng thái nhập giọng nói",
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe Fluent Icons", 12F, FontStyle.Regular),
+            ForeColor = palette.Accent,
+            BackColor = palette.Surface,
+            UseMnemonic = false,
+        };
+        header.Controls.Add(stateIndicator, 0, 0);
 
         statusLabel = new Label
         {
@@ -84,7 +100,7 @@ public sealed class DictationOverlayForm : Form
             BackColor = palette.Surface,
             UseMnemonic = false,
         };
-        header.Controls.Add(statusLabel, 0, 0);
+        header.Controls.Add(statusLabel, 1, 0);
 
         shortcutLabel = new Label
         {
@@ -98,7 +114,7 @@ public sealed class DictationOverlayForm : Form
             UseMnemonic = false,
             Margin = Padding.Empty,
         };
-        header.Controls.Add(shortcutLabel, 1, 0);
+        header.Controls.Add(shortcutLabel, 2, 0);
 
         transcriptLabel = new Label
         {
@@ -159,11 +175,15 @@ public sealed class DictationOverlayForm : Form
         switch (state.Status)
         {
             case DictationStatus.Connecting:
+                stateIndicator.Text = "\uE895";
+                stateIndicator.ForeColor = palette.Accent;
                 statusLabel.Text = "Đang kết nối";
                 shortcutLabel.Text = "Esc · Hủy";
                 transcriptLabel.Text = "Chuẩn bị microphone…";
                 break;
             case DictationStatus.Listening:
+                stateIndicator.Text = "\uE720";
+                stateIndicator.ForeColor = palette.Success;
                 statusLabel.Text = "Đang nghe";
                 shortcutLabel.Text = "Ctrl + Alt + V · Hoàn tất";
                 transcriptLabel.Text = string.IsNullOrWhiteSpace(state.DisplayText)
@@ -171,15 +191,25 @@ public sealed class DictationOverlayForm : Form
                     : CreateVisibleTranscript(state.DisplayText);
                 break;
             case DictationStatus.Finalizing:
+                stateIndicator.Text = "\uE895";
+                stateIndicator.ForeColor = palette.Warning;
                 statusLabel.Text = "Đang hoàn tất";
                 shortcutLabel.Text = string.Empty;
                 transcriptLabel.Text = string.IsNullOrWhiteSpace(state.DisplayText)
                     ? "Đang chờ Speechmatics gửi phần cuối…"
                     : CreateVisibleTranscript(state.DisplayText);
                 break;
+            case DictationStatus.Error:
+                stateIndicator.Text = "\uEA39";
+                stateIndicator.ForeColor = palette.Error;
+                statusLabel.Text = "Không thể nhập giọng nói";
+                shortcutLabel.Text = "Esc · Đóng";
+                transcriptLabel.Text = string.IsNullOrWhiteSpace(state.ErrorCode)
+                    ? "Đã xảy ra lỗi. Mở Cài đặt để kiểm tra microphone và khóa API."
+                    : $"Lỗi: {state.ErrorCode}";
+                break;
             case DictationStatus.Idle:
             case DictationStatus.Inserted:
-            case DictationStatus.Error:
             case DictationStatus.Cancelled:
                 HideOverlay();
                 return;
@@ -195,6 +225,7 @@ public sealed class DictationOverlayForm : Form
     public void HideOverlay()
     {
         transcriptLabel.Text = string.Empty;
+        stateIndicator.Text = string.Empty;
         statusLabel.Text = string.Empty;
         shortcutLabel.Text = string.Empty;
         AccessibleDescription = string.Empty;
@@ -219,6 +250,7 @@ public sealed class DictationOverlayForm : Form
         if (disposing && !resourcesReleased)
         {
             resourcesReleased = true;
+            stateIndicator.Dispose();
             statusLabel.Dispose();
             shortcutLabel.Dispose();
             transcriptLabel.Dispose();

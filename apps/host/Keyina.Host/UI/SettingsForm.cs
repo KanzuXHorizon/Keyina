@@ -910,13 +910,16 @@ public sealed partial class SettingsForm : Form
         };
         sidebarLayout.Controls.Add(navigation, 0, 1);
 
+        AddNavigationGroup(navigation, "navGroupCore", "CƠ BẢN");
         AddNavigation(navigation, "navOverview", "Tổng quan", "\uE80F", "overview");
         AddNavigation(navigation, "navTyping", "Bộ gõ", "\uE765", "typing");
+        AddNavigationGroup(navigation, "navGroupTools", "CÔNG CỤ");
         AddNavigation(navigation, "navSpeech", "Nhập bằng giọng nói", "\uE720", "speech");
         AddNavigation(navigation, "navTranslation", "Dịch nhanh", "\uE8C1", "translation");
+        AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
+        AddNavigationGroup(navigation, "navGroupSystem", "HỆ THỐNG");
         AddNavigation(navigation, "navHotkeys", "Phím tắt", "\uE92E", "hotkeys");
         AddNavigation(navigation, "navApplications", "Ứng dụng", "\uE7C5", "applications");
-        AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
         AddNavigation(navigation, "navDiagnostics", "Chẩn đoán", "\uE9D9", "diagnostics");
         navigation.SizeChanged += (_, _) => ResizeNavigationButtons();
 
@@ -959,6 +962,21 @@ public sealed partial class SettingsForm : Form
         sidebarLayout.Controls.Add(version, 0, 3);
 
         return panel;
+    }
+
+    private void AddNavigationGroup(
+        FlowLayoutPanel navigation,
+        string name,
+        string text)
+    {
+        var label = CreateLabel(name, text, LabelRole.Caption);
+        label.Width = 196;
+        label.Height = 24;
+        label.Margin = new Padding(8, 8, 0, 0);
+        label.Padding = new Padding(0, 4, 0, 0);
+        label.ForeColor = palette.TextTertiary;
+        label.AccessibleName = $"Nhóm điều hướng {text}";
+        navigation.Controls.Add(label);
     }
 
     private void AddNavigation(
@@ -3637,6 +3655,11 @@ public sealed partial class SettingsForm : Form
             foreach (var button in navigationButtons.Values)
             {
                 button.Compact = narrow;
+            }
+            foreach (var groupName in new[] { "navGroupCore", "navGroupTools", "navGroupSystem" })
+            {
+                var group = navigation.Controls.Find(groupName, true).Single();
+                group.Visible = !narrow;
             }
             ResizeNavigationButtons();
             ApplyResponsiveDensity(narrow);

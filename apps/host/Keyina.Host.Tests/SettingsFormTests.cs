@@ -34,6 +34,9 @@ internal static class SettingsFormTests
 
         foreach (var name in new[]
                  {
+                     "navGroupCore",
+                     "navGroupTools",
+                     "navGroupSystem",
                      "navOverview",
                      "navTyping",
                      "navSpeech",
@@ -46,6 +49,9 @@ internal static class SettingsFormTests
         {
             AssertEx.Equal(1, form.Controls.Find(name, searchAllChildren: true).Length);
         }
+        AssertEx.Equal("CƠ BẢN", ((Label)form.Controls.Find("navGroupCore", true).Single()).Text);
+        AssertEx.Equal("CÔNG CỤ", ((Label)form.Controls.Find("navGroupTools", true).Single()).Text);
+        AssertEx.Equal("HỆ THỐNG", ((Label)form.Controls.Find("navGroupSystem", true).Single()).Text);
     }
 
     [KeyinaTest("overview status cards fill their grid cells without horizontal overflow")]

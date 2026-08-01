@@ -6,6 +6,8 @@ namespace Keyina.Host.UI;
 
 public sealed partial class SnippetSuggestionOverlayForm : Form
 {
+    public const int MaximumVisibleSuggestions = 6;
+
     private const int WsExTransparent = 0x20;
     private const int WsExToolWindow = 0x80;
     private const int WsExNoActivate = 0x08000000;
@@ -81,25 +83,37 @@ public sealed partial class SnippetSuggestionOverlayForm : Form
             return;
         }
 
-        prefixLabel.Text = $"Gõ tắt khớp với {prefix}";
+        var normalizedPrefix = prefix?.Trim() ?? string.Empty;
+        prefixLabel.Text = $"Gõ tắt khớp với {normalizedPrefix}";
+        prefixLabel.AccessibleDescription = $"Có {suggestions.Count} gợi ý cho tiền tố {normalizedPrefix}.";
         rows.SuspendLayout();
         rows.Controls.Clear();
-        foreach (var suggestion in suggestions)
+        var visibleSuggestions = suggestions.Take(MaximumVisibleSuggestions).ToArray();
+        for (var index = 0; index < visibleSuggestions.Length; index++)
         {
+            var suggestion = visibleSuggestions[index];
+            var selected = index == 0;
             var row = new TableLayoutPanel
             {
+                Name = $"snippetSuggestionRow{index}",
+                AccessibleName = $"Gợi ý {index + 1}: {suggestion.Trigger}",
+                AccessibleDescription = selected
+                    ? "Gợi ý đang được chọn. Nhấn Tab để chèn."
+                    : "Gợi ý gõ tắt.",
                 Width = 372,
-                Height = 34,
+                Height = 38,
                 ColumnCount = 2,
                 RowCount = 1,
                 Margin = new Padding(0, 0, 0, 4),
-                BackColor = palette.SurfaceSecondary,
+                BackColor = selected ? palette.SurfacePressed : palette.SurfaceSecondary,
                 Padding = new Padding(8, 0, 8, 0),
             };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             row.Controls.Add(new Label
             {
+                Name = $"snippetSuggestionTrigger{index}",
+                AccessibleName = $"Phần khớp {suggestion.Trigger}",
                 Text = suggestion.Trigger,
                 Dock = DockStyle.Fill,
                 Font = new Font(Font, FontStyle.Bold),
@@ -108,6 +122,8 @@ public sealed partial class SnippetSuggestionOverlayForm : Form
             }, 0, 0);
             row.Controls.Add(new Label
             {
+                Name = $"snippetSuggestionExpansion{index}",
+                AccessibleName = "Nội dung mở rộng",
                 Text = suggestion.Command == SnippetCommand.None
                     ? suggestion.Expansion
                     : DescribeCommand(suggestion.Command),
@@ -120,7 +136,12 @@ public sealed partial class SnippetSuggestionOverlayForm : Form
         }
         rows.ResumeLayout();
 
+        var desiredHeight = 62 + visibleSuggestions.Length * 42;
+        Height = Math.Clamp(desiredHeight, 104, 314);
         var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Size = new Size(
+            Math.Min(Width, Math.Max(320, screen.Width - 32)),
+            Math.Min(Height, Math.Max(104, screen.Height - 32)));
         Location = new Point(
             Math.Max(screen.Left + 8, screen.Right - Width - 20),
             Math.Max(screen.Top + 8, screen.Bottom - Height - 20));
