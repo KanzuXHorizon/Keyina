@@ -3,6 +3,7 @@
 #include "../test_support.h"
 
 #include <array>
+#include <cstring>
 #include <span>
 
 KEYINA_TEST(native_input_injection_contains_keyboard_events_only) {
@@ -12,7 +13,11 @@ KEYINA_TEST(native_input_injection_contains_keyboard_events_only) {
   decision.insert_units = 2;
   decision.insert[0] = L'á';
   decision.insert[1] = L'x';
-  std::array<INPUT, 16> inputs{};
+  std::array<INPUT, 16> inputs;
+  std::memset(inputs.data(), 0xA5, sizeof(inputs));
+  for (auto& input : inputs) {
+    input.type = INPUT_MOUSE;
+  }
 
   const auto count = keyina::windows::BuildKeyboardInputSequence(
       decision, inputs);
@@ -67,7 +72,11 @@ KEYINA_TEST(native_chromium_replacement_selects_text_before_inserting_unicode) {
   decision.backspace_count = 2;
   decision.insert_units = 1;
   decision.insert[0] = L'ê';
-  std::array<INPUT, 16> inputs{};
+  std::array<INPUT, 16> inputs;
+  std::memset(inputs.data(), 0x5A, sizeof(inputs));
+  for (auto& input : inputs) {
+    input.type = INPUT_MOUSE;
+  }
 
   const auto count = keyina::windows::BuildSelectionReplacementSequence(
       decision, inputs);
@@ -191,6 +200,33 @@ KEYINA_TEST(native_input_injection_fails_without_partial_mouse_or_keyboard_outpu
 
   KEYINA_EXPECT_EQ(count, std::size_t{0});
   for (const auto& input : insufficient) {
+    KEYINA_EXPECT_EQ(input.type, static_cast<DWORD>(INPUT_MOUSE));
+  }
+}
+
+KEYINA_TEST(native_input_injection_rejects_corrupt_insert_length_without_writes) {
+  keyina::windows::InputDecision decision{};
+  decision.suppress = true;
+  decision.insert_units = static_cast<std::uint16_t>(
+      decision.insert.size() + 1);
+  std::array<INPUT, 8> destination;
+  std::memset(destination.data(), 0xCC, sizeof(destination));
+  for (auto& input : destination) {
+    input.type = INPUT_MOUSE;
+  }
+
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildKeyboardInputSequence(decision, destination),
+      std::size_t{0});
+  for (const auto& input : destination) {
+    KEYINA_EXPECT_EQ(input.type, static_cast<DWORD>(INPUT_MOUSE));
+  }
+
+  KEYINA_EXPECT_EQ(
+      keyina::windows::BuildSelectionReplacementSequence(
+          decision, destination),
+      std::size_t{0});
+  for (const auto& input : destination) {
     KEYINA_EXPECT_EQ(input.type, static_cast<DWORD>(INPUT_MOUSE));
   }
 }

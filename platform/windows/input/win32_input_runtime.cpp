@@ -46,6 +46,110 @@ constexpr std::uint8_t kWindowsModifier = 1u << 3u;
 constexpr std::uint64_t kTenMiB = 10ULL * 1024ULL * 1024ULL;
 constexpr DWORD kClipboardPasteSettleMilliseconds = 100;
 constexpr std::uint64_t kNanosecondsPerSecond = 1000000000ULL;
+constexpr std::size_t kFastInputEventCapacity = 16;
+constexpr std::size_t kMaximumKeyboardInputEvents =
+    ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
+constexpr std::size_t kMaximumSelectionInputEvents =
+    2 + (kMaxActiveKeys * 2) + (kMaximumInputInsertUnits * 2);
+
+#if defined(_MSC_VER)
+#define KEYINA_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define KEYINA_NOINLINE __attribute__((noinline))
+#else
+#define KEYINA_NOINLINE
+#endif
+
+std::size_t RequiredKeyboardInputEvents(
+    const InputDecision& decision) noexcept {
+  return (static_cast<std::size_t>(decision.backspace_count) * 2) +
+      (static_cast<std::size_t>(decision.insert_units) * 2);
+}
+
+std::size_t RequiredSelectionInputEvents(
+    const InputDecision& decision) noexcept {
+  return (decision.backspace_count == 0 ? 0 : 2) +
+      (static_cast<std::size_t>(decision.backspace_count) * 2) +
+      (static_cast<std::size_t>(decision.insert_units) * 2);
+}
+
+template <std::size_t Capacity>
+bool BuildAndSendKeyboardInput(
+    const InputDecision& decision,
+    std::size_t required) noexcept {
+  if (required == 0 || required > Capacity) {
+    return required == 0 && decision.backspace_count == 0 &&
+        decision.insert_units == 0;
+  }
+  std::array<INPUT, Capacity> inputs;
+  const std::size_t count = BuildKeyboardInputSequence(
+      decision,
+      std::span<INPUT>(inputs.data(), required));
+  if (count != required) {
+    return false;
+  }
+  const UINT expected = static_cast<UINT>(count);
+  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+}
+
+template <std::size_t Capacity>
+bool BuildAndSendSelectionInput(
+    const InputDecision& decision,
+    std::size_t required) noexcept {
+  if (required == 0 || required > Capacity) {
+    return required == 0 && decision.backspace_count == 0 &&
+        decision.insert_units == 0;
+  }
+  std::array<INPUT, Capacity> inputs;
+  const std::size_t count = BuildSelectionReplacementSequence(
+      decision,
+      std::span<INPUT>(inputs.data(), required));
+  if (count != required) {
+    return false;
+  }
+  const UINT expected = static_cast<UINT>(count);
+  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
+}
+
+KEYINA_NOINLINE bool SendKeyboardInputFallback(
+    const InputDecision& decision,
+    std::size_t required) noexcept {
+  return BuildAndSendKeyboardInput<kMaximumKeyboardInputEvents>(
+      decision, required);
+}
+
+KEYINA_NOINLINE bool SendSelectionInputFallback(
+    const InputDecision& decision,
+    std::size_t required) noexcept {
+  return BuildAndSendSelectionInput<kMaximumSelectionInputEvents>(
+      decision, required);
+}
+
+bool SendKeyboardInputDecision(const InputDecision& decision) noexcept {
+  const std::size_t required = RequiredKeyboardInputEvents(decision);
+  if (required <= kFastInputEventCapacity) {
+    return BuildAndSendKeyboardInput<kFastInputEventCapacity>(
+        decision, required);
+  }
+  if (required > kMaximumKeyboardInputEvents) {
+    return false;
+  }
+  return SendKeyboardInputFallback(decision, required);
+}
+
+bool SendSelectionInputDecision(const InputDecision& decision) noexcept {
+  const std::size_t required = RequiredSelectionInputEvents(decision);
+  if (required <= kFastInputEventCapacity) {
+    return BuildAndSendSelectionInput<kFastInputEventCapacity>(
+        decision, required);
+  }
+  if (required > kMaximumSelectionInputEvents) {
+    return false;
+  }
+  return SendSelectionInputFallback(decision, required);
+}
+
+#undef KEYINA_NOINLINE
 
 std::uint64_t CounterTicksToNanoseconds(
     std::uint64_t ticks,
@@ -1271,26 +1375,14 @@ bool Win32InputRuntime::Inject(
       (decision.insert_units != 0 || !decision.extended_insert.empty())) {
     return InjectViaClipboard(decision, target_focus_window);
   }
-  constexpr std::size_t kMaximumInputEvents =
-      ((kMaxActiveKeys + 1) * 2) + (kMaximumInputInsertUnits * 2);
-  auto send = [](const InputDecision& part) noexcept {
-    std::array<INPUT, kMaximumInputEvents> inputs{};
-    const std::size_t count = BuildKeyboardInputSequence(part, inputs);
-    if (count == 0) {
-      return part.backspace_count == 0 && part.insert_units == 0;
-    }
-    const UINT expected = static_cast<UINT>(count);
-    return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
-  };
-
   if (decision.extended_insert.empty()) {
-    return send(decision);
+    return SendKeyboardInputDecision(decision);
   }
 
   InputDecision erase{};
   erase.suppress = true;
   erase.backspace_count = decision.backspace_count;
-  if (!send(erase)) {
+  if (!SendKeyboardInputDecision(erase)) {
     return false;
   }
 
@@ -1305,7 +1397,7 @@ bool Win32InputRuntime::Inject(
       part.insert[index] = static_cast<wchar_t>(
           decision.extended_insert[offset + index]);
     }
-    if (!send(part)) {
+    if (!SendKeyboardInputDecision(part)) {
       return false;
     }
     offset += part.insert_units;
@@ -1315,20 +1407,8 @@ bool Win32InputRuntime::Inject(
 
 bool Win32InputRuntime::InjectWithSelectionReplacement(
     const InputDecision& decision) noexcept {
-  constexpr std::size_t kMaximumInputEvents =
-      2 + (kMaxActiveKeys * 2) + (kMaximumInputInsertUnits * 2);
-  auto send = [](const InputDecision& part) noexcept {
-    std::array<INPUT, kMaximumInputEvents> inputs{};
-    const std::size_t count = BuildSelectionReplacementSequence(part, inputs);
-    if (count == 0) {
-      return part.backspace_count == 0 && part.insert_units == 0;
-    }
-    const UINT expected = static_cast<UINT>(count);
-    return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected;
-  };
-
   if (decision.extended_insert.empty()) {
-    return send(decision);
+    return SendSelectionInputDecision(decision);
   }
 
   std::size_t offset = 0;
@@ -1344,7 +1424,7 @@ bool Win32InputRuntime::InjectWithSelectionReplacement(
       part.insert[index] = static_cast<wchar_t>(
           decision.extended_insert[offset + index]);
     }
-    if (!send(part)) {
+    if (!SendSelectionInputDecision(part)) {
       return false;
     }
     offset += part.insert_units;

@@ -52,6 +52,9 @@ bool BuildLiteralInputDecision(
 std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept {
+  if (decision.insert_units > decision.insert.size()) {
+    return 0;
+  }
   const std::size_t required =
       (static_cast<std::size_t>(decision.backspace_count) * 2) +
       (static_cast<std::size_t>(decision.insert_units) * 2);
@@ -125,6 +128,9 @@ std::size_t BuildClipboardPasteSequence(
 std::size_t BuildSelectionReplacementSequence(
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept {
+  if (decision.insert_units > decision.insert.size()) {
+    return 0;
+  }
   const std::size_t required =
       (decision.backspace_count == 0 ? 0 : 2) +
       (static_cast<std::size_t>(decision.backspace_count) * 2) +
