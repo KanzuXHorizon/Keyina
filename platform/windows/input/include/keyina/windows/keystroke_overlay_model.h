@@ -4,13 +4,40 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <string_view>
 
 namespace keyina::windows {
 
 inline constexpr std::size_t kMaximumOverlayTokens = 16;
 inline constexpr std::size_t kMaximumOverlayCodeUnits = 64;
+
+class BoundedKeystrokeOverlayText {
+ public:
+  void Assign(
+      std::u16string_view value,
+      bool force_truncated = false) noexcept;
+  void Clear() noexcept;
+  [[nodiscard]] bool Append(char16_t value) noexcept;
+  void EraseLast(std::size_t count) noexcept;
+
+  [[nodiscard]] std::u16string_view View() const noexcept {
+    return {storage_.data(), size_};
+  }
+  [[nodiscard]] std::size_t size() const noexcept { return size_; }
+  [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
+  [[nodiscard]] bool truncated() const noexcept { return truncated_; }
+
+  friend bool operator==(const BoundedKeystrokeOverlayText& left,
+                         const BoundedKeystrokeOverlayText& right) noexcept {
+    return left.View() == right.View() &&
+        left.truncated_ == right.truncated_;
+  }
+
+ private:
+  std::array<char16_t, kMaximumOverlayCodeUnits> storage_{};
+  std::uint8_t size_{};
+  bool truncated_{};
+};
 
 enum class KeystrokeOverlayEventKind : std::uint8_t {
   Token,
@@ -47,26 +74,29 @@ struct KeystrokeOverlayPreferences {
   std::uint8_t sound_volume_percent{30};
 
   [[nodiscard]] bool IsValid() const noexcept;
+
+  friend bool operator==(const KeystrokeOverlayPreferences&,
+                         const KeystrokeOverlayPreferences&) = default;
 };
 
 struct KeystrokeOverlayEvent {
   KeystrokeOverlayEventKind kind{KeystrokeOverlayEventKind::Cleared};
-  std::array<char16_t, kMaximumOverlayCodeUnits> text{};
-  std::size_t text_length{};
+  BoundedKeystrokeOverlayText text{};
   char16_t token{};
   std::uint64_t generation{};
-  bool text_truncated{};
 
-  void SetText(std::u16string_view value) noexcept;
+  void SetText(std::u16string_view value) noexcept {
+    text.Assign(value);
+  }
   [[nodiscard]] std::u16string_view Text() const noexcept {
-    return {text.data(), text_length};
+    return text.View();
   }
 };
 
 struct KeystrokeOverlayState {
   std::array<char16_t, kMaximumOverlayTokens> tokens{};
+  BoundedKeystrokeOverlayText text{};
   std::size_t token_count{};
-  std::u16string text{};
   std::uint64_t generation{};
   KeystrokeOverlayEventKind transition{KeystrokeOverlayEventKind::Cleared};
   bool visible{};

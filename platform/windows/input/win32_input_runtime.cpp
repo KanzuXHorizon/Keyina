@@ -511,6 +511,30 @@ std::uint32_t CountCurrentProcessThreads() noexcept {
   return count;
 }
 
+std::uint32_t MeasureSettledCurrentProcessThreads(
+    Win32InputRuntime& runtime) noexcept {
+  constexpr ULONGLONG kStableWindowMilliseconds = 1000;
+  constexpr ULONGLONG kMaximumWaitMilliseconds = 3000;
+
+  const ULONGLONG started_at = GetTickCount64();
+  ULONGLONG stable_since = started_at;
+  std::uint32_t current = CountCurrentProcessThreads();
+  while (GetTickCount64() - started_at < kMaximumWaitMilliseconds) {
+    runtime.PumpMessagesFor(25);
+    const std::uint32_t next = CountCurrentProcessThreads();
+    const ULONGLONG now = GetTickCount64();
+    if (next != current) {
+      current = next;
+      stable_since = now;
+      continue;
+    }
+    if (now - stable_since >= kStableWindowMilliseconds) {
+      break;
+    }
+  }
+  return current;
+}
+
 HICON LoadIconFromExecutableDirectory(const wchar_t* file_name) noexcept {
   std::array<wchar_t, 32768> module_path{};
   const DWORD length = GetModuleFileNameW(
@@ -822,8 +846,7 @@ bool Win32InputRuntime::Start() noexcept {
   keystroke_overlay_update_posted_ = false;
   keystroke_overlay_state_ = {};
   pending_keystroke_overlay_event_ = {};
-  keystroke_overlay_composition_.clear();
-  keystroke_overlay_composition_.reserve(kMaximumOverlayCodeUnits);
+  keystroke_overlay_composition_.Clear();
   keystroke_overlay_generation_ = 0;
   keystroke_overlay_has_stable_anchor_ = false;
   keystroke_overlay_hide_timer_ = 0;
@@ -1022,7 +1045,7 @@ void Win32InputRuntime::Stop() noexcept {
   keystroke_overlay_update_posted_ = false;
   keystroke_overlay_state_ = {};
   pending_keystroke_overlay_event_ = {};
-  keystroke_overlay_composition_.clear();
+  keystroke_overlay_composition_.Clear();
   keystroke_overlay_has_stable_anchor_ = false;
   tray_update_posted_ = false;
   deferred_clipboard_message_posted_ = false;
@@ -2017,7 +2040,7 @@ void Win32InputRuntime::RequestKeystrokeOverlayUpdate() noexcept {
 }
 
 void Win32InputRuntime::SuppressKeystrokeOverlay() noexcept {
-  keystroke_overlay_composition_.clear();
+  keystroke_overlay_composition_.Clear();
   KeystrokeOverlayEvent event{};
   event.kind = KeystrokeOverlayEventKind::Suppressed;
   event.generation = ++keystroke_overlay_generation_;
@@ -2049,18 +2072,10 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
   }
 
   auto erase_units = [this](std::size_t count) noexcept {
-    if (count >= keystroke_overlay_composition_.size()) {
-      keystroke_overlay_composition_.clear();
-    } else {
-      keystroke_overlay_composition_.erase(
-          keystroke_overlay_composition_.size() - count);
-    }
+    keystroke_overlay_composition_.EraseLast(count);
   };
   auto append_unit = [this](char16_t unit) noexcept {
-    if (keystroke_overlay_composition_.size() <
-        kMaximumOverlayCodeUnits) {
-      keystroke_overlay_composition_.push_back(unit);
-    }
+    static_cast<void>(keystroke_overlay_composition_.Append(unit));
   };
 
   if (event.virtual_key == VK_BACK) {
@@ -2082,7 +2097,7 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     update.kind = keystroke_overlay_composition_.empty()
                       ? KeystrokeOverlayEventKind::Cleared
                       : KeystrokeOverlayEventKind::CompositionUpdated;
-    update.SetText(keystroke_overlay_composition_);
+    update.SetText(keystroke_overlay_composition_.View());
     update.generation = ++keystroke_overlay_generation_;
     PublishKeystrokeOverlayEvent(update);
     return;
@@ -2100,10 +2115,10 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     if (!keystroke_overlay_composition_.empty()) {
       KeystrokeOverlayEvent committed{};
       committed.kind = KeystrokeOverlayEventKind::CompositionCommitted;
-      committed.SetText(keystroke_overlay_composition_);
+      committed.SetText(keystroke_overlay_composition_.View());
       committed.generation = ++keystroke_overlay_generation_;
       PublishKeystrokeOverlayEvent(committed);
-      keystroke_overlay_composition_.clear();
+      keystroke_overlay_composition_.Clear();
     }
     return;
   }
@@ -2131,7 +2146,7 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
                      ? static_cast<char16_t>(event.character)
                      : 0;
   if (decision.suppress) {
-    update.SetText(keystroke_overlay_composition_);
+    update.SetText(keystroke_overlay_composition_.View());
   }
   update.generation = ++keystroke_overlay_generation_;
   PublishKeystrokeOverlayEvent(update);
@@ -3431,6 +3446,8 @@ NativeResidentResourceSnapshot MeasureNativeResidentResources(
 
   GetProcessTimes(
       GetCurrentProcess(), &creation, &exit, &kernel_after, &user_after);
+  const std::uint32_t settled_thread_count =
+      MeasureSettledCurrentProcessThreads(runtime);
   PROCESS_MEMORY_COUNTERS_EX counters{};
   counters.cb = sizeof(counters);
   GetProcessMemoryInfo(
@@ -3452,7 +3469,7 @@ NativeResidentResourceSnapshot MeasureNativeResidentResources(
   snapshot.working_set_bytes = counters.WorkingSetSize;
   snapshot.private_working_set_bytes = QueryPrivateWorkingSetBytes();
   snapshot.private_memory_bytes = counters.PrivateUsage;
-  snapshot.thread_count = CountCurrentProcessThreads();
+  snapshot.thread_count = settled_thread_count;
   snapshot.thread_count_delta =
       snapshot.thread_count > baseline_thread_count
           ? snapshot.thread_count - baseline_thread_count

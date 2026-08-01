@@ -18,7 +18,7 @@ KEYINA_TEST(keystroke_overlay_window_is_no_activate_and_click_through) {
 
   KeystrokeOverlayState state{};
   state.visible = true;
-  state.text = u"nguyễn";
+  state.text.Assign(u"nguyễn");
   KeystrokeOverlayPlacement placement{};
   placement.bounds = {100, 100, 340, 156};
   const auto motion = ResolveKeystrokeOverlayMotion(
@@ -38,14 +38,14 @@ KEYINA_TEST(keystroke_overlay_window_retargets_and_recovers_device_loss) {
 
   KeystrokeOverlayState state{};
   state.visible = true;
-  state.text = u"nguyên";
+  state.text.Assign(u"nguyên");
   KeystrokeOverlayPlacement placement{};
   placement.bounds = {100, 100, 340, 156};
   overlay.Present(state, placement,
                   ResolveKeystrokeOverlayMotion({}), {});
   KEYINA_EXPECT_TRUE(overlay.HasActiveAnimationForTesting());
 
-  state.text = u"nguyễn";
+  state.text.Assign(u"nguyễn");
   overlay.Present(state, placement,
                   ResolveKeystrokeOverlayMotion({}), {});
   overlay.SimulateDeviceLossForTesting();

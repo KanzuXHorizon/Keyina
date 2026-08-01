@@ -3,27 +3,81 @@
 #include <algorithm>
 
 namespace keyina::windows {
-namespace {
 
-std::u16string BoundedText(std::u16string_view value, bool& truncated) {
-  truncated = value.size() > kMaximumOverlayCodeUnits;
-  return std::u16string(value.substr(0, kMaximumOverlayCodeUnits));
+void BoundedKeystrokeOverlayText::Assign(
+    std::u16string_view value,
+    bool force_truncated) noexcept {
+  std::size_t bounded = std::min(value.size(), storage_.size());
+  if (bounded != 0 && value[bounded - 1] >= 0xD800 &&
+      value[bounded - 1] <= 0xDBFF) {
+    --bounded;
+  }
+  if (bounded != 0) {
+    std::copy_n(value.begin(), bounded, storage_.begin());
+  }
+  size_ = static_cast<std::uint8_t>(bounded);
+  truncated_ = force_truncated || bounded < value.size();
 }
 
-}  // namespace
+void BoundedKeystrokeOverlayText::Clear() noexcept {
+  size_ = 0;
+  truncated_ = false;
+}
 
-void KeystrokeOverlayEvent::SetText(std::u16string_view value) noexcept {
-  text_length = std::min(value.size(), kMaximumOverlayCodeUnits);
-  std::copy_n(value.begin(), text_length, text.begin());
-  text_truncated = value.size() > kMaximumOverlayCodeUnits;
+bool BoundedKeystrokeOverlayText::Append(char16_t value) noexcept {
+  const bool high_surrogate = value >= 0xD800 && value <= 0xDBFF;
+  const bool low_surrogate = value >= 0xDC00 && value <= 0xDFFF;
+  if (size_ != 0 && storage_[size_ - 1] >= 0xD800 &&
+      storage_[size_ - 1] <= 0xDBFF) {
+    if (low_surrogate && size_ < storage_.size()) {
+      storage_[size_++] = value;
+      return true;
+    }
+    --size_;
+    truncated_ = true;
+  } else if (low_surrogate) {
+    truncated_ = true;
+    return false;
+  }
+  if (high_surrogate) {
+    if (size_ + 2 > storage_.size()) {
+      truncated_ = true;
+      return false;
+    }
+    storage_[size_++] = value;
+    return true;
+  }
+  if (size_ >= storage_.size()) {
+    truncated_ = true;
+    return false;
+  }
+  storage_[size_++] = value;
+  return true;
+}
+
+void BoundedKeystrokeOverlayText::EraseLast(std::size_t count) noexcept {
+  if (count >= size_) {
+    Clear();
+    return;
+  }
+  size_ = static_cast<std::uint8_t>(size_ - count);
+  if (size_ != 0 && storage_[size_ - 1] >= 0xD800 &&
+      storage_[size_ - 1] <= 0xDBFF) {
+    --size_;
+  }
 }
 
 bool KeystrokeOverlayPreferences::IsValid() const noexcept {
-  return size_percent >= 75 && size_percent <= 150 &&
-         opacity_percent >= 25 && opacity_percent <= 100 &&
-         hide_delay_milliseconds >= 500 &&
-         hide_delay_milliseconds <= 2000 &&
-         sound_volume_percent <= 100;
+  return static_cast<std::uint8_t>(motion) <=
+             static_cast<std::uint8_t>(KeystrokeOverlayMotionLevel::Off) &&
+      static_cast<std::uint8_t>(fallback_corner) <=
+          static_cast<std::uint8_t>(
+              KeystrokeOverlayFallbackCorner::TopLeft) &&
+      size_percent >= 75 && size_percent <= 150 &&
+      opacity_percent >= 25 && opacity_percent <= 100 &&
+      hide_delay_milliseconds >= 500 &&
+      hide_delay_milliseconds <= 2000 &&
+      sound_volume_percent <= 100;
 }
 
 KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
@@ -41,7 +95,7 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
       event.kind == KeystrokeOverlayEventKind::Cleared) {
     next.tokens.fill(0);
     next.token_count = 0;
-    next.text.clear();
+    next.text.Clear();
     next.visible = false;
     next.truncated = false;
     return next;
@@ -54,7 +108,10 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
     if (next.token_count < kMaximumOverlayTokens) {
       next.tokens[next.token_count++] = event.token;
     } else {
-      std::move(next.tokens.begin() + 1, next.tokens.end(), next.tokens.begin());
+      std::move(
+          next.tokens.begin() + 1,
+          next.tokens.end(),
+          next.tokens.begin());
       next.tokens.back() = event.token;
       next.truncated = true;
     }
@@ -62,8 +119,8 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
     return next;
   }
 
-  next.text = BoundedText(event.Text(), next.truncated);
-  next.truncated = next.truncated || event.text_truncated;
+  next.text = event.text;
+  next.truncated = next.text.truncated();
   next.visible = !next.text.empty();
   return next;
 }

@@ -374,7 +374,7 @@ void KeystrokeOverlayWindow::TickAnimation() noexcept {
 void KeystrokeOverlayWindow::UpdateDisplayText(
     const KeystrokeOverlayState& state) {
   if (!state.text.empty()) {
-    display_text_ = state.text;
+    display_text_.assign(state.text.View());
     return;
   }
   display_text_.clear();

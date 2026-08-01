@@ -75,19 +75,19 @@ public sealed partial class SettingsForm
 
     private FluentCard CreateKeystrokeOverlayCard()
     {
-        var card = CreateCard("keystrokeOverlayCard", 414);
+        var card = CreateCard("keystrokeOverlayCard", 456);
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 9,
+            RowCount = 10,
             Padding = new Padding(4),
             Margin = Padding.Empty,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64F));
-        for (var index = 1; index <= 7; index++)
+        for (var index = 1; index <= 8; index++)
         {
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
         }
@@ -111,9 +111,10 @@ public sealed partial class SettingsForm
         var hidePanel = CreateOverlayNumberPanel(keystrokeOverlayHideDelay, "ms");
         AddOverlaySetting(layout, 5, "Tự ẩn", hidePanel);
 
-        AddOverlaySetting(layout, 6, "Âm thanh", keystrokeOverlaySoundToggle);
+        AddOverlaySetting(layout, 6, "Góc dự phòng", keystrokeOverlayCorner);
+        AddOverlaySetting(layout, 7, "Âm thanh", keystrokeOverlaySoundToggle);
         var soundPanel = CreateOverlayNumberPanel(keystrokeOverlaySoundVolume, "%");
-        AddOverlaySetting(layout, 7, "Âm lượng", soundPanel);
+        AddOverlaySetting(layout, 8, "Âm lượng", soundPanel);
 
         var previewPanel = new TableLayoutPanel
         {
@@ -129,7 +130,7 @@ public sealed partial class SettingsForm
         previewPanel.Controls.Add(keystrokeOverlayPresentationToggle, 1, 0);
         previewPanel.Controls.Add(previewKeystrokeOverlay, 2, 0);
         layout.SetColumnSpan(previewPanel, 2);
-        layout.Controls.Add(previewPanel, 0, 8);
+        layout.Controls.Add(previewPanel, 0, 9);
         return card;
     }
 

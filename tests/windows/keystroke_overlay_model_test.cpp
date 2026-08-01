@@ -2,13 +2,16 @@
 
 #include "../test_support.h"
 
+#include <string>
+#include <type_traits>
+
 using namespace keyina::windows;
 
 KEYINA_TEST(keystroke_overlay_model_bounds_composition_text) {
   KeystrokeOverlayReducer reducer;
   KeystrokeOverlayEvent event{};
   event.kind = KeystrokeOverlayEventKind::CompositionUpdated;
-  event.SetText(std::u16string(80, u'x')); 
+  event.SetText(std::u16string(80, u'x'));
   event.generation = 1;
 
   const auto state = reducer.Apply({}, event);
@@ -67,8 +70,50 @@ KEYINA_TEST(keystroke_overlay_model_ignores_stale_generation) {
   stale.generation = 6;
   const auto state = reducer.Apply(current, stale);
 
-  KEYINA_EXPECT_EQ(state.text, std::u16string(u"nguyễn"));
+  KEYINA_EXPECT_EQ(state.text.View(), std::u16string_view(u"nguyễn"));
   KEYINA_EXPECT_EQ(state.generation, 7u);
+}
+
+KEYINA_TEST(keystroke_overlay_state_is_fixed_capacity_and_trivially_copyable) {
+  KEYINA_EXPECT_TRUE(
+      std::is_trivially_copyable_v<BoundedKeystrokeOverlayText>);
+  KEYINA_EXPECT_TRUE(std::is_trivially_copyable_v<KeystrokeOverlayEvent>);
+  KEYINA_EXPECT_TRUE(std::is_trivially_copyable_v<KeystrokeOverlayState>);
+}
+
+KEYINA_TEST(keystroke_overlay_text_never_splits_a_surrogate_pair) {
+  std::u16string value(63, u'x');
+  value.push_back(static_cast<char16_t>(0xD83D));
+  value.push_back(static_cast<char16_t>(0xDE00));
+  BoundedKeystrokeOverlayText text{};
+
+  text.Assign(value);
+
+  KEYINA_EXPECT_EQ(text.size(), std::size_t{63});
+  KEYINA_EXPECT_TRUE(text.truncated());
+  KEYINA_EXPECT_EQ(text.View().back(), u'x');
+}
+
+KEYINA_TEST(keystroke_overlay_append_preserves_surrogate_pairs_at_capacity) {
+  BoundedKeystrokeOverlayText text{};
+  text.Assign(std::u16string(63, u'x'));
+
+  KEYINA_EXPECT_TRUE(
+      !text.Append(static_cast<char16_t>(0xD83D)));
+  KEYINA_EXPECT_EQ(text.size(), std::size_t{63});
+  KEYINA_EXPECT_TRUE(text.truncated());
+
+  text.Assign(std::u16string(62, u'x'));
+  KEYINA_EXPECT_TRUE(text.Append(static_cast<char16_t>(0xD83D)));
+  KEYINA_EXPECT_TRUE(text.Append(static_cast<char16_t>(0xDE00)));
+  KEYINA_EXPECT_EQ(text.size(), std::size_t{64});
+  KEYINA_EXPECT_EQ(text.View()[62], static_cast<char16_t>(0xD83D));
+  KEYINA_EXPECT_EQ(text.View()[63], static_cast<char16_t>(0xDE00));
+
+  text.Clear();
+  KEYINA_EXPECT_TRUE(!text.Append(static_cast<char16_t>(0xDE00)));
+  KEYINA_EXPECT_TRUE(text.empty());
+  KEYINA_EXPECT_TRUE(text.truncated());
 }
 
 KEYINA_TEST(keystroke_overlay_privacy_fails_closed) {

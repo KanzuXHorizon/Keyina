@@ -326,7 +326,7 @@ class Win32InputRuntime {
   KeystrokeOverlaySoundPlayer keystroke_overlay_sound_{};
   KeystrokeOverlayState keystroke_overlay_state_{};
   KeystrokeOverlayEvent pending_keystroke_overlay_event_{};
-  std::u16string keystroke_overlay_composition_{};
+  BoundedKeystrokeOverlayText keystroke_overlay_composition_{};
   OverlayPoint keystroke_overlay_stable_anchor_{};
   std::uint64_t keystroke_overlay_generation_{};
   UINT_PTR keystroke_overlay_hide_timer_{};

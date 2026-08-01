@@ -2,6 +2,7 @@ using System.Reflection;
 using Keyina.Host.Core.Applications;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
+using Keyina.Host.Core.Overlay;
 using Keyina.Host.UI;
 using Keyina.Host.Windows.Typing;
 
@@ -133,6 +134,122 @@ internal static class SettingsFormTests
             FindDescendants<CheckBox>(form).All(control =>
                 control.GetType().Name.Contains("FluentToggle", StringComparison.Ordinal)),
             "Settings toggles should use the Fluent owner-drawn control.");
+    }
+
+    [KeyinaTest("visual typing settings expose every bounded option with safe disabled dependencies")]
+    private static void VisualTypingSettingsAreCompleteAndSafe()
+    {
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample with
+            {
+                KeystrokeOverlay = KeystrokeOverlayPreferences.Default,
+            },
+            SettingsActions.NoOp);
+
+        foreach (var name in new[]
+                 {
+                     "keystrokeOverlayCard",
+                     "keystrokeOverlayToggle",
+                     "keystrokeOverlayMotion",
+                     "keystrokeOverlayCorner",
+                     "keystrokeOverlaySize",
+                     "keystrokeOverlayOpacity",
+                     "keystrokeOverlayHideDelay",
+                     "keystrokeOverlayPresentationToggle",
+                     "keystrokeOverlaySoundToggle",
+                     "keystrokeOverlaySoundVolume",
+                     "previewKeystrokeOverlay",
+                     "keystrokeOverlayPreviewText",
+                 })
+        {
+            AssertEx.Equal(1, form.Controls.Find(name, true).Length);
+        }
+
+        var enabled = (CheckBox)form.Controls.Find(
+            "keystrokeOverlayToggle", true).Single();
+        AssertEx.False(enabled.Checked, "Visual typing must remain opt in.");
+        foreach (var name in new[]
+                 {
+                     "keystrokeOverlayMotion",
+                     "keystrokeOverlayCorner",
+                     "keystrokeOverlaySize",
+                     "keystrokeOverlayOpacity",
+                     "keystrokeOverlayHideDelay",
+                     "keystrokeOverlayPresentationToggle",
+                     "keystrokeOverlaySoundToggle",
+                     "keystrokeOverlaySoundVolume",
+                 })
+        {
+            AssertEx.False(
+                form.Controls.Find(name, true).Single().Enabled,
+                $"{name} remained interactive while visual typing was disabled.");
+        }
+
+        var previewText = (Label)form.Controls.Find(
+            "keystrokeOverlayPreviewText", true).Single();
+        AssertEx.True(
+            previewText.Text.Contains("nguyễn", StringComparison.Ordinal),
+            "Visual typing preview must use a deterministic synthetic Vietnamese sample.");
+    }
+
+    [KeyinaTest("visual typing controls persist a complete preference snapshot and preview synthetically")]
+    private static void VisualTypingControlsAreBound()
+    {
+        var saved = new List<KeystrokeOverlayPreferences>();
+        var previews = 0;
+        var actions = SettingsActions.NoOp with
+        {
+            SetKeystrokeOverlayPreferences = saved.Add,
+            PreviewKeystrokeOverlay = () => previews++,
+        };
+        var preferences = new KeystrokeOverlayPreferences(
+            Enabled: true,
+            Motion: KeystrokeOverlayMotionLevel.Reduced,
+            SizePercent: 125,
+            OpacityPercent: 80,
+            HideDelayMilliseconds: 1_400,
+            FallbackCorner: KeystrokeOverlayFallbackCorner.TopLeft,
+            PresentationMode: true,
+            PerKeySoundEnabled: true,
+            SoundVolumePercent: 35);
+        using var form = new SettingsForm(
+            SettingsSnapshot.Sample with { KeystrokeOverlay = preferences },
+            actions)
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-1200, 100),
+        };
+
+        AssertEx.Equal(
+            (int)KeystrokeOverlayFallbackCorner.TopLeft,
+            ((ComboBox)form.Controls.Find(
+                "keystrokeOverlayCorner", true).Single()).SelectedIndex);
+        ((NumericUpDown)form.Controls.Find(
+            "keystrokeOverlaySize", true).Single()).Value = 130;
+
+        AssertEx.True(saved.Count > 0, "Visual typing change was not persisted.");
+        AssertEx.Equal(130, saved[^1].SizePercent);
+        AssertEx.Equal(KeystrokeOverlayMotionLevel.Reduced, saved[^1].Motion);
+        AssertEx.Equal(
+            KeystrokeOverlayFallbackCorner.TopLeft,
+            saved[^1].FallbackCorner);
+        AssertEx.True(
+            saved[^1].PresentationMode,
+            "Presentation mode was not preserved.");
+        AssertEx.True(
+            saved[^1].PerKeySoundEnabled,
+            "Per-key sound preference was not preserved.");
+        AssertEx.Equal(35, saved[^1].SoundVolumePercent);
+
+        form.Show();
+        InvokeClick((Button)form.Controls.Find(
+            "previewKeystrokeOverlay", true).Single());
+        Application.DoEvents();
+        AssertEx.Equal(1, previews);
+        AssertEx.Equal(
+            "nguyễn",
+            ((Label)form.Controls.Find(
+                "keystrokeOverlayPreviewText", true).Single()).Text);
     }
 
     [KeyinaTest("credential setup opens and focuses the requested secure input")]
