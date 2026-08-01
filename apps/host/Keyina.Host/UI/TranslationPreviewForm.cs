@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Keyina.Host.Translation;
 using Keyina.Host.UI.Fluent;
 
@@ -5,6 +6,9 @@ namespace Keyina.Host.UI;
 
 public sealed class TranslationPreviewForm : Form
 {
+    private const int WindowStyleThickFrame = 0x00040000;
+    private const int WindowMessageNonClientLeftButtonDown = 0x00A1;
+    private const int HitTestCaption = 0x0002;
     private const float MinimumReaderZoom = 0.8F;
     private const float MaximumReaderZoom = 1.8F;
     private const float ReaderZoomStep = 0.1F;
@@ -16,12 +20,30 @@ public sealed class TranslationPreviewForm : Form
     private readonly FluentThemePalette palette = FluentTheme.Current;
     private readonly RichTextBox translatedReader;
     private readonly Label metadataLabel;
+    private readonly Label shortcutHint;
+    private readonly FluentButton copyButton;
     private readonly FluentButton replaceButton;
     private readonly System.Windows.Forms.Timer previewTimer = new()
     {
         Interval = 1_000,
     };
     private bool completed;
+    private bool headerDragConfigured;
+
+    public bool UsesResizableWindowStyle =>
+        (CreateParams.Style & WindowStyleThickFrame) != 0;
+
+    public bool SupportsHeaderDrag => headerDragConfigured;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.Style |= WindowStyleThickFrame;
+            return parameters;
+        }
+    }
 
     public TranslationPreviewForm(
         TranslationPreview preview,
@@ -40,7 +62,7 @@ public sealed class TranslationPreviewForm : Form
             "Hiển thị bản dịch nhưng không thay đổi văn bản đang chọn cho đến khi bạn chọn Thay thế. Có thể sao chép hoặc đóng.";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.Manual;
-        MinimumSize = new Size(480, 320);
+        MinimumSize = new Size(600, 340);
         Size = CalculateInitialSize(preview.TranslatedText);
         FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
@@ -88,6 +110,8 @@ public sealed class TranslationPreviewForm : Form
             UseMnemonic = false,
         };
         header.Controls.Add(title, 0, 0);
+        header.MouseDown += BeginWindowDrag;
+        title.MouseDown += BeginWindowDrag;
 
         metadataLabel = new Label
         {
@@ -100,6 +124,8 @@ public sealed class TranslationPreviewForm : Form
             ForeColor = palette.TextSecondary,
         };
         header.Controls.Add(metadataLabel, 0, 1);
+        metadataLabel.MouseDown += BeginWindowDrag;
+        headerDragConfigured = true;
 
         var zoomActions = new FlowLayoutPanel
         {
@@ -194,18 +220,46 @@ public sealed class TranslationPreviewForm : Form
             }
         };
 
-        var actions = new FlowLayoutPanel
+        var footer = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false,
+            ColumnCount = 2,
+            RowCount = 1,
             Padding = new Padding(0, 11, 0, 0),
             Margin = Padding.Empty,
         };
-        var copyButton = CreateButton(
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        shortcutHint = new Label
+        {
+            Name = "translationPreviewShortcutHint",
+            Text = "Enter · Thay thế   Esc · Đóng",
+            AccessibleName = "Phím tắt trình đọc bản dịch",
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            UseMnemonic = false,
+            Font = new Font(Font.FontFamily, 8.5F, FontStyle.Regular),
+            ForeColor = palette.TextTertiary,
+            BackColor = Color.Transparent,
+        };
+        footer.Controls.Add(shortcutHint, 0, 0);
+
+        var actions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right | AnchorStyles.Top,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty,
+        };
+        footer.Controls.Add(actions, 1, 0);
+        copyButton = CreateButton(
             "copyTranslationPreview",
             "Sao chép",
-            FluentButtonKind.Primary,
+            FluentButtonKind.Secondary,
             112);
         copyButton.AccessibleDescription = "Sao chép toàn bộ bản dịch nhưng không thay văn bản gốc.";
         copyButton.Margin = Padding.Empty;
@@ -214,7 +268,7 @@ public sealed class TranslationPreviewForm : Form
         replaceButton = CreateButton(
             "replaceTranslationPreview",
             "Thay thế",
-            FluentButtonKind.Secondary,
+            FluentButtonKind.Primary,
             112);
         replaceButton.AccessibleDescription =
             "Thay văn bản đã chọn bằng bản dịch khi vị trí nhập vẫn còn hợp lệ.";
@@ -230,12 +284,12 @@ public sealed class TranslationPreviewForm : Form
         cancelButton.Margin = new Padding(0, 0, 8, 0);
         cancelButton.Click += (_, _) => CompleteOnce(cancel);
 
-        actions.Controls.Add(copyButton);
         actions.Controls.Add(replaceButton);
+        actions.Controls.Add(copyButton);
         actions.Controls.Add(cancelButton);
-        shell.Controls.Add(actions, 0, 2);
+        shell.Controls.Add(footer, 0, 2);
 
-        AcceptButton = copyButton;
+        AcceptButton = replaceButton;
         CancelButton = cancelButton;
         KeyDown += HandleShortcutKeyDown;
         FormClosing += (_, _) =>
@@ -258,7 +312,7 @@ public sealed class TranslationPreviewForm : Form
             translatedReader.SelectionStart = 0;
             translatedReader.SelectionLength = 0;
             translatedReader.ScrollToCaret();
-            copyButton.Select();
+            replaceButton.Select();
         };
     }
 
@@ -359,6 +413,21 @@ public sealed class TranslationPreviewForm : Form
         }
     }
 
+    private void BeginWindowDrag(object? sender, MouseEventArgs eventArgs)
+    {
+        if (eventArgs.Button != MouseButtons.Left || IsDisposed)
+        {
+            return;
+        }
+
+        _ = ReleaseCapture();
+        _ = SendMessageW(
+            Handle,
+            WindowMessageNonClientLeftButtonDown,
+            new IntPtr(HitTestCaption),
+            IntPtr.Zero);
+    }
+
     private void AdjustReaderZoom(float delta)
     {
         translatedReader.ZoomFactor = Math.Clamp(
@@ -373,12 +442,17 @@ public sealed class TranslationPreviewForm : Form
         if (remaining <= TimeSpan.Zero)
         {
             replaceButton.Enabled = false;
+            AcceptButton = copyButton;
+            shortcutHint.Text = "Enter · Sao chép   Esc · Đóng";
             metadataLabel.Text =
                 $"{preview.Provider} · phát hiện {preview.DetectedSourceLanguage} · đã hết hạn thay thế";
             previewTimer.Stop();
             return;
         }
 
+        replaceButton.Enabled = true;
+        AcceptButton = replaceButton;
+        shortcutHint.Text = "Enter · Thay thế   Esc · Đóng";
         var remainingMinutes = Math.Max(0, (int)Math.Ceiling(remaining.TotalMinutes));
         metadataLabel.Text =
             $"{preview.Provider} · phát hiện {preview.DetectedSourceLanguage} · còn {remainingMinutes} phút";
@@ -397,6 +471,17 @@ public sealed class TranslationPreviewForm : Form
             Close();
         }
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr SendMessageW(
+        IntPtr window,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam);
 
     private void ApplyPaletteRecursive(Control control)
     {
@@ -420,6 +505,13 @@ public sealed class TranslationPreviewForm : Form
             if (label == metadataLabel)
             {
                 label.ForeColor = palette.TextSecondary;
+            }
+            else if (string.Equals(
+                         label.Name,
+                         "translationPreviewShortcutHint",
+                         StringComparison.Ordinal))
+            {
+                label.ForeColor = palette.TextTertiary;
             }
             else
             {

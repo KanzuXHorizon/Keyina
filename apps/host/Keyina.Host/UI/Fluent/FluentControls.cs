@@ -211,6 +211,7 @@ public sealed class FluentNavigationButton : Button
     private FluentThemePalette palette = FluentTheme.Current;
     private bool hovered;
     private bool selected;
+    private bool compact;
 
     public FluentNavigationButton()
     {
@@ -233,6 +234,21 @@ public sealed class FluentNavigationButton : Button
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string Glyph { get; set; } = "\uE80F";
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool Compact
+    {
+        get => compact;
+        set
+        {
+            if (compact == value)
+            {
+                return;
+            }
+            compact = value;
+            Invalidate();
+        }
+    }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool Selected
@@ -299,7 +315,9 @@ public sealed class FluentNavigationButton : Button
             eventArgs.Graphics.FillPath(brush, path);
         }
 
-        var iconBounds = new Rectangle(Scale(14), 0, Scale(24), Height);
+        var iconBounds = compact
+            ? new Rectangle(0, 0, Width, Height)
+            : new Rectangle(Scale(14), 0, Scale(24), Height);
         using (var iconFont = new Font("Segoe Fluent Icons", ScaleFont(12F), FontStyle.Regular))
         {
             TextRenderer.DrawText(
@@ -313,17 +331,24 @@ public sealed class FluentNavigationButton : Button
                 TextFormatFlags.NoPadding);
         }
 
-        var textBounds = new Rectangle(Scale(48), 0, Math.Max(0, Width - Scale(58)), Height);
-        TextRenderer.DrawText(
-            eventArgs.Graphics,
-            Text,
-            Font,
-            textBounds,
-            Enabled ? palette.TextPrimary : palette.TextTertiary,
-            TextFormatFlags.Left |
-            TextFormatFlags.VerticalCenter |
-            TextFormatFlags.EndEllipsis |
-            TextFormatFlags.NoPrefix);
+        if (!compact)
+        {
+            var textBounds = new Rectangle(
+                Scale(48),
+                0,
+                Math.Max(0, Width - Scale(58)),
+                Height);
+            TextRenderer.DrawText(
+                eventArgs.Graphics,
+                Text,
+                Font,
+                textBounds,
+                Enabled ? palette.TextPrimary : palette.TextTertiary,
+                TextFormatFlags.Left |
+                TextFormatFlags.VerticalCenter |
+                TextFormatFlags.EndEllipsis |
+                TextFormatFlags.NoPrefix);
+        }
 
         if (Focused && ShowFocusCues)
         {

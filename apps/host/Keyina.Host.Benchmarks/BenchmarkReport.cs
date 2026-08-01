@@ -81,6 +81,56 @@ internal static class BenchmarkReport
             checksum);
     }
 
+    internal static async Task<BenchmarkCase> MeasureAsync(
+        string name,
+        int warmupIterations,
+        int measuredIterations,
+        Func<Task<long>> operation)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(warmupIterations);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(measuredIterations);
+        ArgumentNullException.ThrowIfNull(operation);
+
+        long checksum = 0;
+        for (var index = 0; index < warmupIterations; index++)
+        {
+            checksum += await operation().ConfigureAwait(false);
+        }
+
+        var beforeAllocated = GC.GetTotalAllocatedBytes(precise: true);
+        for (var index = 0; index < measuredIterations; index++)
+        {
+            checksum += await operation().ConfigureAwait(false);
+        }
+        var allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - beforeAllocated;
+
+        var samples = new long[measuredIterations];
+        for (var index = 0; index < measuredIterations; index++)
+        {
+            var started = Stopwatch.GetTimestamp();
+            checksum += await operation().ConfigureAwait(false);
+            samples[index] = Stopwatch.GetTimestamp() - started;
+        }
+
+        Array.Sort(samples);
+        static double ToNanoseconds(long ticks) => ticks * (1_000_000_000d / Stopwatch.Frequency);
+        static long Percentile(long[] sorted, int numerator, int denominator)
+        {
+            var index = ((sorted.Length - 1L) * numerator + denominator - 1) / denominator;
+            return sorted[index];
+        }
+
+        return new BenchmarkCase(
+            name,
+            ToNanoseconds(Percentile(samples, 1, 2)),
+            ToNanoseconds(Percentile(samples, 95, 100)),
+            ToNanoseconds(Percentile(samples, 99, 100)),
+            ToNanoseconds(samples[^1]),
+            allocatedBytes / (double)measuredIterations,
+            checksum);
+    }
+
     internal static void Write(string outputDirectory, BenchmarkDocument document)
     {
         Directory.CreateDirectory(outputDirectory);

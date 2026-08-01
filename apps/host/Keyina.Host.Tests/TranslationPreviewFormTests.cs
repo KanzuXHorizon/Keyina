@@ -1,6 +1,7 @@
 using System.Reflection;
 using Keyina.Host.Translation;
 using Keyina.Host.UI;
+using Keyina.Host.UI.Fluent;
 
 namespace Keyina.Host.Tests;
 
@@ -27,6 +28,12 @@ internal static class TranslationPreviewFormTests
             form.AccessibleDescription?.Contains("không thay đổi", StringComparison.OrdinalIgnoreCase) == true,
             "Overlay accessibility copy did not explain that original text remains unchanged.");
         AssertEx.Equal(FormBorderStyle.None, form.FormBorderStyle);
+        AssertEx.True(
+            form.UsesResizableWindowStyle,
+            "Borderless translation reader did not expose the native resize frame.");
+        AssertEx.True(
+            form.SupportsHeaderDrag,
+            "Translation reader header cannot move the borderless window.");
         AssertEx.False(form.MaximizeBox, "Borderless translation overlay must not expose maximize chrome.");
         AssertEx.False(form.MinimizeBox, "Borderless translation overlay must not expose minimize chrome.");
         AssertEx.Equal(1, form.Controls.Find("closeTranslationPreview", true).Length);
@@ -41,13 +48,85 @@ internal static class TranslationPreviewFormTests
         AssertEx.Equal(RichTextBoxScrollBars.Vertical, reader.ScrollBars);
         AssertEx.Equal(0, reader.SelectionLength);
 
-        InvokeClick((Button)form.Controls.Find("copyTranslationPreview", true).Single());
+        var replaceButton = (FluentButton)form.Controls
+            .Find("replaceTranslationPreview", true).Single();
+        var copyButton = (FluentButton)form.Controls
+            .Find("copyTranslationPreview", true).Single();
+        AssertEx.Equal(FluentButtonKind.Primary, replaceButton.Kind);
+        AssertEx.Equal(FluentButtonKind.Secondary, copyButton.Kind);
+        AssertEx.True(
+            ReferenceEquals(form.AcceptButton, replaceButton),
+            "Enter should activate the replace action in a replace-preview workflow.");
+        AssertEx.Equal(1, form.Controls.Find("translationPreviewShortcutHint", true).Length);
+
+        InvokeClick(copyButton);
         AssertEx.Equal("Hello", copied);
         AssertEx.Equal(0, replaced);
         AssertEx.Equal(0, cancelled);
 
-        InvokeClick((Button)form.Controls.Find("replaceTranslationPreview", true).Single());
+        InvokeClick(replaceButton);
         AssertEx.Equal(1, replaced);
+    }
+
+    [KeyinaTest("translation reader minimum size keeps shortcuts and actions visible")]
+    private static void PreviewMinimumSizeDoesNotClipFooter()
+    {
+        using var form = new TranslationPreviewForm(
+            CreatePreview(),
+            _ => { },
+            _ => { },
+            () => { })
+        {
+            Size = new Size(600, 340),
+        };
+        form.Opacity = 0;
+        form.Show();
+        Application.DoEvents();
+        form.PerformLayout();
+
+        var hint = form.Controls.Find("translationPreviewShortcutHint", true).Single();
+        var replace = form.Controls.Find("replaceTranslationPreview", true).Single();
+        var copy = form.Controls.Find("copyTranslationPreview", true).Single();
+        var cancel = form.Controls.Find("cancelTranslationPreview", true).Single();
+        var reader = form.Controls.Find("translationPreviewReaderCard", true).Single();
+
+        AssertEx.True(hint.Width >= 120, "Shortcut hint collapsed at the minimum size.");
+        AssertEx.True(reader.Height >= 140, "Reader content area became too short at minimum size.");
+        foreach (var control in new[] { hint, replace, copy, cancel })
+        {
+            var bounds = form.RectangleToClient(control.RectangleToScreen(control.ClientRectangle));
+            AssertEx.True(bounds.Left >= 0 && bounds.Top >= 0,
+                $"{control.Name} began outside the client area.");
+            AssertEx.True(bounds.Right <= form.ClientSize.Width && bounds.Bottom <= form.ClientSize.Height,
+                $"{control.Name} was clipped at the minimum size.");
+        }
+    }
+
+    [KeyinaTest("expired translation preview defaults Enter to copy")]
+    private static void ExpiredPreviewUsesCopyAsSafeDefault()
+    {
+        var copied = string.Empty;
+        var preview = CreatePreview() with
+        {
+            ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+        };
+        using var form = new TranslationPreviewForm(
+            preview,
+            _ => throw new InvalidOperationException("Expired preview must not replace text."),
+            text => copied = text,
+            () => { });
+
+        var replace = (Button)form.Controls.Find("replaceTranslationPreview", true).Single();
+        var copy = (Button)form.Controls.Find("copyTranslationPreview", true).Single();
+        var hint = (Label)form.Controls.Find("translationPreviewShortcutHint", true).Single();
+
+        AssertEx.False(replace.Enabled, "Expired preview still allowed replacement.");
+        AssertEx.True(ReferenceEquals(form.AcceptButton, copy),
+            "Enter did not switch to the safe copy action after preview expiry.");
+        AssertEx.True(hint.Text.Contains("Sao chép", StringComparison.Ordinal),
+            "Expired preview shortcut hint did not explain the new default action.");
+        InvokeClick(copy);
+        AssertEx.Equal("Hello", copied);
     }
 
     [KeyinaTest("translation overlay cancel action fires once without replacing")]

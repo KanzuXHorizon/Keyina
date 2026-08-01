@@ -6,6 +6,8 @@ namespace Keyina.Host.UI;
 
 public sealed class DictationOverlayForm : Form
 {
+    public const int MaximumVisibleTranscriptCharacters = 180;
+
     private const int ExtendedToolWindow = 0x00000080;
     private const int ExtendedTransparent = 0x00000020;
     private const int ExtendedNoActivate = 0x08000000;
@@ -15,6 +17,7 @@ public sealed class DictationOverlayForm : Form
 
     private readonly FluentThemePalette palette = FluentTheme.Current;
     private readonly Label statusLabel;
+    private readonly Label shortcutLabel;
     private readonly Label transcriptLabel;
     private bool resourcesReleased;
 
@@ -57,6 +60,19 @@ public sealed class DictationOverlayForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
         Controls.Add(layout);
 
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            BackColor = palette.Surface,
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.Controls.Add(header, 0, 0);
+
         statusLabel = new Label
         {
             Name = "dictationOverlayStatus",
@@ -68,14 +84,28 @@ public sealed class DictationOverlayForm : Form
             BackColor = palette.Surface,
             UseMnemonic = false,
         };
-        layout.Controls.Add(statusLabel, 0, 0);
+        header.Controls.Add(statusLabel, 0, 0);
+
+        shortcutLabel = new Label
+        {
+            Name = "dictationOverlayShortcut",
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            TextAlign = ContentAlignment.MiddleRight,
+            Font = new Font(Font.FontFamily, 8.5F, FontStyle.Regular),
+            ForeColor = palette.TextSecondary,
+            BackColor = palette.Surface,
+            UseMnemonic = false,
+            Margin = Padding.Empty,
+        };
+        header.Controls.Add(shortcutLabel, 1, 0);
 
         transcriptLabel = new Label
         {
             Name = "dictationOverlayTranscript",
             Dock = DockStyle.Fill,
             AutoSize = false,
-            AutoEllipsis = true,
+            AutoEllipsis = false,
             TextAlign = ContentAlignment.TopLeft,
             Font = new Font(Font.FontFamily, 12F, FontStyle.Regular),
             ForeColor = palette.TextPrimary,
@@ -90,7 +120,7 @@ public sealed class DictationOverlayForm : Form
             Name = "dictationOverlayHint",
             Dock = DockStyle.Fill,
             AutoSize = false,
-            Text = "Esc để hủy · Keyina không ghi nội dung vào log",
+            Text = "Esc · Hủy  ·  Keyina không ghi nội dung vào log",
             TextAlign = ContentAlignment.BottomLeft,
             Font = new Font(Font.FontFamily, 8.5F, FontStyle.Regular),
             ForeColor = palette.TextTertiary,
@@ -129,20 +159,23 @@ public sealed class DictationOverlayForm : Form
         switch (state.Status)
         {
             case DictationStatus.Connecting:
-                statusLabel.Text = "Đang kết nối Speechmatics";
+                statusLabel.Text = "Đang kết nối";
+                shortcutLabel.Text = "Esc · Hủy";
                 transcriptLabel.Text = "Chuẩn bị microphone…";
                 break;
             case DictationStatus.Listening:
-                statusLabel.Text = "Đang nghe · Ctrl + Alt + V để hoàn tất";
+                statusLabel.Text = "Đang nghe";
+                shortcutLabel.Text = "Ctrl + Alt + V · Hoàn tất";
                 transcriptLabel.Text = string.IsNullOrWhiteSpace(state.DisplayText)
                     ? "Hãy bắt đầu nói…"
-                    : state.DisplayText;
+                    : CreateVisibleTranscript(state.DisplayText);
                 break;
             case DictationStatus.Finalizing:
-                statusLabel.Text = "Đang hoàn tất bản ghi";
+                statusLabel.Text = "Đang hoàn tất";
+                shortcutLabel.Text = string.Empty;
                 transcriptLabel.Text = string.IsNullOrWhiteSpace(state.DisplayText)
                     ? "Đang chờ Speechmatics gửi phần cuối…"
-                    : state.DisplayText;
+                    : CreateVisibleTranscript(state.DisplayText);
                 break;
             case DictationStatus.Idle:
             case DictationStatus.Inserted:
@@ -163,6 +196,7 @@ public sealed class DictationOverlayForm : Form
     {
         transcriptLabel.Text = string.Empty;
         statusLabel.Text = string.Empty;
+        shortcutLabel.Text = string.Empty;
         AccessibleDescription = string.Empty;
         if (Visible)
         {
@@ -186,9 +220,27 @@ public sealed class DictationOverlayForm : Form
         {
             resourcesReleased = true;
             statusLabel.Dispose();
+            shortcutLabel.Dispose();
             transcriptLabel.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private static string CreateVisibleTranscript(string transcript)
+    {
+        var normalized = transcript.Trim();
+        if (normalized.Length <= MaximumVisibleTranscriptCharacters)
+        {
+            return normalized;
+        }
+
+        var start = normalized.Length - MaximumVisibleTranscriptCharacters;
+        var wordBoundary = normalized.IndexOf(' ', start);
+        if (wordBoundary >= start && wordBoundary < normalized.Length - 1)
+        {
+            start = wordBoundary + 1;
+        }
+        return "… " + normalized[start..];
     }
 
     private void ShowNoActivate()

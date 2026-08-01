@@ -12,5 +12,6 @@
     <ProjectReference Include="..\Keyina.Host\Keyina.Host.csproj" />
     <ProjectReference Include="..\Keyina.Host.Windows\Keyina.Host.Windows.csproj" />
     <ProjectReference Include="..\Keyina.Speechmatics\Keyina.Speechmatics.csproj" />
+    <ProjectReference Include="..\Keyina.Host.Benchmarks\Keyina.Host.Benchmarks.csproj" />
   </ItemGroup>
 </Project>

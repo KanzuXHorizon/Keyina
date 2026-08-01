@@ -4,12 +4,21 @@ namespace Keyina.Host.UI;
 
 public static class SettingsScreenshotRenderer
 {
+    private static readonly Size DefaultClientSize = new(980, 690);
+
     public static void Render(string path, SettingsSnapshot snapshot) =>
-        RenderSection(path, snapshot, "navOverview");
+        RenderSection(path, snapshot, "navOverview", DefaultClientSize);
 
     public static IReadOnlyList<string> RenderGallery(
         string directory,
-        SettingsSnapshot snapshot)
+        SettingsSnapshot snapshot) =>
+        RenderGallery(directory, snapshot, DefaultClientSize, string.Empty);
+
+    public static IReadOnlyList<string> RenderGallery(
+        string directory,
+        SettingsSnapshot snapshot,
+        Size clientSize,
+        string fileNamePrefix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -17,6 +26,13 @@ public static class SettingsScreenshotRenderer
         {
             throw new ArgumentException("Gallery directory must be fully qualified.", nameof(directory));
         }
+        if (clientSize.Width <= 0 || clientSize.Height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(clientSize),
+                "Gallery size must be positive.");
+        }
+        ArgumentNullException.ThrowIfNull(fileNamePrefix);
 
         Directory.CreateDirectory(directory);
         var sections = new (string FileName, string NavigationName)[]
@@ -33,8 +49,8 @@ public static class SettingsScreenshotRenderer
         var paths = new List<string>(sections.Length);
         foreach (var (fileName, navigationName) in sections)
         {
-            var path = Path.Combine(directory, fileName);
-            RenderSection(path, snapshot, navigationName);
+            var path = Path.Combine(directory, fileNamePrefix + fileName);
+            RenderSection(path, snapshot, navigationName, clientSize);
             paths.Add(path);
         }
         return paths;
@@ -43,7 +59,8 @@ public static class SettingsScreenshotRenderer
     private static void RenderSection(
         string path,
         SettingsSnapshot snapshot,
-        string navigationName)
+        string navigationName,
+        Size clientSize)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -63,7 +80,7 @@ public static class SettingsScreenshotRenderer
 
         using var form = new SettingsForm(snapshot, SettingsActions.NoOp)
         {
-            ClientSize = new Size(980, 690),
+            ClientSize = clientSize,
             ShowInTaskbar = false,
             StartPosition = FormStartPosition.Manual,
             Location = new Point(-32_000, -32_000),

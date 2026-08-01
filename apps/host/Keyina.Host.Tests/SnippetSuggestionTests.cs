@@ -58,6 +58,7 @@ internal static class SnippetSuggestionTests
     private static void SettingsLibrarySupportsManagement()
     {
         using var form = new SettingsForm(SettingsSnapshot.Sample, SettingsActions.NoOp);
+        form.OpenSection("snippets");
         var list = form.Controls.Find("snippetsList", true)
             .OfType<FlowLayoutPanel>()
             .Single();

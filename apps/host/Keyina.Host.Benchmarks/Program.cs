@@ -4,6 +4,7 @@ namespace Keyina.Host.Benchmarks;
 
 internal static class Program
 {
+    [STAThread]
     private static int Main(string[] args)
     {
         var suite = "snippets";
@@ -41,7 +42,9 @@ internal static class Program
 
         try
         {
-            var cases = RunSuites(suite, residentExecutable, warmup, iterations);
+            var cases = RunSuitesAsync(suite, residentExecutable, warmup, iterations)
+                .GetAwaiter()
+                .GetResult();
             var document = new BenchmarkDocument(
                 1,
                 new BenchmarkEnvironment(
@@ -68,7 +71,7 @@ internal static class Program
         }
     }
 
-    private static List<BenchmarkCase> RunSuites(
+    private static async Task<List<BenchmarkCase>> RunSuitesAsync(
         string suite,
         string? residentExecutable,
         int warmup,
@@ -88,6 +91,8 @@ internal static class Program
                 case "all":
                     cases.AddRange(SnippetBenchmarks.Run(warmup, iterations));
                     cases.AddRange(CommandOutputBenchmarks.Run(Math.Min(warmup, 5), Math.Min(iterations, 20)));
+                    cases.AddRange(await ApplicationBenchmarks.RunAsync(warmup, iterations)
+                        .ConfigureAwait(false));
                     if (!string.IsNullOrWhiteSpace(residentExecutable))
                     {
                         cases.AddRange(ResidentBenchmarks.Run(residentExecutable, warmup, iterations));
@@ -98,6 +103,13 @@ internal static class Program
                     break;
                 case "commands":
                     cases.AddRange(CommandOutputBenchmarks.Run(Math.Min(warmup, 5), Math.Min(iterations, 20)));
+                    break;
+                case "application":
+                    cases.AddRange(await ApplicationBenchmarks.RunAsync(warmup, iterations)
+                        .ConfigureAwait(false));
+                    break;
+                case "settings":
+                    cases.AddRange(ApplicationBenchmarks.RunSnippetUi(warmup, iterations));
                     break;
                 case "resident" when !string.IsNullOrWhiteSpace(residentExecutable):
                     cases.AddRange(ResidentBenchmarks.Run(residentExecutable, warmup, iterations));
@@ -112,6 +124,6 @@ internal static class Program
     }
 
     private static void PrintUsage() => Console.Error.WriteLine(
-        "Usage: Keyina.Host.Benchmarks --suite snippets|commands|resident|all[,suite] " +
+        "Usage: Keyina.Host.Benchmarks --suite snippets|commands|application|settings|resident|all[,suite] " +
         "--output <directory> [--resident <KeyinaInput.exe>] [--warmup N] [--iterations N]");
 }

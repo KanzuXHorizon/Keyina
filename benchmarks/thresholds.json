@@ -1,0 +1,55 @@
+{
+  "SchemaVersion": 1,
+  "Defaults": {
+    "Median": {
+      "RelativeTolerance": 0.20,
+      "AbsoluteToleranceNanoseconds": 250000
+    },
+    "P95": {
+      "RelativeTolerance": 0.25,
+      "AbsoluteToleranceNanoseconds": 500000
+    }
+  },
+  "Cases": {
+    "application_settings_construct_sample": {
+      "Median": {
+        "RelativeTolerance": 0.20,
+        "AbsoluteToleranceNanoseconds": 5000000
+      },
+      "P95": {
+        "RelativeTolerance": 0.25,
+        "AbsoluteToleranceNanoseconds": 7500000
+      }
+    },
+    "application_settings_construct_1000_snippets": {
+      "Median": {
+        "RelativeTolerance": 0.20,
+        "AbsoluteToleranceNanoseconds": 5000000
+      },
+      "P95": {
+        "RelativeTolerance": 0.25,
+        "AbsoluteToleranceNanoseconds": 7500000
+      }
+    },
+    "application_settings_apply_1000_snippets": {
+      "Median": {
+        "RelativeTolerance": 0.15,
+        "AbsoluteToleranceNanoseconds": 50000000
+      },
+      "P95": {
+        "RelativeTolerance": 0.20,
+        "AbsoluteToleranceNanoseconds": 75000000
+      }
+    },
+    "application_settings_apply_unchanged_1000_snippets": {
+      "Median": {
+        "RelativeTolerance": 0.20,
+        "AbsoluteToleranceNanoseconds": 1000000
+      },
+      "P95": {
+        "RelativeTolerance": 0.25,
+        "AbsoluteToleranceNanoseconds": 1500000
+      }
+    }
+  }
+}

@@ -10,4 +10,9 @@
     <ProjectReference Include="..\Keyina.Host.Core\Keyina.Host.Core.csproj" />
     <ProjectReference Include="..\Keyina.Host\Keyina.Host.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Keyina.Host.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

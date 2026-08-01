@@ -16,6 +16,13 @@ using Microsoft.Win32;
 
 namespace Keyina.Host.UI;
 
+public enum SettingsLayoutMode
+{
+    Expanded,
+    Compact,
+    Narrow,
+}
+
 public sealed partial class SettingsForm : Form
 {
     private const string DeepLAuthenticationHelpUrl =
@@ -37,8 +44,10 @@ public sealed partial class SettingsForm : Form
     private readonly SettingsActions actions;
     private readonly Dictionary<string, Panel> pages = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FluentNavigationButton> navigationButtons = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Label> namedLabels = new(StringComparer.Ordinal);
     private readonly Dictionary<HotkeyCommand, Label> hotkeyKeycaps = [];
     private readonly CancellationTokenSource lifetime = new();
+    private readonly ToolTip navigationToolTip = new();
     private readonly TableLayoutPanel shell;
     private readonly Panel sidebar;
     private readonly Panel contentPanel;
@@ -99,8 +108,15 @@ public sealed partial class SettingsForm : Form
     private SettingsSnapshot currentSnapshot;
     private bool applyingSnapshot;
     private bool applicationRulesDirty;
+    private bool snippetRowsInitialized;
+    private bool snippetRowsDirty = true;
     private bool resourcesReleased;
-    private bool? compactLayout;
+    private SettingsLayoutMode? appliedLayoutMode;
+    private TableLayoutPanel sidebarLayout = null!;
+    private FlowLayoutPanel navigation = null!;
+
+    public SettingsLayoutMode CurrentLayoutMode { get; private set; } =
+        SettingsLayoutMode.Expanded;
 
     public SettingsForm(SettingsSnapshot snapshot, SettingsActions actions)
     {
@@ -114,7 +130,7 @@ public sealed partial class SettingsForm : Form
             "Cài đặt bộ gõ tiếng Việt, nhập bằng giọng nói, dịch nhanh, phím tắt, gõ tắt và chẩn đoán.";
         AutoScaleMode = AutoScaleMode.Dpi;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(900, 620);
+        MinimumSize = new Size(760, 620);
         Size = new Size(1100, 760);
         Font = new Font("Segoe UI Variable Text", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
         ShowInTaskbar = true;
@@ -637,6 +653,9 @@ public sealed partial class SettingsForm : Form
     public void ApplySnapshot(SettingsSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var snippetsChanged = !SnippetConfigurationsEqual(
+            currentSnapshot.Snippets,
+            snapshot.Snippets);
         currentSnapshot = snapshot;
         applyingSnapshot = true;
         try
@@ -752,7 +771,14 @@ public sealed partial class SettingsForm : Form
             snippetCount.Text = snapshot.CustomSnippetCount == 1
                 ? "1 gõ tắt tùy chỉnh"
                 : $"{snapshot.CustomSnippetCount} gõ tắt tùy chỉnh";
-            AddSnippetRows();
+            if (snippetsChanged)
+            {
+                snippetRowsDirty = true;
+                if (snippetRowsInitialized)
+                {
+                    AddSnippetRows();
+                }
+            }
             removeSpeechKey.Enabled = snapshot.SpeechCredentialConfigured;
             removeDeepLKey.Enabled = snapshot.TranslationCredentialConfigured;
             saveDeepLKey.Text = snapshot.TranslationCredentialConfigured
@@ -796,6 +822,7 @@ public sealed partial class SettingsForm : Form
             SystemEvents.UserPreferenceChanged -= SystemEventsUserPreferenceChanged;
             typingDiagnosticTimer.Stop();
             typingDiagnosticTimer.Dispose();
+            navigationToolTip.Dispose();
             TypingDiagnosticTrace.ClearAndDisable();
             lifetime.Cancel();
             lifetime.Dispose();
@@ -812,19 +839,20 @@ public sealed partial class SettingsForm : Form
             Padding = new Padding(14, 18, 14, 14),
         };
 
-        var layout = new TableLayoutPanel
+        sidebarLayout = new TableLayoutPanel
         {
+            Name = "sidebarLayout",
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 4,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
-        panel.Controls.Add(layout);
+        sidebarLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
+        sidebarLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        sidebarLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
+        sidebarLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        panel.Controls.Add(sidebarLayout);
 
         var brand = new TableLayoutPanel
         {
@@ -837,7 +865,7 @@ public sealed partial class SettingsForm : Form
         brand.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         brand.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
         brand.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
-        layout.Controls.Add(brand, 0, 0);
+        sidebarLayout.Controls.Add(brand, 0, 0);
 
         var mark = new Label
         {
@@ -867,9 +895,12 @@ public sealed partial class SettingsForm : Form
         productSubtitle.TextAlign = ContentAlignment.TopLeft;
         brand.Controls.Add(productSubtitle, 1, 1);
 
-        var navigation = new FlowLayoutPanel
+        navigation = new FlowLayoutPanel
         {
             Name = "navigation",
+            AccessibleName = "Điều hướng cài đặt",
+            AccessibleDescription =
+                "Chọn trang cài đặt Keyina. Dùng phím mũi tên, Home hoặc End để di chuyển.",
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
@@ -877,7 +908,7 @@ public sealed partial class SettingsForm : Form
             Margin = new Padding(0, 4, 0, 0),
             Padding = new Padding(0, 8, 0, 0),
         };
-        layout.Controls.Add(navigation, 0, 1);
+        sidebarLayout.Controls.Add(navigation, 0, 1);
 
         AddNavigation(navigation, "navOverview", "Tổng quan", "\uE80F", "overview");
         AddNavigation(navigation, "navTyping", "Bộ gõ", "\uE765", "typing");
@@ -887,13 +918,7 @@ public sealed partial class SettingsForm : Form
         AddNavigation(navigation, "navApplications", "Ứng dụng", "\uE7C5", "applications");
         AddNavigation(navigation, "navSnippets", "Gõ tắt", "\uE8A5", "snippets");
         AddNavigation(navigation, "navDiagnostics", "Chẩn đoán", "\uE9D9", "diagnostics");
-        navigation.SizeChanged += (_, _) =>
-        {
-            foreach (Control child in navigation.Controls)
-            {
-                child.Width = Math.Max(120, navigation.ClientSize.Width - 2);
-            }
-        };
+        navigation.SizeChanged += (_, _) => ResizeNavigationButtons();
 
         var privacy = new TableLayoutPanel
         {
@@ -908,7 +933,7 @@ public sealed partial class SettingsForm : Form
         privacy.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         privacy.RowStyles.Add(new RowStyle(SizeType.Absolute, 21F));
         privacy.RowStyles.Add(new RowStyle(SizeType.Absolute, 21F));
-        layout.Controls.Add(privacy, 0, 2);
+        sidebarLayout.Controls.Add(privacy, 0, 2);
 
         var shield = CreateIconLabel("privacyIcon", "\uEA18", 14F);
         shield.Dock = DockStyle.Fill;
@@ -931,7 +956,7 @@ public sealed partial class SettingsForm : Form
         version.Dock = DockStyle.Fill;
         version.TextAlign = ContentAlignment.MiddleLeft;
         version.Padding = new Padding(8, 0, 0, 0);
-        layout.Controls.Add(version, 0, 3);
+        sidebarLayout.Controls.Add(version, 0, 3);
 
         return panel;
     }
@@ -953,7 +978,11 @@ public sealed partial class SettingsForm : Form
             AccessibleName = text,
             AccessibleDescription = $"Mở trang {text}",
         };
+        button.TabIndex = navigationButtons.Count;
         button.Click += (_, _) => ShowSection(pageKey);
+        button.KeyDown += (_, eventArgs) =>
+            HandleNavigationKeyDown(pageKey, eventArgs);
+        navigationToolTip.SetToolTip(button, text);
         navigation.Controls.Add(button);
         navigationButtons.Add(pageKey, button);
     }
@@ -980,12 +1009,18 @@ public sealed partial class SettingsForm : Form
         _ = input.Focus();
     }
 
-    private void ShowSection(string pageKey)
+    private void ShowSection(string pageKey, bool focusPage = true)
     {
         if (!pages.TryGetValue(pageKey, out var selectedPage) ||
             !SectionCopy.TryGetValue(pageKey, out var copy))
         {
             throw new ArgumentOutOfRangeException(nameof(pageKey));
+        }
+
+        if (string.Equals(pageKey, "snippets", StringComparison.Ordinal) &&
+            snippetRowsDirty)
+        {
+            AddSnippetRows();
         }
 
         foreach (var page in pages.Values)
@@ -1001,12 +1036,77 @@ public sealed partial class SettingsForm : Form
 
         sectionTitle.Text = copy.Title;
         sectionSubtitle.Text = copy.Subtitle;
-        selectedPage.SelectNextControl(
-            selectedPage,
-            forward: true,
-            tabStopOnly: true,
-            nested: true,
-            wrap: false);
+        if (focusPage && Visible)
+        {
+            FocusFirstInteractiveControl(selectedPage);
+        }
+    }
+
+    private void HandleNavigationKeyDown(
+        string currentPageKey,
+        KeyEventArgs eventArgs)
+    {
+        var pageKeys = navigationButtons.Keys.ToArray();
+        var currentIndex = Array.IndexOf(pageKeys, currentPageKey);
+        if (currentIndex < 0 || pageKeys.Length == 0)
+        {
+            return;
+        }
+
+        var targetIndex = eventArgs.KeyCode switch
+        {
+            Keys.Down or Keys.Right => (currentIndex + 1) % pageKeys.Length,
+            Keys.Up or Keys.Left =>
+                (currentIndex - 1 + pageKeys.Length) % pageKeys.Length,
+            Keys.Home => 0,
+            Keys.End => pageKeys.Length - 1,
+            _ => -1,
+        };
+        if (targetIndex < 0)
+        {
+            return;
+        }
+
+        var targetPageKey = pageKeys[targetIndex];
+        ShowSection(targetPageKey, focusPage: false);
+        var targetButton = navigationButtons[targetPageKey];
+        targetButton.Select();
+        _ = targetButton.Focus();
+        eventArgs.Handled = true;
+        eventArgs.SuppressKeyPress = true;
+    }
+
+    private static void FocusFirstInteractiveControl(Control root)
+    {
+        var target = FindFirstInteractiveControl(root);
+        if (target is null)
+        {
+            return;
+        }
+        target.Select();
+        _ = target.Focus();
+    }
+
+    private static Control? FindFirstInteractiveControl(Control root)
+    {
+        foreach (Control child in root.Controls.Cast<Control>()
+                     .OrderBy(control => control.TabIndex))
+        {
+            if (!child.Visible || !child.Enabled)
+            {
+                continue;
+            }
+            if (child.TabStop && child.CanSelect)
+            {
+                return child;
+            }
+            var nested = FindFirstInteractiveControl(child);
+            if (nested is not null)
+            {
+                return nested;
+            }
+        }
+        return null;
     }
 
     private Panel CreateOverviewPage()
@@ -1875,7 +1975,6 @@ public sealed partial class SettingsForm : Form
         libraryLayout.Controls.Add(searchToolbar, 0, 1);
         libraryLayout.SetColumnSpan(searchToolbar, 2);
 
-        AddSnippetRows();
         libraryLayout.Controls.Add(snippetsList, 0, 2);
         libraryLayout.SetColumnSpan(snippetsList, 2);
 
@@ -2647,32 +2746,116 @@ public sealed partial class SettingsForm : Form
         {
             return;
         }
-        snippetsList.SuspendLayout();
-        snippetsList.Controls.Clear();
-        foreach (var snippet in SnippetRow.All.Concat(
-                     currentSnapshot.Snippets.Select(configuration => new SnippetRow(
-                         configuration.Trigger,
-                         configuration.Execution is null
-                             ? configuration.Expansion
-                             : $"{Path.GetFileName(configuration.Execution.ExecutablePath)} {configuration.Execution.Arguments}".Trim(),
-                         configuration.Execution is not null
-                             ? "Chương trình · chèn stdout"
-                             : configuration.PreserveDelimiter
-                                 ? "Văn bản · giữ Space"
-                                 : "Văn bản · nuốt Space",
-                         configuration))))
+
+        var desiredRows = BuildSnippetRows();
+        var existingCards = snippetsList.Controls
+            .OfType<FluentCard>()
+            .ToArray();
+        var exactMatches = existingCards
+            .Where(card => card.Tag is SnippetRow)
+            .GroupBy(
+                card => ((SnippetRow)card.Tag!).Trigger,
+                StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<FluentCard>(group),
+                StringComparer.OrdinalIgnoreCase);
+        var selectedCards = new FluentCard?[desiredRows.Length];
+        var reservedCards = new HashSet<FluentCard>(ReferenceEqualityComparer.Instance);
+
+        for (var index = 0; index < desiredRows.Length; index++)
         {
-            snippetsList.Controls.Add(CreateSnippetRow(snippet));
+            if (!exactMatches.TryGetValue(desiredRows[index].Trigger, out var matches) ||
+                matches.Count == 0)
+            {
+                continue;
+            }
+
+            var card = matches.Dequeue();
+            selectedCards[index] = card;
+            reservedCards.Add(card);
         }
-        ResizeStackChildren(snippetsList);
-        FilterSnippets(snippetsSearch.Text);
-        snippetsList.ResumeLayout();
+
+        var recycledCustomCards = new Queue<FluentCard>(existingCards.Where(card =>
+            !reservedCards.Contains(card) &&
+            card.Tag is SnippetRow { Configuration: not null } &&
+            IsCustomSnippetCard(card)));
+        var orderedCards = new List<FluentCard>(desiredRows.Length);
+        var scrollPosition = new Point(
+            -snippetsList.AutoScrollPosition.X,
+            -snippetsList.AutoScrollPosition.Y);
+
+        snippetsList.SuspendLayout();
+        try
+        {
+            for (var index = 0; index < desiredRows.Length; index++)
+            {
+                var snippet = desiredRows[index];
+                var card = selectedCards[index];
+                if (card is null &&
+                    snippet.Configuration is not null &&
+                    recycledCustomCards.Count > 0)
+                {
+                    card = recycledCustomCards.Dequeue();
+                }
+                card ??= CreateSnippetRow(snippet);
+                UpdateSnippetRow(card, snippet);
+                orderedCards.Add(card);
+            }
+
+            var usedCards = orderedCards.ToHashSet(ReferenceEqualityComparer.Instance);
+            foreach (var obsolete in existingCards.Where(card => !usedCards.Contains(card)))
+            {
+                snippetsList.Controls.Remove(obsolete);
+                obsolete.Dispose();
+            }
+
+            for (var index = 0; index < orderedCards.Count; index++)
+            {
+                var card = orderedCards[index];
+                if (!ReferenceEquals(card.Parent, snippetsList))
+                {
+                    snippetsList.Controls.Add(card);
+                }
+                if (!ReferenceEquals(snippetsList.Controls[index], card))
+                {
+                    snippetsList.Controls.SetChildIndex(card, index);
+                }
+            }
+
+            ResizeStackChildren(snippetsList);
+            if (snippetsSearch.TextLength > 0 || snippetsFilter.SelectedIndex != 0)
+            {
+                FilterSnippets(snippetsSearch.Text);
+            }
+            snippetRowsInitialized = true;
+            snippetRowsDirty = false;
+        }
+        finally
+        {
+            snippetsList.ResumeLayout(performLayout: true);
+            snippetsList.AutoScrollPosition = scrollPosition;
+        }
     }
+
+    private SnippetRow[] BuildSnippetRows() =>
+        SnippetRow.All.Concat(
+            currentSnapshot.Snippets.Select(configuration => new SnippetRow(
+                configuration.Trigger,
+                configuration.Execution is null
+                    ? configuration.Expansion
+                    : $"{Path.GetFileName(configuration.Execution.ExecutablePath)} {configuration.Execution.Arguments}".Trim(),
+                configuration.Execution is not null
+                    ? "Chương trình · chèn stdout"
+                    : configuration.PreserveDelimiter
+                        ? "Văn bản · giữ Space"
+                        : "Văn bản · nuốt Space",
+                configuration)))
+        .ToArray();
 
     private FluentCard CreateSnippetRow(SnippetRow snippet)
     {
-        var card = CreateCard("snippet_" + snippet.Trigger.TrimStart(';'), 62);
-        card.Tag = snippet;
+        var card = CreateCard("snippetCard", 62);
         card.Margin = new Padding(0, 0, 0, 6);
         card.UseSecondarySurface = true;
         var layout = new TableLayoutPanel
@@ -2693,34 +2876,143 @@ public sealed partial class SettingsForm : Form
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
         }
         card.Controls.Add(layout);
-        var trigger = CreateLabel(card.Name + "Trigger", snippet.Trigger, LabelRole.Caption);
+
+        var trigger = CreateLabel("snippetTrigger", string.Empty, LabelRole.Caption);
         trigger.Dock = DockStyle.Fill;
         trigger.TextAlign = ContentAlignment.MiddleLeft;
         layout.Controls.Add(trigger, 0, 0);
-        var expansion = CreateLabel(card.Name + "Expansion", snippet.Expansion, LabelRole.Primary);
+        var expansion = CreateLabel("snippetExpansion", string.Empty, LabelRole.Primary);
         expansion.Dock = DockStyle.Fill;
         expansion.TextAlign = ContentAlignment.MiddleLeft;
         layout.Controls.Add(expansion, 1, 0);
-        var scope = CreateLabel(card.Name + "Scope", snippet.Scope, LabelRole.Tertiary);
+        var scope = CreateLabel("snippetScope", string.Empty, LabelRole.Tertiary);
         scope.AutoSize = true;
         scope.Anchor = AnchorStyles.Right;
         layout.Controls.Add(scope, 2, 0);
         if (snippet.Configuration is not null)
         {
-            var duplicate = CreateButton(card.Name + "Duplicate", "Nhân bản", FluentButtonKind.Secondary, 72);
+            var duplicate = CreateButton(
+                "snippetDuplicate",
+                "Nhân bản",
+                FluentButtonKind.Secondary,
+                72);
             duplicate.Height = 30;
-            duplicate.Click += (_, _) => DuplicateSnippet(snippet);
+            duplicate.Click += SnippetDuplicateClick;
             layout.Controls.Add(duplicate, 3, 0);
-            var edit = CreateButton(card.Name + "Edit", "Sửa", FluentButtonKind.Secondary, 64);
+            var edit = CreateButton(
+                "snippetEdit",
+                "Sửa",
+                FluentButtonKind.Secondary,
+                64);
             edit.Height = 30;
-            edit.Click += (_, _) => EditCustomSnippet(snippet.Configuration);
+            edit.Click += SnippetEditClick;
             layout.Controls.Add(edit, 4, 0);
-            var delete = CreateButton(card.Name + "Delete", "Xóa", FluentButtonKind.Danger, 64);
+            var delete = CreateButton(
+                "snippetDelete",
+                "Xóa",
+                FluentButtonKind.Danger,
+                64);
             delete.Height = 30;
-            delete.Click += (_, _) => DeleteCustomSnippet(snippet.Configuration);
+            delete.Click += SnippetDeleteClick;
             layout.Controls.Add(delete, 5, 0);
         }
+
+        UpdateSnippetRow(card, snippet);
         return card;
+    }
+
+    private static void UpdateSnippetRow(FluentCard card, SnippetRow snippet)
+    {
+        var layout = card.Controls.OfType<TableLayoutPanel>().Single();
+        var trigger = (Label)layout.GetControlFromPosition(0, 0)!;
+        var expansion = (Label)layout.GetControlFromPosition(1, 0)!;
+        var scope = (Label)layout.GetControlFromPosition(2, 0)!;
+
+        card.SuspendLayout();
+        layout.SuspendLayout();
+        try
+        {
+            var cardName = "snippet_" + snippet.Trigger.TrimStart(';');
+            if (!string.Equals(card.Name, cardName, StringComparison.Ordinal))
+            {
+                card.Name = cardName;
+            }
+            card.Tag = snippet;
+
+            var accessibleName = $"Gõ tắt {snippet.Trigger}";
+            if (!string.Equals(card.AccessibleName, accessibleName, StringComparison.Ordinal))
+            {
+                card.AccessibleName = accessibleName;
+            }
+            var accessibleDescription = $"{snippet.Expansion}. {snippet.Scope}.";
+            if (!string.Equals(
+                    card.AccessibleDescription,
+                    accessibleDescription,
+                    StringComparison.Ordinal))
+            {
+                card.AccessibleDescription = accessibleDescription;
+            }
+
+            if (!string.Equals(trigger.Text, snippet.Trigger, StringComparison.Ordinal))
+            {
+                trigger.Text = snippet.Trigger;
+            }
+            if (!string.Equals(expansion.Text, snippet.Expansion, StringComparison.Ordinal))
+            {
+                expansion.Text = snippet.Expansion;
+            }
+            if (!string.Equals(scope.Text, snippet.Scope, StringComparison.Ordinal))
+            {
+                scope.Text = snippet.Scope;
+            }
+        }
+        finally
+        {
+            layout.ResumeLayout(performLayout: true);
+            card.ResumeLayout(performLayout: false);
+        }
+    }
+
+    private static bool IsCustomSnippetCard(FluentCard card) =>
+        card.Controls.OfType<TableLayoutPanel>().SingleOrDefault()?.ColumnCount == 6;
+
+    private static SnippetRow? ResolveSnippetRow(Control? control)
+    {
+        while (control is not null)
+        {
+            if (control is FluentCard { Tag: SnippetRow snippet })
+            {
+                return snippet;
+            }
+            control = control.Parent;
+        }
+        return null;
+    }
+
+    private void SnippetDuplicateClick(object? sender, EventArgs eventArgs)
+    {
+        if (sender is Control control && ResolveSnippetRow(control) is { } snippet)
+        {
+            DuplicateSnippet(snippet);
+        }
+    }
+
+    private void SnippetEditClick(object? sender, EventArgs eventArgs)
+    {
+        if (sender is Control control &&
+            ResolveSnippetRow(control)?.Configuration is { } configuration)
+        {
+            EditCustomSnippet(configuration);
+        }
+    }
+
+    private void SnippetDeleteClick(object? sender, EventArgs eventArgs)
+    {
+        if (sender is Control control &&
+            ResolveSnippetRow(control)?.Configuration is { } configuration)
+        {
+            DeleteCustomSnippet(configuration);
+        }
     }
 
     private void AddCustomSnippet()
@@ -2840,6 +3132,42 @@ public sealed partial class SettingsForm : Form
         }
     }
 
+    private static bool SnippetConfigurationsEqual(
+        IReadOnlyList<SnippetConfiguration> left,
+        IReadOnlyList<SnippetConfiguration> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            var first = left[index];
+            var second = right[index];
+            if (!string.Equals(first.Trigger, second.Trigger, StringComparison.Ordinal) ||
+                !string.Equals(first.Expansion, second.Expansion, StringComparison.Ordinal) ||
+                first.CaseSensitive != second.CaseSensitive ||
+                first.PreserveDelimiter != second.PreserveDelimiter ||
+                !string.Equals(first.Delimiters, second.Delimiters, StringComparison.Ordinal) ||
+                first.Execution != second.Execution ||
+                !first.AllowedApplications.SequenceEqual(
+                    second.AllowedApplications,
+                    StringComparer.OrdinalIgnoreCase) ||
+                !first.ExcludedApplications.SequenceEqual(
+                    second.ExcludedApplications,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Panel CreatePage(string name) => new()
     {
         Name = name,
@@ -2872,16 +3200,26 @@ public sealed partial class SettingsForm : Form
         var available = Math.Max(520, stack.ClientSize.Width - stack.Padding.Horizontal - 4);
         foreach (Control child in stack.Controls)
         {
-            child.Width = Math.Max(0, available - child.Margin.Horizontal);
+            var width = Math.Max(0, available - child.Margin.Horizontal);
+            if (child.Width != width)
+            {
+                child.Width = width;
+            }
         }
     }
 
-    private FluentCard CreateCard(string name, int height) => new()
+    private FluentCard CreateCard(string name, int height)
     {
-        Name = name,
-        Height = height,
-        Palette = palette,
-    };
+        var narrow = CurrentLayoutMode == SettingsLayoutMode.Narrow;
+        return new FluentCard
+        {
+            Name = name,
+            Height = height,
+            Palette = palette,
+            Padding = new Padding(narrow ? 16 : 20),
+            Margin = new Padding(0, 0, 0, narrow ? 10 : 12),
+        };
+    }
 
     private Label CreateLabel(string name, string text, LabelRole role)
     {
@@ -2901,6 +3239,10 @@ public sealed partial class SettingsForm : Form
             LabelRole.Caption => new Font(Font.FontFamily, 9F, FontStyle.Bold),
             _ => new Font(Font.FontFamily, 9.5F, FontStyle.Regular),
         };
+        if (!name.StartsWith("snippet", StringComparison.Ordinal))
+        {
+            namedLabels[name] = label;
+        }
         return label;
     }
 
@@ -3138,10 +3480,8 @@ public sealed partial class SettingsForm : Form
 
     private void SetNamedLabelText(string name, string text)
     {
-        var label = Controls.Find(name, searchAllChildren: true)
-            .OfType<Label>()
-            .SingleOrDefault();
-        if (label is not null)
+        if (namedLabels.TryGetValue(name, out var label) &&
+            !string.Equals(label.Text, text, StringComparison.Ordinal))
         {
             label.Text = text;
         }
@@ -3241,26 +3581,114 @@ public sealed partial class SettingsForm : Form
 
     private void UpdateResponsiveShell()
     {
-        var useCompactLayout = ClientSize.Width < 1020;
-        if (compactLayout == useCompactLayout)
+        var mode = ClientSize.Width switch
+        {
+            < 860 => SettingsLayoutMode.Narrow,
+            < 1020 => SettingsLayoutMode.Compact,
+            _ => SettingsLayoutMode.Expanded,
+        };
+        if (appliedLayoutMode == mode)
         {
             return;
         }
 
-        compactLayout = useCompactLayout;
+        appliedLayoutMode = mode;
+        CurrentLayoutMode = mode;
+        var narrow = mode == SettingsLayoutMode.Narrow;
         shell.SuspendLayout();
         contentPanel.SuspendLayout();
+        sidebar.SuspendLayout();
         try
         {
-            shell.ColumnStyles[0].Width = useCompactLayout ? 206F : 228F;
-            contentPanel.Padding = useCompactLayout
-                ? new Padding(22, 20, 22, 22)
-                : new Padding(30, 22, 30, 26);
+            shell.ColumnStyles[0].Width = mode switch
+            {
+                SettingsLayoutMode.Narrow => 76F,
+                SettingsLayoutMode.Compact => 196F,
+                _ => 228F,
+            };
+            contentPanel.Padding = mode switch
+            {
+                SettingsLayoutMode.Narrow => new Padding(18, 18, 18, 20),
+                SettingsLayoutMode.Compact => new Padding(22, 20, 22, 22),
+                _ => new Padding(30, 22, 30, 26),
+            };
+            sidebar.Padding = narrow
+                ? new Padding(10, 14, 10, 10)
+                : new Padding(14, 18, 14, 14);
+            sidebarLayout.RowStyles[0].Height = narrow ? 58F : 72F;
+            sidebarLayout.RowStyles[2].Height = narrow ? 0F : 54F;
+            sidebarLayout.RowStyles[3].Height = narrow ? 0F : 42F;
+
+            foreach (var name in new[]
+                     {
+                         "productName",
+                         "productSubtitle",
+                         "privacySummary",
+                         "versionLabel",
+                     })
+            {
+                var control = sidebar.Controls.Find(name, true).Single();
+                control.Visible = !narrow;
+            }
+            systemThemeStatus.Visible = !narrow;
+            navigation.Padding = narrow
+                ? new Padding(0, 4, 0, 0)
+                : new Padding(0, 8, 0, 0);
+            foreach (var button in navigationButtons.Values)
+            {
+                button.Compact = narrow;
+            }
+            ResizeNavigationButtons();
+            ApplyResponsiveDensity(narrow);
         }
         finally
         {
+            sidebar.ResumeLayout(performLayout: false);
             contentPanel.ResumeLayout(performLayout: false);
             shell.ResumeLayout(performLayout: true);
+        }
+    }
+
+    private void ResizeNavigationButtons()
+    {
+        if (navigation.IsDisposed)
+        {
+            return;
+        }
+        foreach (var button in navigationButtons.Values)
+        {
+            button.Width = Math.Max(
+                button.Compact ? 44 : 120,
+                navigation.ClientSize.Width - 2);
+        }
+    }
+
+    private void ApplyResponsiveDensity(bool narrow)
+    {
+        foreach (var page in pages.Values)
+        {
+            ApplyResponsiveDensity(page, narrow);
+        }
+    }
+
+    private static void ApplyResponsiveDensity(Control root, bool narrow)
+    {
+        foreach (Control child in root.Controls)
+        {
+            if (child is FluentCard card)
+            {
+                card.Padding = new Padding(narrow ? 16 : 20);
+                card.Margin = new Padding(0, 0, 0, narrow ? 10 : 12);
+            }
+            if (child is FlowLayoutPanel stack &&
+                stack.Name.EndsWith("Stack", StringComparison.Ordinal))
+            {
+                stack.Padding = narrow
+                    ? new Padding(0, 4, 6, 8)
+                    : new Padding(0, 8, 8, 8);
+                ResizeStackChildren(stack);
+            }
+            ApplyResponsiveDensity(child, narrow);
         }
     }
 
