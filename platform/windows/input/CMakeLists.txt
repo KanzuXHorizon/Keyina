@@ -3,6 +3,7 @@ add_library(keyina_windows_input STATIC
   input_injection.cpp
   keystroke_overlay_model.cpp
   keystroke_overlay_positioner.cpp
+  keystroke_overlay_window.cpp
   native_latency_histogram.cpp
   pointer_input.cpp
   resident_input_controller.cpp
@@ -44,6 +45,9 @@ target_compile_definitions(KeyinaInput PRIVATE
 )
 target_link_libraries(KeyinaInput PRIVATE
   keyina::windows_input
+  d2d1
+  dwrite
+  dwmapi
   ole32
   psapi
   user32
