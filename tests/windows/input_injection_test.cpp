@@ -107,6 +107,62 @@ KEYINA_TEST(native_text_delivery_policy_is_synchronous_and_deterministic) {
       TextDeliveryMode::Clipboard);
 }
 
+KEYINA_TEST(native_chromium_owned_text_stream_requires_safe_selection_delivery) {
+  KEYINA_EXPECT_TRUE(keyina::windows::ShouldOwnTextStream(
+      true, false, false, true));
+  KEYINA_EXPECT_TRUE(!keyina::windows::ShouldOwnTextStream(
+      false, false, false, true));
+  KEYINA_EXPECT_TRUE(!keyina::windows::ShouldOwnTextStream(
+      true, true, false, true));
+  KEYINA_EXPECT_TRUE(!keyina::windows::ShouldOwnTextStream(
+      true, false, true, true));
+  KEYINA_EXPECT_TRUE(!keyina::windows::ShouldOwnTextStream(
+      true, false, false, false));
+}
+
+KEYINA_TEST(native_literal_input_decision_encodes_valid_unicode_only) {
+  keyina::windows::InputDecision decision{};
+  KEYINA_EXPECT_TRUE(
+      keyina::windows::BuildLiteralInputDecision(U'a', decision));
+  KEYINA_EXPECT_TRUE(decision.suppress);
+  KEYINA_EXPECT_EQ(decision.backspace_count, std::uint16_t{0});
+  KEYINA_EXPECT_EQ(decision.insert_units, std::uint16_t{1});
+  KEYINA_EXPECT_EQ(decision.insert[0], L'a');
+
+  KEYINA_EXPECT_TRUE(
+      keyina::windows::BuildLiteralInputDecision(U'😀', decision));
+  KEYINA_EXPECT_EQ(decision.insert_units, std::uint16_t{2});
+  KEYINA_EXPECT_EQ(
+      static_cast<std::uint16_t>(decision.insert[0]),
+      std::uint16_t{0xD83D});
+  KEYINA_EXPECT_EQ(
+      static_cast<std::uint16_t>(decision.insert[1]),
+      std::uint16_t{0xDE00});
+}
+
+KEYINA_TEST(native_literal_input_decision_rejects_invalid_scalars_without_mutation) {
+  keyina::windows::InputDecision decision{};
+  decision.suppress = true;
+  decision.backspace_count = 7;
+  decision.insert_units = 1;
+  decision.insert[0] = L'x';
+  const auto original = decision;
+
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::BuildLiteralInputDecision(U'\0', decision));
+  KEYINA_EXPECT_EQ(decision.suppress, original.suppress);
+  KEYINA_EXPECT_EQ(decision.backspace_count, original.backspace_count);
+  KEYINA_EXPECT_EQ(decision.insert_units, original.insert_units);
+  KEYINA_EXPECT_EQ(decision.insert[0], original.insert[0]);
+
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::BuildLiteralInputDecision(
+          static_cast<char32_t>(0xD800), decision));
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::BuildLiteralInputDecision(
+          static_cast<char32_t>(0x110000), decision));
+}
+
 KEYINA_TEST(native_chromium_windows_require_selection_replacement) {
   KEYINA_EXPECT_TRUE(
       keyina::windows::RequiresSelectionReplacementForWindowClass(

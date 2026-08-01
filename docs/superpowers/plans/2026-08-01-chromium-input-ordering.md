@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Eliminate Chromium and clipboard replacement reordering by delivering every transformed edit synchronously and atomically before the keyboard hook returns.
+**Goal:** Remove the deferred single-slot race by delivering every transformed edit synchronously before the keyboard hook returns. Complete Chromium stream ordering is finalized by the follow-up owned-stream plan `2026-08-01-chromium-ordering-probe.md`.
 
 **Architecture:** Replace the single-slot posted-message path with a pure delivery-mode selector and direct calls to the existing keyboard, selection-replacement, or clipboard injectors. Remove deferred state and messages so subsequent physical keys cannot overtake a pending edit.
 

@@ -15,6 +15,40 @@ TextDeliveryMode ChooseTextDeliveryMode(
              : TextDeliveryMode::Keyboard;
 }
 
+bool ShouldOwnTextStream(
+    bool vietnamese_enabled,
+    bool bypass_typing,
+    bool clipboard_delivery,
+    bool selection_replacement_target) noexcept {
+  return vietnamese_enabled && !bypass_typing && !clipboard_delivery &&
+      selection_replacement_target;
+}
+
+bool BuildLiteralInputDecision(
+    char32_t character,
+    InputDecision& decision) noexcept {
+  if (character == U'\0' || character > 0x10FFFF ||
+      (character >= 0xD800 && character <= 0xDFFF)) {
+    return false;
+  }
+
+  InputDecision candidate{};
+  candidate.suppress = true;
+  if (character <= 0xFFFF) {
+    candidate.insert[0] = static_cast<wchar_t>(character);
+    candidate.insert_units = 1;
+  } else {
+    const char32_t adjusted = character - 0x10000;
+    candidate.insert[0] =
+        static_cast<wchar_t>(0xD800 + (adjusted >> 10));
+    candidate.insert[1] =
+        static_cast<wchar_t>(0xDC00 + (adjusted & 0x3FF));
+    candidate.insert_units = 2;
+  }
+  decision = candidate;
+  return true;
+}
+
 std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept {

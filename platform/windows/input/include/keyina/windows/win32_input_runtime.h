@@ -41,7 +41,8 @@ class Win32InputRuntime {
       bool enable_tray,
       bool reload_profiles = true,
       bool profile_callback_latency = false,
-      ULONG_PTR accepted_input_marker = 0) noexcept;
+      ULONG_PTR accepted_input_marker = 0,
+      bool force_selection_replacement_for_self_test = false) noexcept;
   ~Win32InputRuntime();
 
   Win32InputRuntime(const Win32InputRuntime&) = delete;
@@ -190,6 +191,7 @@ class Win32InputRuntime {
   bool reload_profiles_{true};
   bool profile_callback_latency_{false};
   ULONG_PTR accepted_input_marker_{};
+  bool force_selection_replacement_for_self_test_{false};
   std::uint64_t performance_counter_frequency_{};
   NativeLatencyHistogram callback_latency_histogram_{};
   std::array<
@@ -207,6 +209,7 @@ class Win32InputRuntime {
       HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, INT){nullptr};
   NOTIFYICONDATAW tray_data_{};
   KeyStateSet pressed_keys_{};
+  KeyStateSet owned_text_keys_{};
   HWND cached_active_window_{nullptr};
   HWND cached_focus_window_{nullptr};
   HWND cached_selection_replacement_target_window_{nullptr};

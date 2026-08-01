@@ -137,6 +137,21 @@ KEYINA_TEST(resident_input_controller_keeps_embedded_tone_keys_literal_in_latin_
   KEYINA_EXPECT_EQ(visible, std::u16string{u"process"});
 }
 
+KEYINA_TEST(resident_input_controller_preserves_mixed_vietnamese_and_latin_sentence) {
+  ResidentInputController controller(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(
+      controller,
+      visible,
+      U"tuyf banj cuws research vaf dduwa ra huowngs toots nhaats ");
+
+  KEYINA_EXPECT_EQ(
+      visible,
+      std::u16string{u"tuỳ bạn cứ research và đưa ra hướng tốt nhất "});
+}
+
 KEYINA_TEST(resident_input_controller_resets_on_pointer_focus_and_secure_context) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;

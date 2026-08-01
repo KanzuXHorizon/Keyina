@@ -41,6 +41,10 @@ Move delivery to a dedicated thread and queue all physical events. This still re
 
 Use synchronous atomic delivery and delete the deferred text-edit queue. Rename Chromium classification to describe the required selection-replacement behavior rather than deferral. Centralize mode selection in a small pure function so the ordering policy has direct regression tests.
 
+## Follow-up correction
+
+Implementation evidence showed that synchronous replacement alone removes the pending-slot race but does not guarantee complete target-queue ordering. Physical literal characters can still coexist with injected replacement events and interleave under burst input. The follow-up design `2026-08-01-chromium-ordering-probe-design.md` therefore makes safe Chromium text a single marked Keyina-owned stream. This document remains the rationale for deleting the deferred queue; the follow-up owns the final ordering architecture.
+
 ## Error handling
 
 If the selected delivery fails, reset composition, disable pointer observation, increment failure diagnostics, and pass the current physical event onward as the existing fail-open path does. Clipboard restoration remains sequence-number guarded and never overwrites clipboard changes made by another application.

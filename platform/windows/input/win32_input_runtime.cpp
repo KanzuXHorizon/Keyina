@@ -625,19 +625,24 @@ Win32InputRuntime::Win32InputRuntime(
     bool enable_tray,
     bool reload_profiles,
     bool profile_callback_latency,
-    ULONG_PTR accepted_input_marker) noexcept
+    ULONG_PTR accepted_input_marker,
+    bool force_selection_replacement_for_self_test) noexcept
     : profile_(profile),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
       enable_tray_(enable_tray),
       reload_profiles_(reload_profiles),
       profile_callback_latency_(profile_callback_latency),
-      accepted_input_marker_(accepted_input_marker) {}
+      accepted_input_marker_(accepted_input_marker),
+      force_selection_replacement_for_self_test_(
+          force_selection_replacement_for_self_test &&
+          accepted_input_marker != 0) {}
 
 Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
 bool Win32InputRuntime::Start() noexcept {
   stopping_ = false;
   pressed_keys_.Clear();
+  owned_text_keys_.Clear();
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;
@@ -797,6 +802,7 @@ void Win32InputRuntime::Stop() noexcept {
     active_runtime_ = nullptr;
   }
   pressed_keys_.Clear();
+  owned_text_keys_.Clear();
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;
@@ -1048,7 +1054,13 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         NativeCallbackLatencyScope key_up_latency(
             stage_histogram(NativeCallbackLatencyStage::KeyUpRelease),
             performance_counter_frequency_);
-        suppress_release = controller_.Process(event, {}).suppress;
+        const bool owned_release = owned_text_keys_.Get(virtual_key);
+        if (owned_release) {
+          owned_text_keys_.Set(virtual_key, false);
+        }
+        const bool controller_release =
+            controller_.Process(event, {}).suppress;
+        suppress_release = owned_release || controller_release;
       }
       return suppress_release
                  ? 1
@@ -1086,8 +1098,48 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
           controller_.pointer_observation_required() &&
           !context.bypass_typing);
     }
-    if (!decision.suppress) {
+    const bool clipboard_delivery =
+        profile_.clipboard_compatibility_enabled && reload_profiles_;
+    const bool selection_replacement_target =
+        !context.bypass_typing && profile_.vietnamese_enabled &&
+        RequiresSelectionReplacementTarget(context.focus_window);
+    const bool own_text_stream = ShouldOwnTextStream(
+        profile_.vietnamese_enabled,
+        context.bypass_typing,
+        clipboard_delivery,
+        selection_replacement_target);
+
+    if (!decision.suppress && !own_text_stream) {
       return CallNextHookEx(nullptr, code, message, data);
+    }
+
+    if (!decision.suppress) {
+      if (event.character == U'\0' || event.control || event.alt ||
+          event.windows) {
+        return CallNextHookEx(nullptr, code, message, data);
+      }
+      InputDecision literal_decision{};
+      if (!BuildLiteralInputDecision(event.character, literal_decision)) {
+        return CallNextHookEx(nullptr, code, message, data);
+      }
+
+      bool injected = false;
+      {
+        NativeCallbackLatencyScope injection_latency(
+            stage_histogram(NativeCallbackLatencyStage::Injection),
+            performance_counter_frequency_);
+        ++suppressed_edit_count_;
+        injected = InjectWithSelectionReplacement(literal_decision);
+      }
+      if (!injected) {
+        ++failed_injection_count_;
+        controller_.Reset();
+        RequestPointerRegistration(false);
+        return CallNextHookEx(nullptr, code, message, data);
+      }
+      ++successful_injection_count_;
+      owned_text_keys_.Set(virtual_key, true);
+      return 1;
     }
 
     bool injection_failed = false;
@@ -1095,35 +1147,31 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       NativeCallbackLatencyScope injection_latency(
           stage_histogram(NativeCallbackLatencyStage::Injection),
           performance_counter_frequency_);
-      if (key_down) {
-        ++suppressed_edit_count_;
-        const bool selection_replacement_target =
-            RequiresSelectionReplacementTarget(context.focus_window);
-        const TextDeliveryMode delivery_mode = ChooseTextDeliveryMode(
-            profile_.clipboard_compatibility_enabled && reload_profiles_,
-            selection_replacement_target);
-        bool injected = false;
-        switch (delivery_mode) {
-          case TextDeliveryMode::Keyboard:
-            injected = Inject(decision, context.focus_window);
-            break;
-          case TextDeliveryMode::SelectionReplacement:
-            injected = InjectWithSelectionReplacement(decision);
-            break;
-          case TextDeliveryMode::Clipboard:
-            injected = InjectViaClipboard(decision, context.focus_window);
-            break;
-        }
-        if (!injected) {
-          ++failed_injection_count_;
-          controller_.Reset();
-          RequestPointerRegistration(false);
-          injection_failed = true;
-        } else {
-          ++successful_injection_count_;
-        }
+      ++suppressed_edit_count_;
+      const TextDeliveryMode delivery_mode = ChooseTextDeliveryMode(
+          clipboard_delivery,
+          selection_replacement_target);
+      bool injected = false;
+      switch (delivery_mode) {
+        case TextDeliveryMode::Keyboard:
+          injected = Inject(decision, context.focus_window);
+          break;
+        case TextDeliveryMode::SelectionReplacement:
+          injected = InjectWithSelectionReplacement(decision);
+          break;
+        case TextDeliveryMode::Clipboard:
+          injected = InjectViaClipboard(decision, context.focus_window);
+          break;
       }
-      if (!injection_failed && key_down) {
+      if (!injected) {
+        ++failed_injection_count_;
+        controller_.Reset();
+        RequestPointerRegistration(false);
+        injection_failed = true;
+      } else {
+        ++successful_injection_count_;
+      }
+      if (!injection_failed) {
         HandleSnippetCommand(
             decision.snippet_command,
             decision.snippet_command_payload,
@@ -1196,6 +1244,9 @@ bool Win32InputRuntime::RequiresSelectionReplacementTarget(
   const HWND window = reinterpret_cast<HWND>(focus_window);
   if (window == nullptr) {
     return false;
+  }
+  if (force_selection_replacement_for_self_test_) {
+    return true;
   }
   if (window == cached_selection_replacement_target_window_) {
     return cached_selection_replacement_target_;
@@ -1811,6 +1862,7 @@ void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
   if (!input_profile_changed) {
     return;
   }
+  owned_text_keys_.Clear();
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;

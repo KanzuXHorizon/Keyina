@@ -24,6 +24,16 @@ enum class TextDeliveryMode : std::uint8_t {
     bool clipboard_compatibility_enabled,
     bool chromium_target) noexcept;
 
+[[nodiscard]] bool ShouldOwnTextStream(
+    bool vietnamese_enabled,
+    bool bypass_typing,
+    bool clipboard_delivery,
+    bool selection_replacement_target) noexcept;
+
+[[nodiscard]] bool BuildLiteralInputDecision(
+    char32_t character,
+    InputDecision& decision) noexcept;
+
 [[nodiscard]] std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept;
