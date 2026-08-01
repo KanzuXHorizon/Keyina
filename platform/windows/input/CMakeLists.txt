@@ -1,6 +1,7 @@
 add_library(keyina_windows_input STATIC
   clipboard_privacy.cpp
   input_injection.cpp
+  keystroke_overlay_model.cpp
   native_latency_histogram.cpp
   pointer_input.cpp
   resident_input_controller.cpp
