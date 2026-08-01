@@ -770,6 +770,7 @@ Win32InputRuntime::Win32InputRuntime(
     ULONG_PTR accepted_input_marker,
     bool force_selection_replacement_for_self_test) noexcept
     : profile_(profile),
+      committed_vietnamese_enabled_(profile.vietnamese_enabled),
       controller_(profile, LoadRuntimeSnippetProfileOrDefault()),
       enable_tray_(enable_tray),
       reload_profiles_(reload_profiles),
@@ -815,6 +816,8 @@ bool Win32InputRuntime::Start() noexcept {
   external_command_queue_.ResetAfterShutdown();
   deferred_clipboard_queue_full_count_ = 0;
   deferred_clipboard_fallback_count_ = 0;
+  preapplied_vietnamese_toggle_count_ = 0;
+  committed_vietnamese_enabled_ = profile_.vietnamese_enabled;
   deferred_literal_injection_count_ = 0;
   deferred_virtual_key_injection_count_ = 0;
   clipboard_privacy_write_count_ = 0;
@@ -997,6 +1000,11 @@ void Win32InputRuntime::Stop() noexcept {
   tray_update_posted_ = false;
   deferred_clipboard_message_posted_ = false;
   pending_snippet_actions_.store(0, std::memory_order_relaxed);
+  if (preapplied_vietnamese_toggle_count_ != 0) {
+    profile_.vietnamese_enabled = committed_vietnamese_enabled_;
+    controller_.ApplyProfile(profile_);
+    preapplied_vietnamese_toggle_count_ = 0;
+  }
   if (deferred_clipboard_queue_ != nullptr) {
     deferred_clipboard_queue_->ResetAfterShutdown();
   }
@@ -1147,14 +1155,7 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
     case WM_COMMAND:
       switch (LOWORD(w_param)) {
         case kToggleMenuCommand:
-          profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
-          controller_.ApplyProfile(profile_);
-          RequestPointerRegistration(false);
-          UpdateTray();
-          static_cast<void>(QueueManagedCommand(
-              profile_.vietnamese_enabled
-                  ? RuntimeCommand::SetVietnameseEnabled
-                  : RuntimeCommand::SetVietnameseDisabled));
+          ExecuteSnippetAction(RuntimeSnippetCommand::ToggleVietnamese);
           return 0;
         case kSettingsMenuCommand:
           OpenManagedSettings();
@@ -1930,14 +1931,7 @@ void Win32InputRuntime::ProcessToggleGesture(
   }
   if (toggle_chord_active_ && !active) {
     if (!toggle_chord_contaminated_) {
-      profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
-      controller_.ApplyProfile(profile_);
-      RequestPointerRegistration(false);
-      RequestTrayUpdate();
-      static_cast<void>(QueueManagedCommand(
-          profile_.vietnamese_enabled
-              ? RuntimeCommand::SetVietnameseEnabled
-              : RuntimeCommand::SetVietnameseDisabled));
+      ExecuteSnippetAction(RuntimeSnippetCommand::ToggleVietnamese);
     }
     toggle_chord_active_ = false;
     toggle_chord_contaminated_ = false;
@@ -2009,6 +2003,7 @@ bool Win32InputRuntime::QueueDeferredClipboardInjection(
   item->target_process_id = context.foreground_process_id;
   item->target_focus_window = context.focus_window;
   item->snippet_command = decision.snippet_command;
+  item->snippet_state_preapplied = false;
 
   const bool needs_message = !deferred_clipboard_message_posted_ &&
       pending_clipboard_sequence_ == 0;
@@ -2048,6 +2043,7 @@ bool Win32InputRuntime::QueueDeferredLiteralInjection(
     return false;
   }
   item->kind = DeferredClipboardWorkKind::Literal;
+  item->snippet_state_preapplied = false;
   if (character <= 0xFFFF) {
     item->text_storage[0] = static_cast<char16_t>(character);
     item->text_units = 1;
@@ -2102,6 +2098,7 @@ bool Win32InputRuntime::QueueDeferredVirtualKeyInjection(
     return false;
   }
   item->kind = DeferredClipboardWorkKind::VirtualKey;
+  item->snippet_state_preapplied = false;
   item->text_units = 0;
   item->backspace_count = 0;
   item->source_virtual_key = virtual_key;
@@ -2169,6 +2166,8 @@ bool Win32InputRuntime::QueueDeferredCommandInjection(
   item->target_process_id = context.foreground_process_id;
   item->target_focus_window = context.focus_window;
   item->snippet_command = decision.snippet_command;
+  item->snippet_state_preapplied =
+      decision.snippet_command == RuntimeSnippetCommand::ToggleVietnamese;
 
   const bool needs_message = !deferred_clipboard_message_posted_ &&
       pending_clipboard_sequence_ == 0;
@@ -2178,7 +2177,17 @@ bool Win32InputRuntime::QueueDeferredCommandInjection(
     deferred_clipboard_queue_->CancelProducer();
     return false;
   }
+  if (item->snippet_state_preapplied &&
+      !PreapplySnippetState(item->snippet_command)) {
+    deferred_clipboard_queue_->CancelProducer();
+    return false;
+  }
   if (!deferred_clipboard_queue_->CommitProducer()) {
+    if (item->snippet_state_preapplied) {
+      RollbackPreappliedSnippetState(item->snippet_command);
+      item->snippet_state_preapplied = false;
+    }
+    deferred_clipboard_queue_->CancelProducer();
     return false;
   }
   if (needs_message) {
@@ -2246,6 +2255,7 @@ Win32InputRuntime::InjectDeferredVirtualKey(
 Win32InputRuntime::TargetInjectionResult
 Win32InputRuntime::InjectDeferredCommand(
     RuntimeSnippetCommand command,
+    bool state_preapplied,
     std::uint16_t backspace_count,
     std::u16string_view payload,
     std::uint32_t target_process_id,
@@ -2301,7 +2311,7 @@ Win32InputRuntime::InjectDeferredCommand(
   if (external) {
     CommitDeferredSnippetCommand(command);
   } else {
-    ExecuteSnippetAction(command);
+    ExecuteSnippetAction(command, state_preapplied);
   }
   return TargetInjectionResult::Succeeded;
 }
@@ -2355,6 +2365,7 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
       } else if (command_item) {
         result = InjectDeferredCommand(
             item->snippet_command,
+            item->snippet_state_preapplied,
             item->backspace_count,
             std::u16string_view(
                 item->text_storage.data(), item->text_units),
@@ -2378,6 +2389,14 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
         transform_state_valid = false;
         raw_fallback_safe =
             result == TargetInjectionResult::FailedBeforeMutation;
+        if (command_item && item->snippet_state_preapplied) {
+          if (raw_fallback_safe) {
+            RollbackPreappliedSnippetState(item->snippet_command);
+            item->snippet_state_preapplied = false;
+          } else {
+            ExecuteSnippetAction(item->snippet_command, true);
+          }
+        }
         controller_.Reset();
         RequestPointerRegistration(false);
         RequestSnippetOverlayUpdate();
@@ -2398,6 +2417,10 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
       }
     } else {
       ++failed_injection_count_;
+      if (command_item && item->snippet_state_preapplied) {
+        RollbackPreappliedSnippetState(item->snippet_command);
+        item->snippet_state_preapplied = false;
+      }
       if (pressed_keys_.Get(item->source_virtual_key)) {
         owned_text_keys_.Set(item->source_virtual_key, true);
       }
@@ -2412,6 +2435,15 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
       }
     }
 
+    if (item->snippet_state_preapplied) {
+      if (preapplied_vietnamese_toggle_count_ != 0) {
+        --preapplied_vietnamese_toggle_count_;
+      }
+      item->snippet_state_preapplied = false;
+      if (preapplied_vietnamese_toggle_count_ == 0) {
+        RequestTrayUpdate();
+      }
+    }
     item->kind = DeferredClipboardWorkKind::Transform;
     item->text_units = 0;
     item->backspace_count = 0;
@@ -2420,6 +2452,7 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
     item->target_process_id = 0;
     item->target_focus_window = 0;
     item->snippet_command = RuntimeSnippetCommand::None;
+    item->snippet_state_preapplied = false;
     static_cast<void>(deferred_clipboard_queue_->PopConsumer());
     if (pending_clipboard_sequence_ != 0) {
       // Ctrl+V is asynchronous. Do not replace/restore the clipboard for the
@@ -2517,16 +2550,52 @@ void Win32InputRuntime::HandleDeferredSnippetActions() noexcept {
   }
 }
 
-void Win32InputRuntime::ExecuteSnippetAction(
+bool Win32InputRuntime::PreapplySnippetState(
     RuntimeSnippetCommand command) noexcept {
+  if (command != RuntimeSnippetCommand::ToggleVietnamese) {
+    return false;
+  }
+  profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+  controller_.ApplyProfile(profile_);
+  ++preapplied_vietnamese_toggle_count_;
+  RequestPointerRegistration(false);
+  RequestSnippetOverlayUpdate();
+  return true;
+}
+
+void Win32InputRuntime::RollbackPreappliedSnippetState(
+    RuntimeSnippetCommand command) noexcept {
+  if (command != RuntimeSnippetCommand::ToggleVietnamese ||
+      preapplied_vietnamese_toggle_count_ == 0) {
+    return;
+  }
+  profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+  controller_.ApplyProfile(profile_);
+  --preapplied_vietnamese_toggle_count_;
+  RequestPointerRegistration(false);
+  RequestSnippetOverlayUpdate();
+  if (preapplied_vietnamese_toggle_count_ == 0) {
+    RequestTrayUpdate();
+  }
+}
+
+void Win32InputRuntime::ExecuteSnippetAction(
+    RuntimeSnippetCommand command,
+    bool state_preapplied) noexcept {
   switch (command) {
     case RuntimeSnippetCommand::ToggleVietnamese:
-      profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
-      controller_.ApplyProfile(profile_);
-      RequestPointerRegistration(false);
-      UpdateTray();
+      if (state_preapplied) {
+        committed_vietnamese_enabled_ = !committed_vietnamese_enabled_;
+      } else {
+        profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
+        controller_.ApplyProfile(profile_);
+        committed_vietnamese_enabled_ = profile_.vietnamese_enabled;
+        RequestPointerRegistration(false);
+        RequestSnippetOverlayUpdate();
+        RequestTrayUpdate();
+      }
       static_cast<void>(QueueManagedCommand(
-          profile_.vietnamese_enabled
+          committed_vietnamese_enabled_
               ? RuntimeCommand::SetVietnameseEnabled
               : RuntimeCommand::SetVietnameseDisabled));
       break;
@@ -2881,6 +2950,9 @@ bool Win32InputRuntime::IsCommandCompanionActive() const noexcept {
 }
 
 void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
+  if (preapplied_vietnamese_toggle_count_ != 0) {
+    return;
+  }
   bool input_profile_changed = false;
   std::array<wchar_t, 32768> input_path{};
   FILETIME input_write_time{};
@@ -2894,6 +2966,7 @@ void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
       profile_write_time_ = input_write_time;
       profile_write_time_known_ = true;
       profile_ = profile;
+      committed_vietnamese_enabled_ = profile_.vietnamese_enabled;
       controller_.ApplyProfile(profile_);
       input_profile_changed = true;
     }

@@ -223,6 +223,7 @@ class Win32InputRuntime {
       std::uintptr_t target_focus_window) noexcept;
   [[nodiscard]] TargetInjectionResult InjectDeferredCommand(
       RuntimeSnippetCommand command,
+      bool state_preapplied,
       std::uint16_t backspace_count,
       std::u16string_view payload,
       std::uint32_t target_process_id,
@@ -262,7 +263,13 @@ class Win32InputRuntime {
   void CommitDeferredSnippetCommand(
       RuntimeSnippetCommand command) noexcept;
   void HandleDeferredSnippetActions() noexcept;
-  void ExecuteSnippetAction(RuntimeSnippetCommand command) noexcept;
+  [[nodiscard]] bool PreapplySnippetState(
+      RuntimeSnippetCommand command) noexcept;
+  void RollbackPreappliedSnippetState(
+      RuntimeSnippetCommand command) noexcept;
+  void ExecuteSnippetAction(
+      RuntimeSnippetCommand command,
+      bool state_preapplied = false) noexcept;
   [[nodiscard]] bool StartExternalCommandWorker() noexcept;
   void StopExternalCommandWorker() noexcept;
   DWORD RunExternalCommandWorker() noexcept;
@@ -286,6 +293,8 @@ class Win32InputRuntime {
   void RequestExit() noexcept;
 
   RuntimeInputProfile profile_{};
+  bool committed_vietnamese_enabled_{true};
+  std::uint32_t preapplied_vietnamese_toggle_count_{};
   ResidentInputController controller_;
   RuntimeHotkeyRouter hotkey_router_;
   bool enable_tray_{false};
@@ -369,6 +378,7 @@ class Win32InputRuntime {
     std::uint32_t target_process_id{};
     std::uintptr_t target_focus_window{};
     RuntimeSnippetCommand snippet_command{RuntimeSnippetCommand::None};
+    bool snippet_state_preapplied{false};
   };
   // Sixty-four queued keystrokes cover large SendInput bursts before the
   // posted transaction message runs. The queue is heap-backed once at Start,
