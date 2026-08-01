@@ -16,7 +16,8 @@ The selected experience is:
 - hybrid visual treatment: individual key tokens transition into one composed-result pill;
 - ordinary mode shows text composition only;
 - Presentation Mode may additionally show selected function keys and shortcuts;
-- per-key sound is optional, disabled by default, and never allowed to delay typing.
+- per-key sound is optional, disabled by default, and never allowed to delay typing;
+- implementation is split into two independently shippable phases: visual overlay first, bounded audio second.
 
 ## User experience
 
@@ -40,7 +41,7 @@ Only affected glyphs may receive a brief emphasis. The full pill must not flash,
 - New tokens appear immediately after the display event reaches the UI worker.
 - Active animations retarget to the newest state; they never queue behind old states.
 - During rapid typing, durations shorten automatically and intermediate visual-only frames may be dropped.
-- After 700-1100 ms without a meaningful update, the pill fades and moves by no more than 2 px before becoming fully hidden.
+- Default hide delay is 900 ms, configurable from 500-2000 ms; the pill fades and moves by no more than 2 px before becoming fully hidden.
 - Once hidden, no animation timer, composition tick, or continuous rendering loop remains active.
 
 ### Adaptive placement
@@ -71,7 +72,7 @@ Small caret movements do not reposition the overlay. A composition keeps a stabl
 
 The renderer must not receive unrestricted raw global keystroke logs.
 
-The typing layer emits a bounded display model containing only the current visible composition state and semantic event kind. The model may include:
+The typing layer emits a bounded display model containing only the current visible composition state and semantic event kind. The first release caps visible composition text at 64 UTF-16 code units and token history at 16 tokens; longer state is truncated visually without changing input behavior. The model may include:
 
 - physical token intended for display;
 - composition updated;
@@ -155,6 +156,8 @@ Rules:
 
 ### 7. Settings integration
 
+Overlay preferences are stored as a version-tolerant optional configuration object. Missing preferences resolve to the disabled defaults without changing the current configuration schema version. Invalid enum values, opacity outside 25-100%, hide delay outside 500-2000 ms, and size outside 75-150% are rejected during configuration validation.
+
 Add a dedicated Keystroke Overlay settings section with:
 
 - enable overlay;
@@ -171,6 +174,16 @@ Add a dedicated Keystroke Overlay settings section with:
 - per-application exclusion.
 
 Defaults favor normal daily use: overlay off until explicitly enabled, Adaptive motion, bottom-right fallback, Presentation Mode off, and per-key sound off.
+
+## Phase boundaries
+
+### Phase 1: visual overlay
+
+Phase 1 ships a complete visual feature: bounded producer events, reducer, privacy suppression, adaptive placement, native rendering, motion policy, settings, preview, regression tests, and performance gates. It does not initialize an audio engine or include audio assets.
+
+### Phase 2: optional per-key sound
+
+Phase 2 begins only after Phase 1 passes callback-latency, idle-CPU, privacy, and rapid-input gates. It consumes the already privacy-filtered semantic event stream and remains independently disableable and removable.
 
 ## Optional per-key sound
 
@@ -218,13 +231,22 @@ The first implementation should include only one restrained built-in sound theme
 - no continuous caret polling;
 - no continuous frame loop while hidden or static;
 - no synchronous UI or audio work in the keyboard callback;
-- bounded token count and bounded text length;
+- maximum 16 visible tokens and 64 UTF-16 code units per state snapshot;
+- one pending latest-state slot between producer and reducer; updates overwrite rather than accumulate;
 - state snapshots use fixed limits and latest-state replacement;
 - cache reusable render resources;
 - overlay and sound failures are isolated from input processing;
 - performance instrumentation must distinguish producer, queue, reducer, positioning, rendering, and audio stages.
 
-Target behavior is qualitative until measured on supported hardware: no observable typing latency regression, no visible backlog under rapid typing, and near-zero idle CPU attributable to the feature.
+Acceptance budgets on the existing benchmark hardware are:
+
+- feature-disabled callback p99 must remain within 2% of the current baseline;
+- feature-enabled producer/posting overhead must add no more than 5 microseconds at p99;
+- no pending visual queue depth above one latest-state slot;
+- overlay-attributable idle CPU rounds to 0.0% over a 30-second hidden interval using the existing resident resource probe;
+- no renderer or audio work occurs while the feature is disabled.
+
+If a machine or timer cannot measure these thresholds reliably, the benchmark must report raw distributions and fail only on a statistically clear regression rather than inventing precision.
 
 ## Error handling
 
@@ -303,7 +325,8 @@ Animations require a short recording or frame-sequence review in addition to scr
 - light/dark/high-contrast and DPI handling;
 - settings and preview;
 - Presentation Mode foundation;
-- one optional restrained per-key sound theme;
+- Phase 1: no audio engine or assets;
+- Phase 2: one optional restrained per-key sound theme;
 - latency, resource, privacy, regression, and visual tests.
 
 ### Excluded
@@ -332,7 +355,7 @@ The design intentionally rejects these tempting but costly choices:
 - sound enabled by default;
 - framework migration solely for this overlay.
 
-The optional sound feature remains in scope because it can share the same privacy policy and bounded event stream, but it is isolated behind its own setting and failure boundary. The visual overlay remains complete and useful without audio.
+The optional sound feature remains in product scope because it can share the same privacy policy and bounded semantic event stream, but it is a separate implementation phase and commit series. The visual overlay must be complete, measurable, and releasable without audio.
 
 ## Completion criteria
 
