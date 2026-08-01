@@ -24,6 +24,7 @@ if(WIN32)
     windows/clipboard_privacy_test.cpp
     windows/input_injection_test.cpp
     windows/keystroke_overlay_model_test.cpp
+    windows/keystroke_overlay_positioner_test.cpp
     windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
     windows/resident_input_controller_test.cpp
