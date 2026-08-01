@@ -90,15 +90,35 @@ KEYINA_TEST(native_clipboard_restore_requires_the_same_clipboard_sequence) {
   KEYINA_EXPECT_TRUE(!keyina::windows::ShouldRestoreClipboard(0, 0));
 }
 
-KEYINA_TEST(native_chromium_windows_defer_text_replacement_outside_the_hook) {
+KEYINA_TEST(native_text_delivery_policy_is_synchronous_and_deterministic) {
+  using keyina::windows::TextDeliveryMode;
+
+  KEYINA_EXPECT_EQ(
+      keyina::windows::ChooseTextDeliveryMode(false, false),
+      TextDeliveryMode::Keyboard);
+  KEYINA_EXPECT_EQ(
+      keyina::windows::ChooseTextDeliveryMode(false, true),
+      TextDeliveryMode::SelectionReplacement);
+  KEYINA_EXPECT_EQ(
+      keyina::windows::ChooseTextDeliveryMode(true, false),
+      TextDeliveryMode::Clipboard);
+  KEYINA_EXPECT_EQ(
+      keyina::windows::ChooseTextDeliveryMode(true, true),
+      TextDeliveryMode::Clipboard);
+}
+
+KEYINA_TEST(native_chromium_windows_require_selection_replacement) {
   KEYINA_EXPECT_TRUE(
-      keyina::windows::ShouldDeferInputForWindowClass(L"Chrome_WidgetWin_1"));
+      keyina::windows::RequiresSelectionReplacementForWindowClass(
+          L"Chrome_WidgetWin_1"));
   KEYINA_EXPECT_TRUE(
-      keyina::windows::ShouldDeferInputForWindowClass(L"Chrome_RenderWidgetHostHWND"));
+      keyina::windows::RequiresSelectionReplacementForWindowClass(
+          L"Chrome_RenderWidgetHostHWND"));
   KEYINA_EXPECT_TRUE(
-      !keyina::windows::ShouldDeferInputForWindowClass(L"Edit"));
+      !keyina::windows::RequiresSelectionReplacementForWindowClass(L"Edit"));
   KEYINA_EXPECT_TRUE(
-      !keyina::windows::ShouldDeferInputForWindowClass(L"ApplicationFrameWindow"));
+      !keyina::windows::RequiresSelectionReplacementForWindowClass(
+          L"ApplicationFrameWindow"));
 }
 
 KEYINA_TEST(native_input_injection_fails_without_partial_mouse_or_keyboard_output) {

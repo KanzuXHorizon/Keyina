@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string_view>
 
@@ -12,6 +13,16 @@ namespace keyina::windows {
 
 inline constexpr ULONG_PTR kKeyinaInjectionMarker =
     static_cast<ULONG_PTR>(0x4B4559494E41ULL);
+
+enum class TextDeliveryMode : std::uint8_t {
+  Keyboard = 0,
+  SelectionReplacement,
+  Clipboard,
+};
+
+[[nodiscard]] TextDeliveryMode ChooseTextDeliveryMode(
+    bool clipboard_compatibility_enabled,
+    bool chromium_target) noexcept;
 
 [[nodiscard]] std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,
@@ -29,7 +40,7 @@ inline constexpr ULONG_PTR kKeyinaInjectionMarker =
     DWORD owned_sequence,
     DWORD current_sequence) noexcept;
 
-[[nodiscard]] bool ShouldDeferInputForWindowClass(
+[[nodiscard]] bool RequiresSelectionReplacementForWindowClass(
     std::wstring_view class_name) noexcept;
 
 }  // namespace keyina::windows

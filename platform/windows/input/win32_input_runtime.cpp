@@ -28,7 +28,6 @@ constexpr std::size_t kMaximumVisibleSnippetSuggestions = 8;
 constexpr UINT kPointerRegistrationMessage = WM_APP + 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 2;
 constexpr UINT kRuntimeCommandMessage = WM_APP + 3;
-constexpr UINT kDeferredInputMessage = WM_APP + 4;
 constexpr UINT_PTR kProfileReloadTimerIdentifier = 1;
 constexpr UINT_PTR kClipboardRestoreTimerIdentifier = 2;
 constexpr UINT kProfileReloadIntervalMilliseconds = 1000;
@@ -797,11 +796,6 @@ void Win32InputRuntime::Stop() noexcept {
   if (active_runtime_ == this) {
     active_runtime_ = nullptr;
   }
-  pending_input_available_ = false;
-  pending_input_selection_replacement_ = false;
-  pending_input_decision_ = {};
-  pending_input_context_ = {};
-  pending_input_extended_insert_.clear();
   pressed_keys_.Clear();
   hotkey_router_.Reset();
   toggle_chord_active_ = false;
@@ -917,9 +911,6 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
         return 0;
       }
       break;
-    case kDeferredInputMessage:
-      ProcessDeferredInput();
-      return 0;
     case kRuntimeCommandMessage:
       static_cast<void>(
           LaunchManagedCommand(static_cast<RuntimeCommand>(w_param)));
@@ -1106,17 +1097,23 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
           performance_counter_frequency_);
       if (key_down) {
         ++suppressed_edit_count_;
-        const bool chromium_target =
-            IsDeferredInputTarget(context.focus_window);
-        const bool defer_input =
-            (profile_.clipboard_compatibility_enabled && reload_profiles_) ||
-            chromium_target;
-        const bool injected = defer_input
-                                  ? QueueDeferredInput(
-                                        decision, context,
-                                        chromium_target &&
-                                            !profile_.clipboard_compatibility_enabled)
-                                  : Inject(decision, context.focus_window);
+        const bool selection_replacement_target =
+            RequiresSelectionReplacementTarget(context.focus_window);
+        const TextDeliveryMode delivery_mode = ChooseTextDeliveryMode(
+            profile_.clipboard_compatibility_enabled && reload_profiles_,
+            selection_replacement_target);
+        bool injected = false;
+        switch (delivery_mode) {
+          case TextDeliveryMode::Keyboard:
+            injected = Inject(decision, context.focus_window);
+            break;
+          case TextDeliveryMode::SelectionReplacement:
+            injected = InjectWithSelectionReplacement(decision);
+            break;
+          case TextDeliveryMode::Clipboard:
+            injected = InjectViaClipboard(decision, context.focus_window);
+            break;
+        }
         if (!injected) {
           ++failed_injection_count_;
           controller_.Reset();
@@ -1151,15 +1148,15 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
   info.cbSize = sizeof(info);
   if (!GetGUIThreadInfo(0, &info) || info.hwndFocus == nullptr) {
     cached_focus_window_ = nullptr;
-    cached_deferred_target_window_ = nullptr;
-    cached_deferred_target_ = false;
+    cached_selection_replacement_target_window_ = nullptr;
+    cached_selection_replacement_target_ = false;
     return {};
   }
 
   if (info.hwndFocus != cached_focus_window_) {
     cached_focus_window_ = info.hwndFocus;
-    cached_deferred_target_window_ = nullptr;
-    cached_deferred_target_ = false;
+    cached_selection_replacement_target_window_ = nullptr;
+    cached_selection_replacement_target_ = false;
   }
 
   const HWND active = info.hwndActive != nullptr
@@ -1170,10 +1167,10 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
     if (GetWindowThreadProcessId(active, &process_id) == 0) {
       cached_active_window_ = nullptr;
       cached_focus_window_ = nullptr;
-      cached_deferred_target_window_ = nullptr;
+      cached_selection_replacement_target_window_ = nullptr;
       cached_process_id_ = 0;
       cached_application_hash_ = 0;
-      cached_deferred_target_ = false;
+      cached_selection_replacement_target_ = false;
       return {};
     }
     cached_active_window_ = active;
@@ -1194,14 +1191,14 @@ TypingContext Win32InputRuntime::CaptureTypingContext() noexcept {
   };
 }
 
-bool Win32InputRuntime::IsDeferredInputTarget(
+bool Win32InputRuntime::RequiresSelectionReplacementTarget(
     std::uintptr_t focus_window) noexcept {
   const HWND window = reinterpret_cast<HWND>(focus_window);
   if (window == nullptr) {
     return false;
   }
-  if (window == cached_deferred_target_window_) {
-    return cached_deferred_target_;
+  if (window == cached_selection_replacement_target_window_) {
+    return cached_selection_replacement_target_;
   }
 
   std::array<wchar_t, 128> focus_class{};
@@ -1209,11 +1206,11 @@ bool Win32InputRuntime::IsDeferredInputTarget(
       window,
       focus_class.data(),
       static_cast<int>(focus_class.size()));
-  cached_deferred_target_window_ = window;
-  cached_deferred_target_ = class_length > 0 &&
-      ShouldDeferInputForWindowClass(std::wstring_view(
+  cached_selection_replacement_target_window_ = window;
+  cached_selection_replacement_target_ = class_length > 0 &&
+      RequiresSelectionReplacementForWindowClass(std::wstring_view(
           focus_class.data(), static_cast<std::size_t>(class_length)));
-  return cached_deferred_target_;
+  return cached_selection_replacement_target_;
 }
 
 bool Win32InputRuntime::Inject(
@@ -1303,73 +1300,6 @@ bool Win32InputRuntime::InjectWithSelectionReplacement(
     first = false;
   }
   return true;
-}
-
-bool Win32InputRuntime::QueueDeferredInput(
-    const InputDecision& decision,
-    const TypingContext& context,
-    bool selection_replacement) noexcept {
-  if (window_ == nullptr || pending_input_available_) {
-    return false;
-  }
-  try {
-    pending_input_extended_insert_.assign(decision.extended_insert);
-  } catch (...) {
-    return false;
-  }
-  pending_input_decision_ = decision;
-  pending_input_decision_.extended_insert = pending_input_extended_insert_;
-  pending_input_decision_.snippet_command_payload = {};
-  pending_input_context_ = context;
-  pending_input_selection_replacement_ = selection_replacement;
-  pending_input_available_ = true;
-  if (PostMessageW(window_, kDeferredInputMessage, 0, 0) == FALSE) {
-    pending_input_available_ = false;
-    pending_input_selection_replacement_ = false;
-    pending_input_decision_ = {};
-    pending_input_context_ = {};
-    pending_input_extended_insert_.clear();
-    return false;
-  }
-  return true;
-}
-
-void Win32InputRuntime::ProcessDeferredInput() noexcept {
-  if (!pending_input_available_) {
-    return;
-  }
-  const TypingContext current = CaptureTypingContext();
-  const HWND locked_focus = reinterpret_cast<HWND>(
-      pending_input_context_.focus_window);
-  DWORD foreground_process_id = 0;
-  const HWND foreground = GetForegroundWindow();
-  if (foreground != nullptr) {
-    static_cast<void>(GetWindowThreadProcessId(
-        foreground, &foreground_process_id));
-  }
-  const bool same_foreground_process =
-      foreground_process_id != 0 &&
-      foreground_process_id == pending_input_context_.foreground_process_id;
-  const bool target_unchanged = !reload_profiles_ ||
-      (same_foreground_process && locked_focus != nullptr &&
-       IsWindow(locked_focus) != FALSE);
-  bool injected = false;
-  if (target_unchanged) {
-    injected = pending_input_selection_replacement_
-                   ? InjectWithSelectionReplacement(pending_input_decision_)
-                   : Inject(
-                         pending_input_decision_,
-                         pending_input_context_.focus_window);
-  }
-  pending_input_available_ = false;
-  pending_input_selection_replacement_ = false;
-  pending_input_decision_ = {};
-  pending_input_context_ = {};
-  pending_input_extended_insert_.clear();
-  if (!injected) {
-    controller_.Reset();
-    RequestPointerRegistration(false);
-  }
 }
 
 bool Win32InputRuntime::InjectViaClipboard(

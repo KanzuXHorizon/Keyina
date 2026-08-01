@@ -4,6 +4,17 @@
 
 namespace keyina::windows {
 
+TextDeliveryMode ChooseTextDeliveryMode(
+    bool clipboard_compatibility_enabled,
+    bool chromium_target) noexcept {
+  if (clipboard_compatibility_enabled) {
+    return TextDeliveryMode::Clipboard;
+  }
+  return chromium_target
+             ? TextDeliveryMode::SelectionReplacement
+             : TextDeliveryMode::Keyboard;
+}
+
 std::size_t BuildKeyboardInputSequence(
     const InputDecision& decision,
     std::span<INPUT> destination) noexcept {
@@ -121,7 +132,7 @@ bool ShouldRestoreClipboard(
   return owned_sequence != 0 && owned_sequence == current_sequence;
 }
 
-bool ShouldDeferInputForWindowClass(
+bool RequiresSelectionReplacementForWindowClass(
     std::wstring_view class_name) noexcept {
   return class_name.starts_with(L"Chrome_");
 }

@@ -147,7 +147,7 @@ class Win32InputRuntime {
   LRESULT HandleKeyboardEvent(int code, WPARAM message,
                               LPARAM data) noexcept;
   [[nodiscard]] TypingContext CaptureTypingContext() noexcept;
-  [[nodiscard]] bool IsDeferredInputTarget(
+  [[nodiscard]] bool RequiresSelectionReplacementTarget(
       std::uintptr_t focus_window) noexcept;
   [[nodiscard]] bool Inject(
       const InputDecision& decision,
@@ -157,11 +157,6 @@ class Win32InputRuntime {
   [[nodiscard]] bool InjectViaClipboard(
       const InputDecision& decision,
       std::uintptr_t target_focus_window) noexcept;
-  [[nodiscard]] bool QueueDeferredInput(
-      const InputDecision& decision,
-      const TypingContext& context,
-      bool selection_replacement) noexcept;
-  void ProcessDeferredInput() noexcept;
   void RestorePendingClipboard() noexcept;
   [[nodiscard]] bool IsPointerResetPacket(HRAWINPUT input) noexcept;
   void RequestPointerRegistration(bool active) noexcept;
@@ -214,10 +209,10 @@ class Win32InputRuntime {
   KeyStateSet pressed_keys_{};
   HWND cached_active_window_{nullptr};
   HWND cached_focus_window_{nullptr};
-  HWND cached_deferred_target_window_{nullptr};
+  HWND cached_selection_replacement_target_window_{nullptr};
   std::uint32_t cached_process_id_{};
   std::uint64_t cached_application_hash_{};
-  bool cached_deferred_target_{};
+  bool cached_selection_replacement_target_{};
   std::uint8_t modifier_state_{};
   bool caps_lock_{false};
   bool pointer_registration_desired_{false};
@@ -232,11 +227,6 @@ class Win32InputRuntime {
   bool snippet_profile_write_time_known_{false};
   UINT_PTR profile_timer_{};
   UINT_PTR clipboard_restore_timer_{};
-  InputDecision pending_input_decision_{};
-  TypingContext pending_input_context_{};
-  std::u16string pending_input_extended_insert_{};
-  bool pending_input_available_{false};
-  bool pending_input_selection_replacement_{false};
   std::wstring pending_clipboard_text_{};
   DWORD pending_clipboard_sequence_{};
   bool pending_clipboard_text_present_{false};
