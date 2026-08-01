@@ -31,6 +31,9 @@ internal static class RuntimeInputProfileTests
             VietnameseEnabled = false,
             SpeechEnabled = true,
             TranslationEnabled = true,
+            TraditionalTonePlacement = true,
+            QuickTelexLetters = true,
+            StandaloneWToUHorn = false,
             ClipboardCompatibilityEnabled = true,
             Hotkeys = HotkeyPreferences.Default
                 .WithChord(
@@ -56,6 +59,9 @@ internal static class RuntimeInputProfileTests
         AssertEx.False(decoded.VietnameseEnabled, "Vietnamese state changed during profile round trip.");
         AssertEx.True(decoded.SpeechEnabled, "Speech state changed during profile round trip.");
         AssertEx.True(decoded.TranslationEnabled, "Translation state changed during profile round trip.");
+        AssertEx.True(decoded.TraditionalTonePlacement, "Tone placement changed during profile round trip.");
+        AssertEx.True(decoded.QuickTelexLetters, "Quick Telex state changed during profile round trip.");
+        AssertEx.False(decoded.StandaloneWToUHorn, "Standalone W behavior changed during profile round trip.");
         AssertEx.True(decoded.RestoreInvalidWord, "Invalid-Latin restoration changed during profile round trip.");
         AssertEx.True(decoded.ClipboardCompatibilityEnabled, "Clipboard compatibility mode changed during profile round trip.");
         AssertEx.Equal(configuration.SchemaVersion, decoded.SourceSchemaVersion);
@@ -89,11 +95,6 @@ internal static class RuntimeInputProfileTests
         invalidMagic[0] = (byte)'X';
         RewriteChecksum(invalidMagic);
         AssertInvalid(invalidMagic, "invalid magic");
-
-        var unknownFlag = DefaultVector.ToArray();
-        unknownFlag[6] |= 0x80;
-        RewriteChecksum(unknownFlag);
-        AssertInvalid(unknownFlag, "unknown flag");
 
         var reservedByte = DefaultVector.ToArray();
         reservedByte[26] = 1;

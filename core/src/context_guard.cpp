@@ -33,6 +33,57 @@ constexpr char32_t ToAsciiLower(char32_t value) noexcept {
   return IsAsciiUpper(value) ? value + (U'a' - U'A') : value;
 }
 
+bool IsIpv6Address(std::u32string_view token) noexcept {
+  if (token.size() < 2) {
+    return false;
+  }
+
+  std::size_t groups = 0;
+  std::size_t group_digits = 0;
+  bool compressed = false;
+  for (std::size_t index = 0; index < token.size(); ++index) {
+    const char32_t value = token[index];
+    if (IsAsciiHex(value)) {
+      ++group_digits;
+      if (group_digits > 4) {
+        return false;
+      }
+      continue;
+    }
+    if (value != U':') {
+      return false;
+    }
+
+    const bool double_colon =
+        index + 1 < token.size() && token[index + 1] == U':';
+    if (double_colon) {
+      if (compressed) {
+        return false;
+      }
+      compressed = true;
+      if (group_digits != 0) {
+        ++groups;
+        group_digits = 0;
+      }
+      ++index;
+      continue;
+    }
+
+    if (group_digits == 0) {
+      return false;
+    }
+    ++groups;
+    group_digits = 0;
+  }
+
+  if (group_digits != 0) {
+    ++groups;
+  } else if (!compressed || !token.ends_with(U"::")) {
+    return false;
+  }
+  return compressed ? groups < 8 : groups == 8;
+}
+
 bool StartsWithInsensitive(std::u32string_view value,
                            std::u32string_view prefix) noexcept {
   if (value.size() < prefix.size()) {
@@ -93,6 +144,10 @@ bool IsFilePath(std::u32string_view token) noexcept {
 }
 
 bool IsVersionOrHash(std::u32string_view token) noexcept {
+  if (IsIpv6Address(token)) {
+    return true;
+  }
+
   std::size_t start = 0;
   if (token.size() > 1 && (token.front() == U'v' || token.front() == U'V')) {
     start = 1;
@@ -134,6 +189,10 @@ bool IsVersionOrHash(std::u32string_view token) noexcept {
 }
 
 bool IsIdentifier(std::u32string_view token) noexcept {
+  if (IsIpv6Address(token)) {
+    return false;
+  }
+
   bool has_letter = false;
   bool has_digit = false;
   bool has_identifier_punctuation = false;

@@ -33,16 +33,24 @@ char32_t DelimiterForEvent(const PhysicalKeyEvent& event) noexcept {
 
 EngineConfig ToEngineConfig(const RuntimeInputProfile& profile) noexcept {
   return EngineConfig{
-      profile.traditional_tone_placement ? TonePlacement::Traditional
-                                         : TonePlacement::Modern,
-      false,
-      profile.restore_invalid_word,
+      .tone_placement = profile.traditional_tone_placement
+                            ? TonePlacement::Traditional
+                            : TonePlacement::Modern,
+      .application_bypass = false,
+      .restore_invalid_word = profile.restore_invalid_word,
+      .quick_telex_letters = profile.quick_telex_letters,
+      .standalone_w_to_u_horn = profile.standalone_w_to_u_horn,
   };
 }
 
 bool IsSupportedCharacter(char32_t character) noexcept {
   return (character >= U'A' && character <= U'Z') ||
          (character >= U'a' && character <= U'z');
+}
+
+bool IsQuickTelexCharacter(char32_t character) noexcept {
+  return character == U'[' || character == U']' ||
+         character == U'{' || character == U'}';
 }
 
 bool IsCommitBoundaryCharacter(char32_t character) noexcept {
@@ -218,9 +226,22 @@ InputDecision ResidentInputController::ProcessKeyDown(
     return {};
   }
 
+  if (event.key_repeat && suppressed_keys_.Get(event.virtual_key)) {
+    InputDecision decision{};
+    decision.suppress = true;
+    return decision;
+  }
+
   if (event.virtual_key == kBackspace) {
     if (boundary_backspace_recovery_available_) {
-      RestoreCommittedCompositionAfterBoundaryBackspace();
+      if (post_boundary_literal_codepoints_ > 0) {
+        --post_boundary_literal_codepoints_;
+        engine_.Reset();
+        snippet_matcher_.Reset();
+        pointer_observation_required_ = false;
+      } else {
+        RestoreCommittedCompositionAfterBoundaryBackspace();
+      }
       return {};
     }
     if (snippet_matcher_.active()) {
@@ -232,8 +253,6 @@ InputDecision ResidentInputController::ProcessKeyDown(
     }
     return {};
   }
-
-  ClearCommittedComposition();
 
   const char32_t delimiter = DelimiterForEvent(event);
   if (delimiter != U'\0' && snippet_matcher_.active()) {
@@ -272,8 +291,19 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   TextEditView edit{};
-  if (event.virtual_key == kSpace ||
-      IsCommitBoundaryCharacter(event.character)) {
+  const bool quick_telex_character =
+      profile_.quick_telex_letters && IsQuickTelexCharacter(event.character);
+  if (quick_telex_character || IsSupportedCharacter(event.character)) {
+    edit = engine_.ProcessView(KeyEvent{
+        KeyKind::Character,
+        event.character,
+        event.shift,
+        event.control,
+        event.alt,
+    });
+    pointer_observation_required_ = true;
+  } else if (event.virtual_key == kSpace ||
+             IsCommitBoundaryCharacter(event.character)) {
     RememberCommittedComposition();
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::CommitBoundary,
@@ -283,15 +313,6 @@ InputDecision ResidentInputController::ProcessKeyDown(
         event.alt,
     });
     pointer_observation_required_ = false;
-  } else if (IsSupportedCharacter(event.character)) {
-    edit = engine_.ProcessView(KeyEvent{
-        KeyKind::Character,
-        event.character,
-        event.shift,
-        event.control,
-        event.alt,
-    });
-    pointer_observation_required_ = true;
   } else {
     if (IsResetBoundary(event.virtual_key)) {
       ResetEngineState();
@@ -300,6 +321,20 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   auto decision = BuildDecision(edit, event.character);
+  if (boundary_backspace_recovery_available_ &&
+      (IsSupportedCharacter(event.character) || quick_telex_character)) {
+    if (IsLiteralPassThrough(edit, event.character)) {
+      constexpr std::size_t kMaximumRecoverableLiteralSuffix = 32;
+      if (post_boundary_literal_codepoints_ <
+          kMaximumRecoverableLiteralSuffix) {
+        ++post_boundary_literal_codepoints_;
+      } else {
+        ClearCommittedComposition();
+      }
+    } else {
+      ClearCommittedComposition();
+    }
+  }
   if (decision.suppress) {
     suppressed_keys_.Set(event.virtual_key, true);
   }
@@ -371,10 +406,12 @@ void ResidentInputController::RememberCommittedComposition() {
   committed_raw_keys_.assign(engine_.RawKeys());
   committed_visible_text_.assign(engine_.VisibleText());
   boundary_backspace_recovery_available_ = !committed_raw_keys_.empty();
+  post_boundary_literal_codepoints_ = 0;
 }
 
 void ResidentInputController::RestoreCommittedCompositionAfterBoundaryBackspace() {
   boundary_backspace_recovery_available_ = false;
+  post_boundary_literal_codepoints_ = 0;
   engine_.Reset();
   for (const char32_t character : committed_raw_keys_) {
     static_cast<void>(engine_.ProcessView(KeyEvent{
@@ -391,6 +428,7 @@ void ResidentInputController::RestoreCommittedCompositionAfterBoundaryBackspace(
 
 void ResidentInputController::ClearCommittedComposition() noexcept {
   boundary_backspace_recovery_available_ = false;
+  post_boundary_literal_codepoints_ = 0;
   committed_raw_keys_.clear();
   committed_visible_text_.clear();
 }

@@ -5,6 +5,7 @@
 #include <keyina/windows/runtime_hotkeys.h>
 
 #include <windows.h>
+#include <ole2.h>
 #include <shellapi.h>
 
 #include <array>
@@ -232,8 +233,10 @@ class Win32InputRuntime {
   UINT_PTR profile_timer_{};
   UINT_PTR clipboard_restore_timer_{};
   std::wstring pending_clipboard_text_{};
+  IDataObject* pending_clipboard_data_object_{nullptr};
   DWORD pending_clipboard_sequence_{};
   bool pending_clipboard_text_present_{false};
+  bool ole_initialized_{false};
   NativeRuntimeStartupStage startup_stage_{NativeRuntimeStartupStage::None};
   DWORD startup_error_{};
   std::uint64_t processed_keyboard_events_{};

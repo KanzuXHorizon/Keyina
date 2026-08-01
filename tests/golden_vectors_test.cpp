@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include <keyina/context_guard.h>
@@ -112,6 +113,15 @@ std::optional<GoldenVector> ParseVectorLine(std::string_view line) {
   };
 }
 
+std::string DescribeRaw(std::u32string_view raw) {
+  std::string result;
+  result.reserve(raw.size());
+  for (const char32_t value : raw) {
+    result.push_back(value <= 0x7F ? static_cast<char>(value) : '?');
+  }
+  return result;
+}
+
 std::u32string TypeVector(keyina::Engine& engine, std::u32string_view raw) {
   std::u32string external;
   for (const char32_t character : raw) {
@@ -155,6 +165,8 @@ KEYINA_TEST(checked_in_golden_vectors_match_engine_and_rollback) {
   KEYINA_EXPECT_TRUE(input.is_open());
 
   std::size_t vector_count = 0;
+  std::size_t technical_guard_count = 0;
+  std::unordered_set<std::u32string> seen_raw;
   std::string line;
   while (std::getline(input, line)) {
     if (!line.empty() && line.back() == '\r') {
@@ -165,14 +177,29 @@ KEYINA_TEST(checked_in_golden_vectors_match_engine_and_rollback) {
       continue;
     }
     ++vector_count;
+    if (!seen_raw.insert(vector->raw).second) {
+      throw std::runtime_error(
+          "duplicate golden raw vector=" + DescribeRaw(vector->raw));
+    }
+    if (vector->guard_reason != keyina::GuardReason::None) {
+      ++technical_guard_count;
+    }
 
     keyina::Engine engine;
     const auto output = TypeVector(engine, vector->raw);
-    KEYINA_EXPECT_EQ(output, vector->expected);
-    KEYINA_EXPECT_EQ(engine.RawKeys(),
-                     std::u32string_view{vector->rollback});
-    KEYINA_EXPECT_EQ(keyina::ClassifyToken(vector->raw, {}).reason,
-                     vector->guard_reason);
+    if (output != vector->expected) {
+      throw std::runtime_error(
+          "golden output mismatch for raw=" + DescribeRaw(vector->raw));
+    }
+    if (engine.RawKeys() != std::u32string_view{vector->rollback}) {
+      throw std::runtime_error(
+          "golden rollback mismatch for raw=" + DescribeRaw(vector->raw));
+    }
+    if (keyina::ClassifyToken(vector->raw, {}).reason !=
+        vector->guard_reason) {
+      throw std::runtime_error(
+          "golden guard mismatch for raw=" + DescribeRaw(vector->raw));
+    }
 
     std::u32string rollback_output = output;
     while (!engine.RawKeys().empty()) {
@@ -186,5 +213,6 @@ KEYINA_TEST(checked_in_golden_vectors_match_engine_and_rollback) {
     KEYINA_EXPECT_TRUE(rollback_output.empty());
   }
 
-  KEYINA_EXPECT_TRUE(vector_count >= 100);
+  KEYINA_EXPECT_TRUE(vector_count >= 220);
+  KEYINA_EXPECT_TRUE(technical_guard_count >= 30);
 }

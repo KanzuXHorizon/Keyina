@@ -8,6 +8,7 @@ add_executable(keyina_tests
   golden_vectors_test.cpp
   invariant_test.cpp
   test_main.cpp
+  typing_corpus_test.cpp
   vietnamese_syllable_test.cpp
   vietnamese_test.cpp
 )

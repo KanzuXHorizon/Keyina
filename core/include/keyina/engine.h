@@ -49,6 +49,7 @@ struct EngineConfig {
   bool application_bypass{false};
   bool restore_invalid_word{false};
   bool quick_telex_letters{false};
+  bool standalone_w_to_u_horn{true};
 };
 
 class Engine {
@@ -66,7 +67,7 @@ class Engine {
   [[nodiscard]] std::u32string_view RawKeys() const noexcept;
 
  private:
-  void ComposeRaw(std::u32string& destination);
+  [[nodiscard]] bool ComposeRaw(std::u32string& destination);
   void BuildVisibleForRaw();
   [[nodiscard]] TextEditView ReplaceVisibleView(bool consumed);
   void ResetCompositionState() noexcept;

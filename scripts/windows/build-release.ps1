@@ -7,6 +7,8 @@ param(
     [string]$RuntimeIdentifier = 'win-x64',
 
     [switch]$SkipVerification,
+    [switch]$SkipBuildTests,
+    [switch]$SkipDesktopInteractiveTests,
     [switch]$SkipInstaller,
     [switch]$Sign,
     [switch]$RequireSignature
@@ -14,11 +16,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$env:MSBUILDDISABLENODEREUSE = '1'
+$env:DOTNET_CLI_USE_MSBUILD_SERVER = '0'
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $propsPath = Join-Path $repoRoot 'Directory.Build.props'
 $signScript = Join-Path $repoRoot 'scripts\windows\sign-file.ps1'
 $installerScript = Join-Path $repoRoot 'installer\Keyina.iss'
+$installerLifecycleScript = Join-Path $repoRoot 'scripts\windows\test-installer.ps1'
+$lifecycleInstallerBuilder = Join-Path $repoRoot 'scripts\windows\build-lifecycle-installer.ps1'
 
 function Invoke-Checked {
     param(
@@ -94,17 +100,17 @@ function Remove-DirectoryWithRetry {
     if (-not (Test-Path -LiteralPath $Path)) {
         return
     }
-    for ($attempt = 1; $attempt -le 8; $attempt++) {
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
         try {
             Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
             return
         } catch {
-            if ($attempt -ge 8) {
+            if ($attempt -ge 20) {
                 throw
             }
             [GC]::Collect()
             [GC]::WaitForPendingFinalizers()
-            Start-Sleep -Milliseconds (150 * $attempt)
+            Start-Sleep -Milliseconds ([Math]::Min(1000, 150 * $attempt))
         }
     }
     Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
@@ -172,13 +178,18 @@ if ($Sign -and
     throw 'Signing was requested but no identity is configured. Set KEYINA_SIGN_CERT_THUMBPRINT or KEYINA_SIGN_PFX_PATH.'
 }
 
-$artifactRoot = Join-Path $repoRoot "artifacts\release\$Version"
+$releaseRoot = Join-Path $repoRoot 'artifacts\release'
+$finalArtifactRoot = Join-Path $releaseRoot $Version
+$artifactRoot = Join-Path `
+    $releaseRoot `
+    ".staging-$Version-$([Guid]::NewGuid().ToString('N'))"
 $publishDir = Join-Path $artifactRoot $RuntimeIdentifier
 $installerDir = Join-Path $artifactRoot 'installer'
 $portableZip = Join-Path $artifactRoot "Keyina-$Version-$RuntimeIdentifier.zip"
 $checksumsPath = Join-Path $artifactRoot 'SHA256SUMS.txt'
 $manifestPath = Join-Path $artifactRoot 'release-manifest.json'
 
+New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 Remove-DirectoryWithRetry $artifactRoot
 New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
@@ -196,8 +207,15 @@ Invoke-Checked 'cmake.exe' @(
 )
 Invoke-Checked 'cmake.exe' @('--build', '--preset', 'windows-msvc-release')
 
-if (-not $SkipVerification) {
-    Invoke-Checked 'ctest.exe' @('--preset', 'windows-msvc-release', '--output-on-failure')
+if (-not $SkipVerification -and -not $SkipBuildTests) {
+    $ctestArguments = @('--preset', 'windows-msvc-release', '--output-on-failure')
+    if ($SkipDesktopInteractiveTests) {
+        $ctestArguments += @(
+            '-E',
+            'keyina\.windows\.input_(typing|clipboard_typing|callback_latency|transform_callback_latency)'
+        )
+    }
+    Invoke-Checked 'ctest.exe' $ctestArguments
     Invoke-Checked 'python.exe' @('tools/check_vectors.py')
     Invoke-Checked 'python.exe' @('tools/test_compare_benchmark.py')
 
@@ -206,7 +224,7 @@ if (-not $SkipVerification) {
         'run', '--project', 'apps/host/Keyina.Host.Tests/Keyina.Host.Tests.csproj',
         '-c', 'Release', '--no-build'
     )
-    foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
+    foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test')) {
         Invoke-Checked 'dotnet.exe' @(
             'run', '--project', 'apps/host/Keyina.Host/Keyina.Host.csproj',
             '-c', 'Release', '--no-build', '--', $selfTest
@@ -265,17 +283,19 @@ $reportedVersion = (($versionResult.StandardOutput -split "`r?`n") | Select-Obje
 if ($reportedVersion -ne $Version) {
     throw "Published host reports version '$reportedVersion'; expected '$Version'."
 }
-foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test', '--resource-self-test')) {
+foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test')) {
     $null = Invoke-CheckedCapturedProcess $publishedHost $selfTest $publishDir
 }
 foreach ($selfTest in @(
     '--self-test',
     '--resource-self-test',
-    '--typing-self-test',
     '--tray-resource-self-test',
     '--profile-reload-self-test'
 )) {
     $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
+}
+if (-not $SkipDesktopInteractiveTests) {
+    $null = Invoke-CheckedCapturedProcess $publishedResident '--typing-self-test' $publishDir
 }
 
 if ($Sign) {
@@ -296,6 +316,7 @@ if ($Sign) {
 Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $portableZip -CompressionLevel Optimal
 
 $installerPath = $null
+$installerLifecycleVerified = $false
 if (-not $SkipInstaller) {
     $iscc = Get-InnoCompiler
     $innoArguments = @(
@@ -319,6 +340,39 @@ if (-not $SkipInstaller) {
         $signTool = Get-SignTool
         Invoke-Checked $signTool @('verify', '/pa', '/all', '/v', $installerPath)
     }
+    if (-not $SkipVerification) {
+        $lifecycleDirectory = Join-Path `
+            $env:TEMP `
+            "KeyinaLifecycleInstallers\$([Guid]::NewGuid().ToString('N'))"
+        try {
+            Invoke-Checked 'powershell.exe' @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', $lifecycleInstallerBuilder,
+                '-SourceDirectory', $publishDir,
+                '-Version', $Version,
+                '-OutputDirectory', $lifecycleDirectory
+            )
+            $lifecycleInstallers = @(
+                Get-ChildItem -LiteralPath $lifecycleDirectory -Filter '*.exe' -File
+            )
+            if ($lifecycleInstallers.Count -ne 1) {
+                throw "Expected one lifecycle installer; found $($lifecycleInstallers.Count)."
+            }
+            Invoke-Checked 'powershell.exe' @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', $installerLifecycleScript,
+                '-InstallerPath', $lifecycleInstallers[0].FullName,
+                '-Version', $Version
+            )
+            $installerLifecycleVerified = $true
+        } finally {
+            Remove-Item `
+                -LiteralPath $lifecycleDirectory `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 $releaseFiles = @($portableZip)
@@ -334,7 +388,7 @@ Set-Content -LiteralPath $checksumsPath -Value $checksumLines -Encoding UTF8
 $commit = (git -C $repoRoot rev-parse HEAD).Trim()
 $publishedFiles = Get-ChildItem -LiteralPath $publishDir -Recurse -File
 $manifest = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     product = 'Keyina'
     version = $Version
     runtime_identifier = $RuntimeIdentifier
@@ -343,6 +397,12 @@ $manifest = [ordered]@{
     self_contained = $true
     ready_to_run = $false
     signed = [bool]$Sign
+    installer_type = if ($null -ne $installerPath) { 'inno_setup' } else { 'none' }
+    install_scope = if ($null -ne $installerPath) { 'current_user' } else { 'portable' }
+    installer_lifecycle_verified = $installerLifecycleVerified
+    build_test_suites_skipped = [bool]$SkipBuildTests
+    desktop_interactive_tests_skipped = [bool]$SkipDesktopInteractiveTests
+    preserved_user_data_directory = '%LOCALAPPDATA%\Keyina'
     published_file_count = $publishedFiles.Count
     published_bytes = [long](($publishedFiles | Measure-Object Length -Sum).Sum)
     artifacts = @(
@@ -358,12 +418,28 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
+Remove-DirectoryWithRetry $finalArtifactRoot
+Move-Item -LiteralPath $artifactRoot -Destination $finalArtifactRoot
+
+$finalPortableZip = Join-Path `
+    $finalArtifactRoot `
+    ([System.IO.Path]::GetFileName($portableZip))
+$finalChecksumsPath = Join-Path $finalArtifactRoot 'SHA256SUMS.txt'
+$finalManifestPath = Join-Path $finalArtifactRoot 'release-manifest.json'
+$finalInstallerPath = if ($null -ne $installerPath) {
+    Join-Path `
+        (Join-Path $finalArtifactRoot 'installer') `
+        ([System.IO.Path]::GetFileName($installerPath))
+} else {
+    $null
+}
+
 Write-Host ''
 Write-Host 'Release artifacts created:' -ForegroundColor Green
-Write-Host "  Portable:  $portableZip"
-if ($null -ne $installerPath) {
-    Write-Host "  Installer: $installerPath"
+Write-Host "  Portable:  $finalPortableZip"
+if ($null -ne $finalInstallerPath) {
+    Write-Host "  Installer: $finalInstallerPath"
 }
-Write-Host "  Checksums: $checksumsPath"
-Write-Host "  Manifest:  $manifestPath"
+Write-Host "  Checksums: $finalChecksumsPath"
+Write-Host "  Manifest:  $finalManifestPath"
 Write-Host "  Signed:    $([bool]$Sign)"

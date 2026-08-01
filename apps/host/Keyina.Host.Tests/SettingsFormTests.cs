@@ -111,8 +111,14 @@ internal static class SettingsFormTests
             "DeepL Free privacy warning must mention sensitive content.");
 
         var vietnamese = (CheckBox)form.Controls.Find("vietnameseToggle", true).Single();
+        var traditional = (CheckBox)form.Controls.Find("traditionalTonePlacementToggle", true).Single();
+        var quickTelex = (CheckBox)form.Controls.Find("quickTelexLettersToggle", true).Single();
+        var standaloneW = (CheckBox)form.Controls.Find("standaloneWToUHornToggle", true).Single();
         var startup = (CheckBox)form.Controls.Find("startupToggle", true).Single();
         AssertEx.True(vietnamese.Checked, "Vietnamese input should be enabled in the sample state.");
+        AssertEx.False(traditional.Checked, "Modern tone placement should be the safe default.");
+        AssertEx.False(quickTelex.Checked, "Quick Telex brackets should be opt in.");
+        AssertEx.True(standaloneW.Checked, "Standalone W should preserve the existing default behavior.");
         AssertEx.True(startup.Checked, "Startup should be enabled in the sample state.");
 
         var saveButton = (Button)form.Controls.Find("saveSpeechKey", true).Single();
@@ -292,6 +298,32 @@ internal static class SettingsFormTests
             "Translation preview toggle did not update runtime preferences.");
         AssertEx.Equal(string.Empty,
             ((TextBox)form.Controls.Find("deepLApiKey", true).Single()).Text);
+    }
+
+    [KeyinaTest("typing personality toggles update runtime preferences")]
+    private static void TypingPersonalityTogglesAreBound()
+    {
+        var traditionalValues = new List<bool>();
+        var quickValues = new List<bool>();
+        var standaloneValues = new List<bool>();
+        var actions = SettingsActions.NoOp with
+        {
+            SetTraditionalTonePlacement = traditionalValues.Add,
+            SetQuickTelexLetters = quickValues.Add,
+            SetStandaloneWToUHorn = standaloneValues.Add,
+        };
+        using var form = new SettingsForm(SettingsSnapshot.Sample, actions);
+
+        ((CheckBox)form.Controls.Find("traditionalTonePlacementToggle", true).Single()).Checked = true;
+        ((CheckBox)form.Controls.Find("quickTelexLettersToggle", true).Single()).Checked = true;
+        ((CheckBox)form.Controls.Find("standaloneWToUHornToggle", true).Single()).Checked = false;
+
+        AssertEx.True(traditionalValues.SequenceEqual([true]),
+            "Traditional tone placement toggle was not bound.");
+        AssertEx.True(quickValues.SequenceEqual([true]),
+            "Quick Telex toggle was not bound.");
+        AssertEx.True(standaloneValues.SequenceEqual([false]),
+            "Standalone W toggle was not bound.");
     }
 
     [KeyinaTest("hotkeys settings configure and preview non-intrusive feedback")]

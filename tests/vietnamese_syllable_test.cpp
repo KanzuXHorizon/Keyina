@@ -36,6 +36,21 @@ KEYINA_TEST(recognizes_delayed_d_candidate_as_a_valid_syllable) {
   KEYINA_EXPECT_EQ(analysis.error, keyina::SyllableError::None);
 }
 
+KEYINA_TEST(classifies_valid_onset_prefixes_as_recoverable) {
+  constexpr std::array<std::u32string_view, 6> recoverable = {
+      U"b", U"ch", U"ng", U"ngh", U"ph", U"tr",
+  };
+  for (const auto prefix : recoverable) {
+    const auto analysis = keyina::AnalyzeVietnameseSyllable(prefix);
+    KEYINA_EXPECT_EQ(analysis.status, keyina::SyllableStatus::RecoverablePrefix);
+    KEYINA_EXPECT_EQ(analysis.error, keyina::SyllableError::MissingNucleus);
+  }
+
+  const auto impossible = keyina::AnalyzeVietnameseSyllable(U"zr");
+  KEYINA_EXPECT_EQ(impossible.status, keyina::SyllableStatus::Impossible);
+  KEYINA_EXPECT_EQ(impossible.error, keyina::SyllableError::MissingNucleus);
+}
+
 KEYINA_TEST(validates_representative_vietnamese_syllables) {
   constexpr std::array<std::u32string_view, 28> valid = {
       U"a", U"ai", U"anh", U"bạn", U"chuyện", U"được", U"giếng",
@@ -147,7 +162,7 @@ KEYINA_TEST(analyzer_reports_shared_structural_parts_and_precise_errors) {
   KEYINA_EXPECT_EQ(valid.tone, keyina::Tone::None);
 
   const auto missing = keyina::AnalyzeVietnameseSyllable(U"tr");
-  KEYINA_EXPECT_EQ(missing.status, keyina::SyllableStatus::Impossible);
+  KEYINA_EXPECT_EQ(missing.status, keyina::SyllableStatus::RecoverablePrefix);
   KEYINA_EXPECT_EQ(missing.error, keyina::SyllableError::MissingNucleus);
 
   const auto bad_onset = keyina::AnalyzeVietnameseSyllable(U"zrường");
@@ -180,6 +195,27 @@ KEYINA_TEST(commit_boundary_does_not_autocorrect_ambiguous_tokens) {
   const auto boundary = engine.Process(
       {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
   KEYINA_EXPECT_EQ(boundary, keyina::TextEdit{});
+}
+
+KEYINA_TEST(selects_tone_offsets_from_orthographic_nucleus_rules) {
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"oa", false, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"oa", false, false),
+                   std::size_t{0});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"oe", false, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"uy", false, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"iê", true, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"ươ", true, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"oai", false, true),
+                   std::size_t{1});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"oai", true, true),
+                   std::size_t{2});
+  KEYINA_EXPECT_EQ(keyina::SelectVietnameseToneOffset(U"ae", false, true),
+                   std::u32string_view::npos);
 }
 
 KEYINA_TEST(validates_broad_dictionary_derived_edge_corpus) {

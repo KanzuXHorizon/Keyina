@@ -8,6 +8,8 @@ public sealed record RuntimeInputProfileSnapshot(
     bool SpeechEnabled,
     bool TranslationEnabled,
     bool TraditionalTonePlacement,
+    bool QuickTelexLetters,
+    bool StandaloneWToUHorn,
     bool RestoreInvalidWord,
     bool ClipboardCompatibilityEnabled,
     int SourceSchemaVersion,
@@ -26,13 +28,17 @@ public static class RuntimeInputProfileCodec
     private const byte TraditionalTonePlacementFlag = 1 << 3;
     private const byte RestoreInvalidWordFlag = 1 << 4;
     private const byte ClipboardCompatibilityFlag = 1 << 5;
+    private const byte QuickTelexLettersFlag = 1 << 6;
+    private const byte DisableStandaloneWFlag = 1 << 7;
     private const byte KnownFlags =
         VietnameseEnabledFlag |
         SpeechEnabledFlag |
         TranslationEnabledFlag |
         TraditionalTonePlacementFlag |
         RestoreInvalidWordFlag |
-        ClipboardCompatibilityFlag;
+        ClipboardCompatibilityFlag |
+        QuickTelexLettersFlag |
+        DisableStandaloneWFlag;
 
     private static ReadOnlySpan<byte> Magic => "KIRP"u8;
 
@@ -124,6 +130,8 @@ public static class RuntimeInputProfileCodec
                 (flags & SpeechEnabledFlag) != 0,
                 (flags & TranslationEnabledFlag) != 0,
                 (flags & TraditionalTonePlacementFlag) != 0,
+                (flags & QuickTelexLettersFlag) != 0,
+                (flags & DisableStandaloneWFlag) == 0,
                 (flags & RestoreInvalidWordFlag) != 0,
                 (flags & ClipboardCompatibilityFlag) != 0,
                 sourceSchemaVersion,
@@ -151,6 +159,18 @@ public static class RuntimeInputProfileCodec
         if (configuration.TranslationEnabled)
         {
             flags |= TranslationEnabledFlag;
+        }
+        if (configuration.TraditionalTonePlacement)
+        {
+            flags |= TraditionalTonePlacementFlag;
+        }
+        if (configuration.QuickTelexLetters)
+        {
+            flags |= QuickTelexLettersFlag;
+        }
+        if (!configuration.StandaloneWToUHorn)
+        {
+            flags |= DisableStandaloneWFlag;
         }
         flags |= RestoreInvalidWordFlag;
         if (configuration.ClipboardCompatibilityEnabled)

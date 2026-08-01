@@ -23,6 +23,7 @@ struct PhysicalKeyEvent {
   bool control{false};
   bool alt{false};
   bool windows{false};
+  bool key_repeat{false};
 };
 
 struct TypingContext {
@@ -117,6 +118,7 @@ class ResidentInputController {
   bool has_context_{false};
   bool pointer_observation_required_{false};
   bool boundary_backspace_recovery_available_{false};
+  std::size_t post_boundary_literal_codepoints_{0};
 };
 
 }  // namespace keyina::windows

@@ -53,6 +53,34 @@ KEYINA_TEST(protects_technical_tokens_with_stable_reasons) {
   }
 }
 
+KEYINA_TEST(protects_ipv6_without_overclassifying_colon_text) {
+  constexpr std::array<GuardCase, 4> protected_cases = {{
+      {U"2001:db8::1", false, keyina::GuardReason::VersionOrHash},
+      {U"::1", false, keyina::GuardReason::VersionOrHash},
+      {U"fe80::1234:abcd", false, keyina::GuardReason::VersionOrHash},
+      {U"2001:0db8:85a3:0000:0000:8a2e:0370:7334", false,
+       keyina::GuardReason::VersionOrHash},
+  }};
+  for (const auto& test : protected_cases) {
+    const auto result = keyina::ClassifyToken(test.token, {});
+    KEYINA_EXPECT_EQ(result.transform, test.transform);
+    KEYINA_EXPECT_EQ(result.reason, test.reason);
+  }
+
+  for (const auto token : {U"time:now", U"abc:def", U"2001:::1",
+                           U"2001:db8::1:", U"1:2:3:4:5:6:7:8:9"}) {
+    const auto result = keyina::ClassifyToken(token, {});
+    KEYINA_EXPECT_EQ(result.transform, true);
+    KEYINA_EXPECT_EQ(result.reason, keyina::GuardReason::None);
+  }
+
+  const auto technical_near_miss =
+      keyina::ClassifyToken(U"12345::1", {});
+  KEYINA_EXPECT_EQ(technical_near_miss.transform, false);
+  KEYINA_EXPECT_EQ(technical_near_miss.reason,
+                   keyina::GuardReason::Identifier);
+}
+
 KEYINA_TEST(modifier_chords_and_app_bypass_take_explicit_paths) {
   keyina::GuardContext modifier_context{};
   modifier_context.modifier_chord = true;

@@ -915,6 +915,27 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         }
     }
 
+    private void SetTraditionalTonePlacement(bool enabled)
+    {
+        configuration = configuration with { TraditionalTonePlacement = enabled };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetQuickTelexLetters(bool enabled)
+    {
+        configuration = configuration with { QuickTelexLetters = enabled };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetStandaloneWToUHorn(bool enabled)
+    {
+        configuration = configuration with { StandaloneWToUHorn = enabled };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
     private void SetClipboardCompatibilityEnabled(bool enabled)
     {
         configuration = configuration with
@@ -1843,6 +1864,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         SetTranslationEnabled = SetTranslationEnabled,
         SetTranslationTargetLanguage = SetTranslationTargetLanguage,
         SetTranslationPreviewEnabled = SetTranslationPreviewEnabled,
+        SetTraditionalTonePlacement = SetTraditionalTonePlacement,
+        SetQuickTelexLetters = SetQuickTelexLetters,
+        SetStandaloneWToUHorn = SetStandaloneWToUHorn,
         SetClipboardCompatibilityEnabled = SetClipboardCompatibilityEnabled,
         SetTranslationProviders = SetTranslationProviders,
         SaveDeepLApiKey = secret =>
@@ -2037,6 +2061,9 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             TranslationEnabled = configuration.TranslationEnabled,
             TranslationCredentialConfigured = translationCredentialConfigured,
             TranslationPreviewEnabled = configuration.TranslationPreviewEnabled,
+            TraditionalTonePlacement = configuration.TraditionalTonePlacement,
+            QuickTelexLetters = configuration.QuickTelexLetters,
+            StandaloneWToUHorn = configuration.StandaloneWToUHorn,
             ClipboardCompatibilityEnabled = configuration.ClipboardCompatibilityEnabled,
             LibreTranslateCredentialConfigured = libreTranslateCredentialConfigured,
             TranslationProviders = configuration.TranslationProviders,

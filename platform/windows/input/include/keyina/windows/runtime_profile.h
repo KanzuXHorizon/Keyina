@@ -41,6 +41,8 @@ struct RuntimeInputProfile {
   bool speech_enabled{false};
   bool translation_enabled{false};
   bool traditional_tone_placement{false};
+  bool quick_telex_letters{false};
+  bool standalone_w_to_u_horn{true};
   bool restore_invalid_word{false};
   bool clipboard_compatibility_enabled{false};
   std::int32_t source_schema_version{1};

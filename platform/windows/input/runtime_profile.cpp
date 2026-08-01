@@ -18,10 +18,13 @@ constexpr std::uint8_t kTranslationEnabledFlag = 1u << 2u;
 constexpr std::uint8_t kTraditionalTonePlacementFlag = 1u << 3u;
 constexpr std::uint8_t kRestoreInvalidWordFlag = 1u << 4u;
 constexpr std::uint8_t kClipboardCompatibilityFlag = 1u << 5u;
+constexpr std::uint8_t kQuickTelexLettersFlag = 1u << 6u;
+constexpr std::uint8_t kDisableStandaloneWFlag = 1u << 7u;
 constexpr std::uint8_t kKnownFlags =
     kVietnameseEnabledFlag | kSpeechEnabledFlag | kTranslationEnabledFlag |
     kTraditionalTonePlacementFlag | kRestoreInvalidWordFlag |
-    kClipboardCompatibilityFlag;
+    kClipboardCompatibilityFlag | kQuickTelexLettersFlag |
+    kDisableStandaloneWFlag;
 constexpr std::uint8_t kControlModifier = 1u << 0u;
 constexpr std::uint8_t kShiftModifier = 1u << 1u;
 constexpr std::uint8_t kAltModifier = 1u << 2u;
@@ -201,6 +204,10 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
       (flags & kTranslationEnabledFlag) != 0;
   result.profile.traditional_tone_placement =
       (flags & kTraditionalTonePlacementFlag) != 0;
+  result.profile.quick_telex_letters =
+      (flags & kQuickTelexLettersFlag) != 0;
+  result.profile.standalone_w_to_u_horn =
+      (flags & kDisableStandaloneWFlag) == 0;
   result.profile.restore_invalid_word =
       (flags & kRestoreInvalidWordFlag) != 0;
   result.profile.clipboard_compatibility_enabled =

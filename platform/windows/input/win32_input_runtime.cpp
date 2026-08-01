@@ -756,6 +756,8 @@ Win32InputRuntime::~Win32InputRuntime() { Stop(); }
 
 bool Win32InputRuntime::Start() noexcept {
   stopping_ = false;
+  const HRESULT ole_result = OleInitialize(nullptr);
+  ole_initialized_ = SUCCEEDED(ole_result);
   pressed_keys_.Clear();
   owned_text_keys_.Clear();
   hotkey_router_.Reset();
@@ -880,6 +882,14 @@ void Win32InputRuntime::Stop() noexcept {
     clipboard_restore_timer_ = 0;
   }
   RestorePendingClipboard();
+  if (pending_clipboard_data_object_ != nullptr) {
+    pending_clipboard_data_object_->Release();
+    pending_clipboard_data_object_ = nullptr;
+  }
+  if (ole_initialized_) {
+    OleUninitialize();
+    ole_initialized_ = false;
+  }
   pointer_registration_desired_ = false;
   ApplyPointerRegistration();
   if (hook_ != nullptr) {
@@ -1143,6 +1153,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       event.control = (modifier_state_ & kControlModifier) != 0;
       event.alt = (modifier_state_ & kAltModifier) != 0;
       event.windows = (modifier_state_ & kWindowsModifier) != 0;
+      event.key_repeat = key_down && was_pressed;
 
       ProcessToggleGesture(event);
       const bool companion_state_required = key_down &&
@@ -1482,19 +1493,33 @@ bool Win32InputRuntime::InjectViaClipboard(
     ++standard_edit_replace_count_;
     return true;
   }
+  IDataObject* previous_data_object = nullptr;
+  const bool captured_all_formats =
+      ole_initialized_ && SUCCEEDED(OleGetClipboard(&previous_data_object)) &&
+      previous_data_object != nullptr;
   if (!OpenClipboardWithRetry(window_)) {
+    if (previous_data_object != nullptr) {
+      previous_data_object->Release();
+    }
     return false;
   }
 
   std::wstring previous_text;
   bool previous_text_present = false;
-  const bool clipboard_safe = ClipboardContainsOnlyRestorableText() &&
-      ReadClipboardUnicodeText(previous_text, previous_text_present);
+  const bool clipboard_safe =
+      ReadClipboardUnicodeText(previous_text, previous_text_present) &&
+      (captured_all_formats || ClipboardContainsOnlyRestorableText());
   if (!clipboard_safe) {
+    if (previous_data_object != nullptr) {
+      previous_data_object->Release();
+    }
     CloseClipboard();
     return false;
   }
   if (!SetClipboardUnicodeText(replacement)) {
+    if (previous_data_object != nullptr) {
+      previous_data_object->Release();
+    }
     if (previous_text_present) {
       static_cast<void>(SetClipboardUnicodeText(previous_text));
     } else {
@@ -1506,10 +1531,14 @@ bool Win32InputRuntime::InjectViaClipboard(
   const DWORD owned_sequence = GetClipboardSequenceNumber();
   CloseClipboard();
   if (owned_sequence == 0) {
+    if (previous_data_object != nullptr) {
+      previous_data_object->Release();
+    }
     return false;
   }
 
   pending_clipboard_text_ = std::move(previous_text);
+  pending_clipboard_data_object_ = previous_data_object;
   pending_clipboard_text_present_ = previous_text_present;
   pending_clipboard_sequence_ = owned_sequence;
   clipboard_restore_timer_ = SetTimer(
@@ -1545,6 +1574,10 @@ void Win32InputRuntime::RestorePendingClipboard() noexcept {
   if (!ShouldRestoreClipboard(
           pending_clipboard_sequence_, current_sequence)) {
     pending_clipboard_text_.clear();
+    if (pending_clipboard_data_object_ != nullptr) {
+      pending_clipboard_data_object_->Release();
+      pending_clipboard_data_object_ = nullptr;
+    }
     pending_clipboard_text_present_ = false;
     pending_clipboard_sequence_ = 0;
     return;
@@ -1562,14 +1595,24 @@ void Win32InputRuntime::RestorePendingClipboard() noexcept {
   const bool still_owned = ShouldRestoreClipboard(
       pending_clipboard_sequence_, GetClipboardSequenceNumber());
   if (still_owned) {
-    if (pending_clipboard_text_present_) {
+    if (pending_clipboard_data_object_ != nullptr) {
+      CloseClipboard();
+      static_cast<void>(OleSetClipboard(pending_clipboard_data_object_));
+    } else if (pending_clipboard_text_present_) {
       static_cast<void>(SetClipboardUnicodeText(pending_clipboard_text_));
+      CloseClipboard();
     } else {
       static_cast<void>(EmptyClipboard());
+      CloseClipboard();
     }
+  } else {
+    CloseClipboard();
   }
-  CloseClipboard();
   pending_clipboard_text_.clear();
+  if (pending_clipboard_data_object_ != nullptr) {
+    pending_clipboard_data_object_->Release();
+    pending_clipboard_data_object_ = nullptr;
+  }
   pending_clipboard_text_present_ = false;
   pending_clipboard_sequence_ = 0;
 }

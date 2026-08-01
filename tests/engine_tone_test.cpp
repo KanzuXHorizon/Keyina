@@ -139,6 +139,48 @@ KEYINA_TEST(z_removes_existing_tone_but_preserves_vowel_shape) {
   }
 }
 
+KEYINA_TEST(z_preserves_vowel_shape_with_invalid_latin_restore_enabled) {
+  constexpr std::array<ToneCase, 3> cases = {{
+      {U"aasz", U"â"},
+      {U"owjz", U"ơ"},
+      {U"uwxz", U"ư"},
+  }};
+
+  for (const auto& test : cases) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+
+  for (const auto& test : std::array<ToneCase, 3>{{
+           {U"asdz", U"asdz"},
+           {U"jazz", U"jazz"},
+           {U"fizz", U"fizz"},
+       }}) {
+    keyina::Engine engine({
+        .restore_invalid_word = true,
+    });
+    KEYINA_EXPECT_EQ(TypeSequence(engine, test.raw),
+                     std::u32string{test.expected});
+  }
+}
+
+KEYINA_TEST(invalid_vowel_nucleus_does_not_receive_a_tone) {
+  keyina::Engine invalid({
+      .restore_invalid_word = true,
+  });
+  keyina::Engine valid({
+      .restore_invalid_word = true,
+  });
+
+  KEYINA_EXPECT_EQ(TypeSequence(invalid, U"laiuj"),
+                   std::u32string{U"laiuj"});
+  KEYINA_EXPECT_EQ(TypeSequence(valid, U"laij"),
+                   std::u32string{U"lại"});
+}
+
 KEYINA_TEST(z_without_an_existing_tone_remains_literal) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(TypeSequence(engine, U"az"), std::u32string{U"az"});

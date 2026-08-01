@@ -80,6 +80,74 @@ internal static class WindowsPublishContractTests
         }
     }
 
+    [KeyinaTest("release packaging publishes from an isolated staging directory")]
+    private static void ReleasePackagingUsesStagingDirectory()
+    {
+        var releaseScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-release.ps1"));
+
+        foreach (var required in new[]
+                 {
+                     ".staging-",
+                     "finalArtifactRoot",
+                     "Move-Item",
+                     "Remove-DirectoryWithRetry $finalArtifactRoot",
+                 })
+        {
+            AssertEx.True(
+                releaseScript.Contains(required, StringComparison.Ordinal),
+                $"Release packaging omitted staging contract token: {required}.");
+        }
+    }
+
+    [KeyinaTest("release manifest checksums and installer metadata are verified one to one")]
+    private static void ReleaseArtifactsUseStrictVerification()
+    {
+        var buildScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-release.ps1"));
+        var verifyScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "verify-release.ps1"));
+
+        foreach (var required in new[]
+                 {
+                     "schema_version = 2",
+                     "installer_lifecycle_verified",
+                     "build_test_suites_skipped",
+                     "desktop_interactive_tests_skipped",
+                     "preserved_user_data_directory",
+                 })
+        {
+            AssertEx.True(
+                buildScript.Contains(required, StringComparison.Ordinal),
+                $"Release manifest omitted required field: {required}.");
+        }
+
+        foreach (var required in new[]
+                 {
+                     "Duplicate checksum entry",
+                     "Duplicate manifest artifact",
+                     "resolved to $($matches.Count) files",
+                     "Artifact length mismatch",
+                     "Manifest hash mismatch",
+                     "ProductVersion",
+                     "ProductName",
+                 })
+        {
+            AssertEx.True(
+                verifyScript.Contains(required, StringComparison.Ordinal),
+                $"Release verification omitted strict artifact check: {required}.");
+        }
+    }
+
     [KeyinaTest("release version flows from the shared property into native and managed builds")]
     private static void ReleaseVersionUsesOneSourceOfTruth()
     {
@@ -123,7 +191,7 @@ internal static class WindowsPublishContractTests
             "NuGet project dependency lock diverged from KeyinaVersion.");
     }
 
-    [KeyinaTest("Windows installer starts native resident and opens settings companion")]
+    [KeyinaTest("Windows installer launches interactively and remains silent safe")]
     private static void InstallerUsesNativeResidentContract()
     {
         var path = Path.Combine(
@@ -138,6 +206,12 @@ internal static class WindowsPublishContractTests
                      "Keyina.Host.exe",
                      "Local\\Keyina.NativeInput",
                      "--open-settings",
+                     "--exit",
+                     "[UninstallRun]",
+                     "RunOnceId:",
+                     "skipifsilent",
+                     "RegDeleteValue",
+                     "{userstartup}\\Keyina.lnk",
                  })
         {
             AssertEx.True(
@@ -152,10 +226,11 @@ internal static class WindowsPublishContractTests
                 line.Contains(
                     "{#MyAppResidentExeName}",
                     StringComparison.Ordinal) &&
-                !line.Contains("--open-settings", StringComparison.Ordinal));
+                !line.Contains("--open-settings", StringComparison.Ordinal) &&
+                !line.Contains("--exit", StringComparison.Ordinal));
         AssertEx.True(
-            !residentRunLine.Contains("skipifsilent", StringComparison.OrdinalIgnoreCase),
-            "Silent install and upgrade must start the native resident.");
+            residentRunLine.Contains("skipifsilent", StringComparison.OrdinalIgnoreCase),
+            "Silent install and upgrade must not leave the native resident running.");
 
         var settingsLaunchLines = script
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
@@ -165,6 +240,64 @@ internal static class WindowsPublishContractTests
             settingsLaunchLines.Length >= 2 && settingsLaunchLines.All(line =>
                 line.Contains("{#MyAppResidentExeName}", StringComparison.Ordinal)),
             "Installer settings entry points must forward through the native resident.");
+        AssertEx.True(
+            !script.Contains(
+                "Name: \"{localappdata}\\Keyina\"",
+                StringComparison.OrdinalIgnoreCase),
+            "Installer must preserve the user configuration directory on uninstall.");
+    }
+
+    [KeyinaTest("installer lifecycle verification is integrated into Windows release")]
+    private static void InstallerLifecycleVerificationIsIntegrated()
+    {
+        var lifecyclePath = Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "test-installer.ps1");
+        var lifecycleBuilderPath = Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-lifecycle-installer.ps1");
+        AssertEx.True(
+            File.Exists(lifecyclePath),
+            "Installer lifecycle verifier was missing.");
+        AssertEx.True(
+            File.Exists(lifecycleBuilderPath),
+            "Isolated lifecycle installer builder was missing.");
+
+        var lifecycle = File.ReadAllText(lifecyclePath);
+        foreach (var required in new[]
+                 {
+                     "InstallerPath",
+                     "Version",
+                     "/CURRENTUSER",
+                     "/VERYSILENT",
+                     "/NOICONS",
+                     "unins000.exe",
+                     "settings.json",
+                     "Keyina.Host.exe",
+                     "KeyinaInput.exe",
+                 })
+        {
+            AssertEx.True(
+                lifecycle.Contains(required, StringComparison.Ordinal),
+                $"Installer lifecycle verifier omitted required token: {required}.");
+        }
+
+        foreach (var scriptName in new[] { "build-release.ps1", "verify-release.ps1" })
+        {
+            var releaseScript = File.ReadAllText(Path.Combine(
+                RepositoryPaths.Root,
+                "scripts",
+                "windows",
+                scriptName));
+            AssertEx.True(
+                releaseScript.Contains("test-installer.ps1", StringComparison.Ordinal) &&
+                releaseScript.Contains("build-lifecycle-installer.ps1", StringComparison.Ordinal),
+                $"{scriptName} does not invoke isolated installer lifecycle verification.");
+        }
     }
 
     [KeyinaTest("duplicate native launch forwards settings without creating another resident")]
@@ -181,10 +314,13 @@ internal static class WindowsPublishContractTests
                  {
                      "Local\\\\Keyina.NativeInput",
                      "--open-settings",
+                     "--exit",
                      "FindWindowW(kWindowClassName",
                      "SendMessageTimeoutW(",
                      "runtime.RequestOpenSettings()",
                      "kSettingsMenuCommand",
+                     "kExitMenuCommand",
+                     "ForwardCommandToExistingResident",
                  })
         {
             AssertEx.True(

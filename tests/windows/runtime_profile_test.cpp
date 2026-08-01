@@ -77,6 +77,28 @@ KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   KEYINA_EXPECT_EQ(result.profile.hotkeys[5].virtual_key, 0x1B);
 }
 
+KEYINA_TEST(runtime_input_profile_decodes_quick_telex_flag) {
+  auto quick_telex = kDefaultVector;
+  quick_telex[6] |= 0x40;
+  RewriteChecksum(quick_telex);
+
+  const auto result = keyina::windows::DecodeRuntimeInputProfile(
+      AsBytes(quick_telex));
+  KEYINA_EXPECT_EQ(result.error, RuntimeInputProfileError::None);
+  KEYINA_EXPECT_TRUE(result.profile.quick_telex_letters);
+}
+
+KEYINA_TEST(runtime_input_profile_decodes_disabled_standalone_w_flag) {
+  auto simple_telex = kDefaultVector;
+  simple_telex[6] |= 0x80;
+  RewriteChecksum(simple_telex);
+
+  const auto result = keyina::windows::DecodeRuntimeInputProfile(
+      AsBytes(simple_telex));
+  KEYINA_EXPECT_EQ(result.error, RuntimeInputProfileError::None);
+  KEYINA_EXPECT_TRUE(!result.profile.standalone_w_to_u_horn);
+}
+
 KEYINA_TEST(runtime_input_profile_rejects_corruption) {
   auto checksum_corrupt = kDefaultVector;
   checksum_corrupt[8] ^= 0x01;
@@ -98,12 +120,6 @@ KEYINA_TEST(runtime_input_profile_rejects_corruption) {
       keyina::windows::DecodeRuntimeInputProfile(AsBytes(unsupported_gesture)).error,
       RuntimeInputProfileError::InvalidHotkey);
 
-  auto unknown_flag = kDefaultVector;
-  unknown_flag[6] |= 0x80;
-  RewriteChecksum(unknown_flag);
-  KEYINA_EXPECT_EQ(
-      keyina::windows::DecodeRuntimeInputProfile(AsBytes(unknown_flag)).error,
-      RuntimeInputProfileError::InvalidHeader);
 }
 
 KEYINA_TEST(runtime_input_profile_rejects_wrong_size) {

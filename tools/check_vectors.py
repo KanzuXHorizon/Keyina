@@ -51,8 +51,8 @@ def validate(path: Path) -> int:
         seen_raw.add(raw)
         count += 1
 
-    if count < 100:
-        raise ValueError(f"{path}: expected at least 100 vectors, found {count}")
+    if count < 220:
+        raise ValueError(f"{path}: expected at least 220 vectors, found {count}")
     return count
 
 

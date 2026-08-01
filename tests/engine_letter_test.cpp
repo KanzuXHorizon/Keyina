@@ -73,6 +73,18 @@ KEYINA_TEST(standalone_w_uses_unikey_short_letter_semantics) {
   KEYINA_EXPECT_EQ(Type(repeated, U"ww"), std::u32string{U"w"});
 }
 
+KEYINA_TEST(standalone_w_can_be_disabled_for_simple_telex) {
+  keyina::Engine standalone({
+      .standalone_w_to_u_horn = false,
+  });
+  keyina::Engine modifier({
+      .standalone_w_to_u_horn = false,
+  });
+
+  KEYINA_EXPECT_EQ(Type(standalone, U"w"), std::u32string{U"w"});
+  KEYINA_EXPECT_EQ(Type(modifier, U"aw"), std::u32string{U"ă"});
+}
+
 KEYINA_TEST(quick_telex_letters_are_opt_in_and_reversible) {
   keyina::Engine disabled;
   keyina::Engine enabled({
@@ -143,6 +155,16 @@ KEYINA_TEST(applies_delayed_w_modifier_across_the_vowel_nucleus) {
 KEYINA_TEST(delayed_d_modifier_does_not_corrupt_latin_words) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(Type(engine, U"david"), std::u32string{U"david"});
+}
+
+KEYINA_TEST(repeated_vowel_at_end_of_latin_word_stays_literal) {
+  keyina::Engine three_es;
+  keyina::Engine four_es;
+
+  KEYINA_EXPECT_EQ(Type(three_es, U"worktreee"),
+                   std::u32string{U"worktreee"});
+  KEYINA_EXPECT_EQ(Type(four_es, U"worktreeee"),
+                   std::u32string{U"worktreeee"});
 }
 
 KEYINA_TEST(leaves_non_modifier_characters_literal) {

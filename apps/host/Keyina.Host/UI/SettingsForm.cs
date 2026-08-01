@@ -66,6 +66,9 @@ public sealed partial class SettingsForm : Form
     private readonly FluentStatusBadge hotkeyStatus;
     private readonly Label snippetCount;
     private readonly FluentToggle vietnameseToggle;
+    private readonly FluentToggle traditionalTonePlacementToggle;
+    private readonly FluentToggle quickTelexLettersToggle;
+    private readonly FluentToggle standaloneWToUHornToggle;
     private readonly FluentToggle clipboardCompatibilityToggle;
     private readonly FluentToggle speechToggle;
     private readonly FluentToggle translationToggle;
@@ -156,6 +159,15 @@ public sealed partial class SettingsForm : Form
         snippetCount = CreateLabel("snippetCount", string.Empty, LabelRole.Secondary);
 
         vietnameseToggle = CreateToggle("vietnameseToggle", "Bật bộ gõ tiếng Việt");
+        traditionalTonePlacementToggle = CreateToggle(
+            "traditionalTonePlacementToggle",
+            "Dùng vị trí dấu kiểu truyền thống");
+        quickTelexLettersToggle = CreateToggle(
+            "quickTelexLettersToggle",
+            "Bật phím tắt [ ] cho ư ơ");
+        standaloneWToUHornToggle = CreateToggle(
+            "standaloneWToUHornToggle",
+            "Đổi w đứng đầu thành ư");
         clipboardCompatibilityToggle = CreateToggle(
             "clipboardCompatibilityToggle",
             "Gửi văn bản qua clipboard");
@@ -482,6 +494,28 @@ public sealed partial class SettingsForm : Form
                 actions.SetVietnameseEnabled(vietnameseToggle.Checked);
             }
         };
+        traditionalTonePlacementToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetTraditionalTonePlacement(
+                    traditionalTonePlacementToggle.Checked);
+            }
+        };
+        quickTelexLettersToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetQuickTelexLetters(quickTelexLettersToggle.Checked);
+            }
+        };
+        standaloneWToUHornToggle.CheckedChanged += (_, _) =>
+        {
+            if (!applyingSnapshot)
+            {
+                actions.SetStandaloneWToUHorn(standaloneWToUHornToggle.Checked);
+            }
+        };
         clipboardCompatibilityToggle.CheckedChanged += (_, _) =>
         {
             if (!applyingSnapshot)
@@ -661,6 +695,9 @@ public sealed partial class SettingsForm : Form
         try
         {
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
+            traditionalTonePlacementToggle.Checked = snapshot.TraditionalTonePlacement;
+            quickTelexLettersToggle.Checked = snapshot.QuickTelexLetters;
+            standaloneWToUHornToggle.Checked = snapshot.StandaloneWToUHorn;
             clipboardCompatibilityToggle.Checked = snapshot.ClipboardCompatibilityEnabled;
             speechToggle.Checked = snapshot.SpeechEnabled;
             translationToggle.Checked = snapshot.TranslationEnabled;
@@ -1237,6 +1274,27 @@ public sealed partial class SettingsForm : Form
             "Bật hoặc tắt mà không làm mất focus của ứng dụng hiện tại.",
             "Ctrl + Shift",
             vietnameseToggle));
+        stack.Controls.Add(CreateSettingRow(
+            "traditionalTonePlacementRow",
+            "\uE8D2",
+            "Vị trí dấu thanh",
+            "Mặc định dùng kiểu mới: hoá, khoẻ, thuỷ. Bật để dùng kiểu cổ điển: hóa, khỏe, thủy theo thói quen cá nhân.",
+            "Tùy chọn cá nhân",
+            traditionalTonePlacementToggle));
+        stack.Controls.Add(CreateSettingRow(
+            "quickTelexLettersRow",
+            "\uE8D7",
+            "Telex mở rộng",
+            "Cho phép [ tạo ư và ] tạo ơ. Tắt mặc định để không ảnh hưởng khi gõ code hoặc dấu ngoặc.",
+            "Tùy chọn nâng cao",
+            quickTelexLettersToggle));
+        stack.Controls.Add(CreateSettingRow(
+            "standaloneWToUHornRow",
+            "\uE8D7",
+            "Phím w đứng đầu",
+            "Bật để w đơn lẻ tạo ư như UniKey. Tắt khi thường xuyên gõ code, lệnh hoặc dùng Simple Telex.",
+            "Tùy chọn cá nhân",
+            standaloneWToUHornToggle));
         stack.Controls.Add(CreateSettingRow(
             "clipboardCompatibilityRow",
             "\uE8C8",

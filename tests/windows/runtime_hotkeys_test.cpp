@@ -32,14 +32,15 @@ keyina::windows::PhysicalKeyEvent Key(
     bool shift = false,
     bool alt = false) {
   return keyina::windows::PhysicalKeyEvent{
-      virtual_key,
-      U'\0',
-      key_down,
-      false,
-      shift,
-      control,
-      alt,
-      false,
+      .virtual_key = virtual_key,
+      .character = U'\0',
+      .key_down = key_down,
+      .injected_by_keyina = false,
+      .shift = shift,
+      .control = control,
+      .alt = alt,
+      .windows = false,
+      .key_repeat = false,
   };
 }
 

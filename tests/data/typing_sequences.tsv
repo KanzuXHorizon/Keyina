@@ -1,0 +1,31 @@
+# name	placement	restore_invalid_word	script	expected	expected_active_raw
+simple_sentence	Modern	true	xin{SPACE}chaof{SPACE}thees{SPACE}giowis{SPACE}	xin chào thế giới 
+greeting_with_punctuation	Modern	true	xin{SPACE}chaof{B:002C}{SPACE}tooi{SPACE}laf{SPACE}Keyina{B:002E}	xin chào, tôi là Keyina.
+modern_tone_placement	Modern	true	hoaf{SPACE}thuyr{SPACE}khoer{SPACE}	hoà thuỷ khoẻ 
+traditional_tone_placement	Traditional	true	hoaf{SPACE}thuyr{SPACE}khoer{SPACE}	hòa thủy khỏe 
+mixed_technical_sentence	Modern	true	hoom{SPACE}nay{SPACE}tooi{SPACE}research{SPACE}Keyina{SPACE}vaf{SPACE}kieemr{SPACE}tra{SPACE}powershell{SPACE}taij{SPACE}C:\Projects\Keyina{SPACE}rooif{SPACE}guwir{SPACE}report@example.com{B:002E}	hôm nay tôi research Keyina và kiểm tra powershell tại C:\Projects\Keyina rồi gửi report@example.com.
+url_sentence	Modern	true	mowr{SPACE}https://example.com?q=research&lang=vi{SPACE}ddeer{SPACE}kieemr{SPACE}tra{B:002E}	mở https://example.com?q=research&lang=vi để kiểm tra.
+identifier_sentence	Modern	true	dufng{SPACE}RuntimeInputProfile::ComposeFlags{SPACE}vaf{SPACE}restoreInvalidWord{B:002E}	dùng RuntimeInputProfile::ComposeFlags và restoreInvalidWord.
+shell_sentence	Modern	true	chayj{SPACE}powershell{SPACE}--NoProfile{SPACE}-ExecutionPolicy{SPACE}Bypass{B:002E}	chạy powershell --NoProfile -ExecutionPolicy Bypass.
+path_sentence	Modern	true	luwu{SPACE}taij{SPACE}\\server\share\file.txt{SPACE}vaf{SPACE}/usr/local/bin/keyina{B:002E}	lưu tại \\server\share\file.txt và /usr/local/bin/keyina.
+punctuation_sentence	Modern	true	tooi{SPACE}thichs{SPACE}Keyina{B:003B}{SPACE}banj{SPACE}thif{SPACE}sao{B:003F}	tôi thích Keyina; bạn thì sao?
+smart_punctuation	Modern	true	Keyina{SPACE}{L:201C}nhanh{L:201D}{SPACE}{L:2014}{SPACE}nhuwng{SPACE}phair{SPACE}chuaanr{B:002E}	Keyina “nhanh” — nhưng phải chuẩn.
+backspace_tone_correction	Modern	true	tieengx{BS}s{SPACE}	tiếng 
+backspace_retype_modifier	Modern	true	nguyenx{BS}e{SPACE}	nguyên 
+repeated_tone_escape	Modern	true	ass{SPACE}aff{SPACE}arr{SPACE}axx{SPACE}ajj{SPACE}	as af ar ax aj 
+tone_clear	Modern	true	asz{SPACE}aasz{SPACE}owjz{SPACE}	a â ơ 
+delayed_modifier_orders	Modern	true	truocws{SPACE}truowcs{SPACE}truwocs{SPACE}truowsc{SPACE}truocsw{SPACE}	trước trước trước trước trước 
+mixed_case	Modern	true	Vieetj{SPACE}Nam{SPACE}DDUOWNGF{SPACE}PHOOS{SPACE}	Việt Nam ĐƯỜNG PHỐ 
+emoji_boundary	Modern	true	xin{SPACE}chaof{SPACE}{L:1F642}{SPACE}tieeps{SPACE}tucj{SPACE}	xin chào 🙂 tiếp tục 
+cjk_boundary	Modern	true	Keyina{SPACE}{L:65E5}{L:672C}{SPACE}vaf{SPACE}{L:4E2D}{L:6587}{SPACE}	Keyina 日本 và 中文 
+math_symbols	Modern	true	gias{SPACE}trij{SPACE}{L:03C0}{SPACE}{L:2264}{SPACE}3.14{SPACE}{L:2014}{SPACE}ddungs{B:002E}	giá trị π ≤ 3.14 — đúng.
+nfd_literal_boundary	Modern	true	NFD{B:003A}{SPACE}{L:0061}{L:0301}{SPACE}khoong{SPACE}lamf{SPACE}hongr{SPACE}tieengs{SPACE}Vieetj{B:002E}	NFD: á không làm hỏng tiếng Việt.
+precomposed_literal_boundary	Modern	true	{L:1EA1}{SPACE}{L:0111}{SPACE}{L:01A1}{SPACE}	ạ đ ơ 
+active_vietnamese_composition	Modern	true	tieengs	tiếng	tieengs
+active_latin_composition	Modern	true	powershell	powershell	powershell
+reset_then_literal	Modern	true	tieengs{RESET}{L:007C}research{SPACE}	tiếng|research 
+literal_braces	Modern	true	{{test}}{SPACE}	{test} 
+ipv6_token	Modern	true	ping{SPACE}2001:db8::1{SPACE}	ping 2001:db8::1 
+rapid_modifier_correction	Modern	true	truowcs{BS}{BS}cs{SPACE}	trước 
+english_telex_key_sentence	Modern	true	search{SPACE}research{SPACE}process{SPACE}source{SPACE}browser{SPACE}powershell{SPACE}windows{SPACE}	search research process source browser powershell windows 
+long_mixed_paragraph	Modern	true	Keyina{SPACE}laf{SPACE}booj{SPACE}gox{SPACE}tieengs{SPACE}Vieetj{SPACE}nhanh{B:002C}{SPACE}nhej{SPACE}vaf{SPACE}an{SPACE}toanf{B:002E}{SPACE}Nos{SPACE}giuwx{SPACE}nguyeen{SPACE}research{B:002C}{SPACE}powershell{B:002C}{SPACE}C:\Projects\Keyina{SPACE}vaf{SPACE}report@example.com{B:002E}{SPACE}Nguowif{SPACE}dufng{SPACE}cos{SPACE}theer{SPACE}gox{SPACE}truowcs{B:002C}{SPACE}nuowcs{B:002C}{SPACE}quyeenf{B:002C}{SPACE}chuyeenj{B:002C}{SPACE}dduowngf{B:002C}{SPACE}luowngj{SPACE}vaf{SPACE}Nguyeexn{SPACE}maf{SPACE}khoong{SPACE}maats{SPACE}kys{SPACE}tuwj{B:002E}{SPACE}Khi{SPACE}nhaapj{SPACE}caau{SPACE}daif{B:002C}{SPACE}daaus{SPACE}phair{SPACE}ddungs{SPACE}vij{SPACE}tris{B:002C}{SPACE}Backspace{SPACE}phair{SPACE}duwngj{SPACE}laij{SPACE}trangj{SPACE}thais{SPACE}vaf{SPACE}moij{SPACE}token{SPACE}kyx{SPACE}thuaatj{SPACE}phair{SPACE}giuwx{SPACE}nguyeen{B:002E}	Keyina là bộ gõ tiếng Việt nhanh, nhẹ và an toàn. Nó giữ nguyên research, powershell, C:\Projects\Keyina và report@example.com. Người dùng có thể gõ trước, nước, quyền, chuyện, đường, lượng và Nguyễn mà không mất ký tự. Khi nhập câu dài, dấu phải đúng vị trí, Backspace phải dựng lại trạng thái và mọi token kỹ thuật phải giữ nguyên.

@@ -15,11 +15,12 @@ constexpr int kAlreadyRunningExitCode = 17;
 constexpr wchar_t kMutexName[] = L"Local\\Keyina.NativeInput";
 constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
 constexpr UINT kSettingsMenuCommand = 1002;
+constexpr UINT kExitMenuCommand = 1003;
 constexpr DWORD kCommandForwardTimeoutMilliseconds = 2'000;
 constexpr ULONG_PTR kSelfTestInputMarker =
     static_cast<ULONG_PTR>(0x4B455954455354ULL);
 
-bool ForwardSettingsToExistingResident() noexcept {
+bool ForwardCommandToExistingResident(UINT command) noexcept {
   const ULONGLONG deadline =
       GetTickCount64() + kCommandForwardTimeoutMilliseconds;
   do {
@@ -29,7 +30,7 @@ bool ForwardSettingsToExistingResident() noexcept {
       return SendMessageTimeoutW(
                  existing,
                  WM_COMMAND,
-                 static_cast<WPARAM>(kSettingsMenuCommand),
+                 static_cast<WPARAM>(command),
                  0,
                  SMTO_ABORTIFHUNG | SMTO_BLOCK,
                  500,
@@ -1535,6 +1536,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       __argc, __wargv, L"--chromium-ordering-self-test");
   const bool open_settings = HasArgument(
       __argc, __wargv, L"--open-settings");
+  const bool exit_requested = HasArgument(
+      __argc, __wargv, L"--exit");
 
   if (self_test) {
     WriteStandardOutput("keyina_input_ready\n");
@@ -1564,10 +1567,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     return 1;
   }
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    const bool forwarded =
-        !open_settings || ForwardSettingsToExistingResident();
+    bool forwarded = true;
+    if (exit_requested) {
+      forwarded = ForwardCommandToExistingResident(kExitMenuCommand);
+    } else if (open_settings) {
+      forwarded = ForwardCommandToExistingResident(kSettingsMenuCommand);
+    }
     CloseHandle(mutex);
     return forwarded ? kAlreadyRunningExitCode : 1;
+  }
+  if (exit_requested) {
+    CloseHandle(mutex);
+    return 0;
   }
 
   auto profile = keyina::windows::LoadRuntimeInputProfileOrDefault();

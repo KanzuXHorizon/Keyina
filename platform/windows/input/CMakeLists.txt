@@ -36,6 +36,7 @@ target_compile_definitions(KeyinaInput PRIVATE
 )
 target_link_libraries(KeyinaInput PRIVATE
   keyina::windows_input
+  ole32
   psapi
   user32
 )

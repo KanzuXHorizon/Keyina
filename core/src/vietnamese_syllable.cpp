@@ -46,6 +46,17 @@ bool Contains(const std::array<std::u32string_view, N>& values,
   return false;
 }
 
+template <std::size_t N>
+bool IsPrefixOfAny(const std::array<std::u32string_view, N>& values,
+                   std::u32string_view value) noexcept {
+  for (const auto candidate : values) {
+    if (candidate.starts_with(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 constexpr std::array<std::u32string_view, 27> kOnsets = {
     U"", U"b", U"c", U"ch", U"d", U"đ", U"g", U"gh", U"gi",
     U"h", U"k", U"kh", U"l", U"m", U"n", U"ng", U"ngh", U"nh",
@@ -65,6 +76,29 @@ constexpr std::array<std::u32string_view, 55> kNuclei = {
     U"uây", U"uôi", U"ươi", U"ươu", U"uya", U"uyê", U"uyu", U"oeo",
     U"uêu", U"yêu",
 };
+
+bool MatchesSupportedNucleusIgnoringShape(
+    std::u32string_view nucleus) noexcept {
+  for (const auto supported : kNuclei) {
+    if (supported.size() != nucleus.size()) {
+      continue;
+    }
+    bool matches = true;
+    for (std::size_t index = 0; index < nucleus.size(); ++index) {
+      const auto actual = DecomposeVietnamese(nucleus[index]);
+      const auto expected = DecomposeVietnamese(supported[index]);
+      if (!actual.has_value() || !expected.has_value() ||
+          actual->base != expected->base) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool IsFrontVowel(char32_t vowel) noexcept {
   return vowel == U'e' || vowel == U'ê' || vowel == U'i' || vowel == U'y';
@@ -128,6 +162,14 @@ SyllableAnalysis AnalyzeVietnameseSyllable(
   }
 
   if (vowel_count == 0) {
+    const auto lowered_view = View(lowered, 0, syllable.size());
+    if (IsPrefixOfAny(kOnsets, lowered_view)) {
+      return {
+          .status = SyllableStatus::RecoverablePrefix,
+          .error = SyllableError::MissingNucleus,
+          .onset = syllable,
+      };
+    }
     return Failure(SyllableError::MissingNucleus);
   }
 
@@ -228,6 +270,57 @@ SyllableAnalysis AnalyzeVietnameseSyllable(
 
 bool IsValidVietnameseSyllable(std::u32string_view syllable) noexcept {
   return AnalyzeVietnameseSyllable(syllable).status == SyllableStatus::Valid;
+}
+
+std::size_t SelectVietnameseToneOffset(std::u32string_view nucleus,
+                                       bool has_coda,
+                                       bool modern_placement) noexcept {
+  if (nucleus.empty() || nucleus.size() > kMaximumNucleusLength) {
+    return std::u32string_view::npos;
+  }
+
+  std::array<char32_t, kMaximumNucleusLength> normalized{};
+  for (std::size_t offset = 0; offset < nucleus.size(); ++offset) {
+    const auto letter = DecomposeVietnamese(nucleus[offset]);
+    if (!letter.has_value() || letter->base == U'đ') {
+      return std::u32string_view::npos;
+    }
+    normalized[offset] = NormalizeVowel(*letter);
+  }
+  const std::u32string_view nucleus_key{normalized.data(), nucleus.size()};
+  if (!Contains(kNuclei, nucleus_key) &&
+      !MatchesSupportedNucleusIgnoringShape(nucleus)) {
+    return std::u32string_view::npos;
+  }
+
+  for (std::size_t offset = nucleus.size(); offset > 0; --offset) {
+    const auto letter = DecomposeVietnamese(nucleus[offset - 1]);
+    if (letter->shape != VowelShape::Plain) {
+      return offset - 1;
+    }
+  }
+
+  if (nucleus.size() == 1) {
+    return 0;
+  }
+  if (nucleus.size() >= 3) {
+    return has_coda ? nucleus.size() - 1 : nucleus.size() - 2;
+  }
+  if (has_coda) {
+    return 1;
+  }
+
+  const auto first = DecomposeVietnamese(nucleus[0]);
+  const auto second = DecomposeVietnamese(nucleus[1]);
+  if (!first.has_value() || !second.has_value() || first->base == U'đ' ||
+      second->base == U'đ') {
+    return std::u32string_view::npos;
+  }
+  const bool modern_open_cluster =
+      (first->base == U'o' &&
+       (second->base == U'a' || second->base == U'e')) ||
+      (first->base == U'u' && second->base == U'y');
+  return modern_placement && modern_open_cluster ? 1 : 0;
 }
 
 }  // namespace keyina

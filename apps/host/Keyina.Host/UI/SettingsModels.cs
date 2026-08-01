@@ -38,6 +38,12 @@ public sealed record SettingsSnapshot(
 
     public bool TranslationPreviewEnabled { get; init; }
 
+    public bool TraditionalTonePlacement { get; init; }
+
+    public bool QuickTelexLetters { get; init; }
+
+    public bool StandaloneWToUHorn { get; init; } = true;
+
     public bool ClipboardCompatibilityEnabled { get; init; }
 
     public bool LibreTranslateCredentialConfigured { get; init; }
@@ -111,6 +117,12 @@ public sealed record SettingsActions(
     public Action<string> SetTranslationTargetLanguage { get; init; } = _ => { };
 
     public Action<bool> SetTranslationPreviewEnabled { get; init; } = _ => { };
+
+    public Action<bool> SetTraditionalTonePlacement { get; init; } = _ => { };
+
+    public Action<bool> SetQuickTelexLetters { get; init; } = _ => { };
+
+    public Action<bool> SetStandaloneWToUHorn { get; init; } = _ => { };
 
     public Action<bool> SetClipboardCompatibilityEnabled { get; init; } = _ => { };
 

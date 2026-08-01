@@ -108,6 +108,12 @@ public sealed record KeyinaConfiguration(
 
     public bool TranslationPreviewEnabled { get; init; }
 
+    public bool TraditionalTonePlacement { get; init; }
+
+    public bool QuickTelexLetters { get; init; }
+
+    public bool StandaloneWToUHorn { get; init; } = true;
+
     public bool ClipboardCompatibilityEnabled { get; init; }
 
     public string TranslationTargetLanguage { get; init; } = "VI";

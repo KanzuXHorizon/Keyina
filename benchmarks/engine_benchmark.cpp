@@ -377,6 +377,15 @@ int main(int argc, char** argv) {
       kWarmup, kIterations, checksum, 1.0));
 
   results.push_back(Measure(
+      "guard_protected_ipv6",
+      [&]() {
+        const auto result = keyina::ClassifyToken(U"2001:db8::1", {});
+        return static_cast<std::size_t>(result.transform) +
+               static_cast<std::size_t>(result.reason);
+      },
+      kWarmup, kIterations, checksum));
+
+  results.push_back(Measure(
       "valid_syllable_analysis",
       [&]() {
         const auto analysis = keyina::AnalyzeVietnameseSyllable(U"nghiêng");

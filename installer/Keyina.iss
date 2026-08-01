@@ -7,6 +7,12 @@
 #ifndef OutputDir
   #error OutputDir must be supplied by the release build.
 #endif
+#ifndef MyAppId
+  #define MyAppId "{{F03D82B7-506E-4FB4-A6B1-74B0BC17A43C}"
+#endif
+#ifndef MyOutputBaseFilename
+  #define MyOutputBaseFilename "Keyina-Setup-" + MyAppVersion + "-x64"
+#endif
 
 #define MyAppName "Keyina"
 #define MyAppPublisher "Keyina contributors"
@@ -15,7 +21,7 @@
 #define MyAppUrl "https://github.com/KanzuXHorizon/Keyina"
 
 [Setup]
-AppId={{F03D82B7-506E-4FB4-A6B1-74B0BC17A43C}
+AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -37,7 +43,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 OutputDir={#OutputDir}
-OutputBaseFilename=Keyina-Setup-{#MyAppVersion}-x64
+OutputBaseFilename={#MyOutputBaseFilename}
 SetupIconFile=..\brand\generated\keyina.ico
 LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\{#MyAppResidentExeName}
@@ -76,10 +82,29 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [InstallDelete]
 Type: files; Name: "{userstartup}\Keyina.lnk"
 
+[UninstallDelete]
+Type: files; Name: "{userstartup}\Keyina.lnk"
+
 [Icons]
 Name: "{group}\Keyina Settings"; Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; WorkingDir: "{app}"
 Name: "{autodesktop}\Keyina Settings"; Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; WorkingDir: "{app}"; Tasks: desktopicon
 
+[UninstallRun]
+Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--exit"; WorkingDir: "{app}"; RunOnceId: "StopResident"; Flags: runhidden waituntilterminated skipifdoesntexist
+
 [Run]
-Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall
+Filename: "{app}\{#MyAppResidentExeName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#MyAppResidentExeName}"; Parameters: "--open-settings"; Description: "Mở Cài đặt Keyina"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    RegDeleteValue(
+      HKCU,
+      'Software\Microsoft\Windows\CurrentVersion\Run',
+      'Keyina');
+    DeleteFile(ExpandConstant('{userstartup}\Keyina.lnk'));
+  end;
+end;
