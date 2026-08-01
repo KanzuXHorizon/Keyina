@@ -2,6 +2,7 @@
 
 #include "../test_support.h"
 
+#include <chrono>
 #include <string>
 #include <type_traits>
 
@@ -148,6 +149,116 @@ KEYINA_TEST(keystroke_overlay_preferences_default_to_private_disabled_state) {
       preferences.fallback_corner,
       keyina::windows::KeystrokeOverlayFallbackCorner::BottomRight);
   KEYINA_EXPECT_TRUE(!preferences.presentation_mode);
+}
+
+KEYINA_TEST(keystroke_overlay_privacy_allows_only_known_editable_context) {
+  keyina::windows::KeystrokeOverlayPrivacyContext context{};
+  context.overlay_enabled = true;
+  context.context_known = true;
+  context.editable = true;
+
+  KEYINA_EXPECT_EQ(
+      keyina::windows::EvaluateKeystrokeOverlayPrivacy(context),
+      keyina::windows::KeystrokeOverlayPrivacyDecision::Allow);
+}
+
+KEYINA_TEST(keystroke_overlay_privacy_suppresses_every_sensitive_context) {
+  using keyina::windows::EvaluateKeystrokeOverlayPrivacy;
+  using keyina::windows::KeystrokeOverlayPrivacyContext;
+  using keyina::windows::KeystrokeOverlayPrivacyDecision;
+
+  KeystrokeOverlayPrivacyContext safe{};
+  safe.overlay_enabled = true;
+  safe.context_known = true;
+  safe.editable = true;
+
+  auto expect_suppressed = [&](KeystrokeOverlayPrivacyContext context) {
+    KEYINA_EXPECT_EQ(
+        EvaluateKeystrokeOverlayPrivacy(context),
+        KeystrokeOverlayPrivacyDecision::Suppress);
+  };
+
+  auto disabled = safe;
+  disabled.overlay_enabled = false;
+  expect_suppressed(disabled);
+
+  auto unknown = safe;
+  unknown.context_known = false;
+  expect_suppressed(unknown);
+
+  auto non_editable = safe;
+  non_editable.editable = false;
+  expect_suppressed(non_editable);
+
+  auto password = safe;
+  password.password = true;
+  expect_suppressed(password);
+
+  auto protected_input = safe;
+  protected_input.protected_input = true;
+  expect_suppressed(protected_input);
+
+  auto secure_desktop = safe;
+  secure_desktop.secure_desktop = true;
+  expect_suppressed(secure_desktop);
+
+  auto excluded = safe;
+  excluded.excluded_application = true;
+  expect_suppressed(excluded);
+}
+
+KEYINA_TEST(keystroke_overlay_motion_off_is_immediate_and_static) {
+  keyina::windows::KeystrokeOverlayMotionContext context{};
+  context.level = keyina::windows::KeystrokeOverlayMotionLevel::Off;
+
+  const auto decision =
+      keyina::windows::ResolveKeystrokeOverlayMotion(context);
+
+  KEYINA_EXPECT_EQ(decision.duration, std::chrono::milliseconds{0});
+  KEYINA_EXPECT_TRUE(!decision.translate);
+  KEYINA_EXPECT_TRUE(!decision.emphasize_changed_glyphs);
+}
+
+KEYINA_TEST(keystroke_overlay_reduced_motion_is_crossfade_only) {
+  keyina::windows::KeystrokeOverlayMotionContext context{};
+  context.level = keyina::windows::KeystrokeOverlayMotionLevel::Full;
+  context.system_reduced_motion = true;
+
+  const auto decision =
+      keyina::windows::ResolveKeystrokeOverlayMotion(context);
+
+  KEYINA_EXPECT_TRUE(decision.duration > std::chrono::milliseconds{0});
+  KEYINA_EXPECT_TRUE(!decision.translate);
+  KEYINA_EXPECT_TRUE(!decision.emphasize_changed_glyphs);
+}
+
+KEYINA_TEST(keystroke_overlay_adaptive_motion_shortens_under_rapid_input) {
+  keyina::windows::KeystrokeOverlayMotionContext normal{};
+  normal.level = keyina::windows::KeystrokeOverlayMotionLevel::Adaptive;
+  auto rapid = normal;
+  rapid.rapid_input = true;
+
+  const auto normal_decision =
+      keyina::windows::ResolveKeystrokeOverlayMotion(normal);
+  const auto rapid_decision =
+      keyina::windows::ResolveKeystrokeOverlayMotion(rapid);
+
+  KEYINA_EXPECT_TRUE(rapid_decision.duration < normal_decision.duration);
+  KEYINA_EXPECT_TRUE(normal_decision.translate);
+  KEYINA_EXPECT_TRUE(rapid_decision.translate);
+}
+
+KEYINA_TEST(keystroke_overlay_low_power_motion_avoids_translation) {
+  keyina::windows::KeystrokeOverlayMotionContext context{};
+  context.level = keyina::windows::KeystrokeOverlayMotionLevel::Adaptive;
+  context.low_power_mode = true;
+
+  const auto decision =
+      keyina::windows::ResolveKeystrokeOverlayMotion(context);
+
+  KEYINA_EXPECT_TRUE(decision.duration > std::chrono::milliseconds{0});
+  KEYINA_EXPECT_TRUE(!decision.translate);
+  KEYINA_EXPECT_TRUE(!decision.emphasize_changed_glyphs);
 }
 
 KEYINA_TEST(keystroke_overlay_clear_resets_tokens_and_composition) {

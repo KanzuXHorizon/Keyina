@@ -60,6 +60,38 @@ void BoundedKeystrokeOverlayText::clear() noexcept {
   truncated_ = false;
 }
 
+KeystrokeOverlayPrivacyDecision EvaluateKeystrokeOverlayPrivacy(
+    const KeystrokeOverlayPrivacyContext& context) noexcept {
+  const bool safe = context.overlay_enabled && context.context_known &&
+      context.editable && !context.password && !context.protected_input &&
+      !context.secure_desktop && !context.excluded_application;
+  return safe ? KeystrokeOverlayPrivacyDecision::Allow
+              : KeystrokeOverlayPrivacyDecision::Suppress;
+}
+
+KeystrokeOverlayMotionDecision ResolveKeystrokeOverlayMotion(
+    const KeystrokeOverlayMotionContext& context) noexcept {
+  using namespace std::chrono_literals;
+
+  if (context.level == KeystrokeOverlayMotionLevel::Off) {
+    return {0ms, false, false};
+  }
+  if (context.system_reduced_motion ||
+      context.level == KeystrokeOverlayMotionLevel::Reduced) {
+    return {90ms, false, false};
+  }
+  if (context.low_power_mode) {
+    return {80ms, false, false};
+  }
+  if (context.level == KeystrokeOverlayMotionLevel::Full) {
+    return {160ms, true, true};
+  }
+  if (context.rapid_input) {
+    return {70ms, true, false};
+  }
+  return {140ms, true, true};
+}
+
 KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
     const KeystrokeOverlayState& current,
     const KeystrokeOverlayEvent& event) const noexcept {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -61,6 +62,43 @@ struct KeystrokeOverlayPreferences {
       KeystrokeOverlayFallbackCorner::BottomRight};
   bool presentation_mode{false};
 };
+
+enum class KeystrokeOverlayPrivacyDecision : std::uint8_t {
+  Allow = 0,
+  Suppress,
+};
+
+struct KeystrokeOverlayPrivacyContext {
+  bool overlay_enabled{false};
+  bool context_known{false};
+  bool editable{false};
+  bool password{false};
+  bool protected_input{false};
+  bool secure_desktop{false};
+  bool excluded_application{false};
+};
+
+[[nodiscard]] KeystrokeOverlayPrivacyDecision
+EvaluateKeystrokeOverlayPrivacy(
+    const KeystrokeOverlayPrivacyContext& context) noexcept;
+
+struct KeystrokeOverlayMotionContext {
+  KeystrokeOverlayMotionLevel level{
+      KeystrokeOverlayMotionLevel::Adaptive};
+  bool system_reduced_motion{false};
+  bool rapid_input{false};
+  bool low_power_mode{false};
+};
+
+struct KeystrokeOverlayMotionDecision {
+  std::chrono::milliseconds duration{};
+  bool translate{false};
+  bool emphasize_changed_glyphs{false};
+};
+
+[[nodiscard]] KeystrokeOverlayMotionDecision
+ResolveKeystrokeOverlayMotion(
+    const KeystrokeOverlayMotionContext& context) noexcept;
 
 struct KeystrokeOverlayEvent {
   KeystrokeOverlayEventKind kind{KeystrokeOverlayEventKind::Cleared};
