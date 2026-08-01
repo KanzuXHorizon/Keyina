@@ -909,6 +909,7 @@ void Win32InputRuntime::Stop() noexcept {
     DestroyWindow(snippet_overlay_window_);
     snippet_overlay_window_ = nullptr;
   }
+  snippet_overlay_visible_ = false;
   if (window_ != nullptr) {
     DestroyWindow(window_);
     window_ = nullptr;
@@ -1980,6 +1981,12 @@ void Win32InputRuntime::RefreshModifierState() noexcept {
 }
 
 void Win32InputRuntime::UpdateSnippetOverlay() noexcept {
+  const std::u32string_view token = controller_.snippet_token();
+  if (!IsRuntimeSnippetSuggestionPrefix(token)) {
+    HideSnippetOverlay();
+    return;
+  }
+
   const auto suggestions = controller_.snippet_suggestions(
       kMaximumVisibleSnippetSuggestions);
   if (suggestions.empty()) {
@@ -1987,8 +1994,7 @@ void Win32InputRuntime::UpdateSnippetOverlay() noexcept {
     return;
   }
 
-  const std::wstring text = BuildSnippetOverlayText(
-      controller_.snippet_token(), suggestions);
+  const std::wstring text = BuildSnippetOverlayText(token, suggestions);
   if (snippet_overlay_window_ == nullptr) {
     snippet_overlay_window_ = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
@@ -2026,21 +2032,24 @@ void Win32InputRuntime::UpdateSnippetOverlay() noexcept {
       360);
   const int x = std::max(work_area.left + 12, work_area.right - width - 20);
   const int y = std::max(work_area.top + 12, work_area.bottom - height - 20);
-  SetWindowPos(
-      snippet_overlay_window_,
-      HWND_TOPMOST,
-      x,
-      y,
-      width,
-      height,
-      SWP_NOACTIVATE | SWP_SHOWWINDOW);
-  ShowWindow(snippet_overlay_window_, SW_SHOWNOACTIVATE);
+  if (SetWindowPos(
+          snippet_overlay_window_,
+          HWND_TOPMOST,
+          x,
+          y,
+          width,
+          height,
+          SWP_NOACTIVATE | SWP_SHOWWINDOW) != FALSE) {
+    snippet_overlay_visible_ = true;
+  }
 }
 
 void Win32InputRuntime::HideSnippetOverlay() noexcept {
-  if (snippet_overlay_window_ != nullptr) {
-    ShowWindow(snippet_overlay_window_, SW_HIDE);
+  if (!snippet_overlay_visible_ || snippet_overlay_window_ == nullptr) {
+    return;
   }
+  ShowWindow(snippet_overlay_window_, SW_HIDE);
+  snippet_overlay_visible_ = false;
 }
 
 void Win32InputRuntime::UpdateTray() noexcept {

@@ -200,6 +200,7 @@ class Win32InputRuntime {
       callback_stage_latency_histograms_{};
   HWND window_{nullptr};
   HWND snippet_overlay_window_{nullptr};
+  bool snippet_overlay_visible_{false};
   HHOOK hook_{nullptr};
   HICON active_icon_{nullptr};
   HICON inactive_icon_{nullptr};

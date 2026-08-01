@@ -32,6 +32,9 @@ struct RuntimeSnippetMatch {
   std::uint16_t erase_codepoints{};
 };
 
+[[nodiscard]] bool IsRuntimeSnippetSuggestionPrefix(
+    std::u32string_view token) noexcept;
+
 class RuntimeSnippetMatcher {
  public:
   explicit RuntimeSnippetMatcher(

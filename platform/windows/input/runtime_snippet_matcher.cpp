@@ -120,6 +120,12 @@ RuntimeSnippetDefinition TextDefinition(std::u32string trigger,
 
 }  // namespace
 
+bool IsRuntimeSnippetSuggestionPrefix(
+    std::u32string_view token) noexcept {
+  return token.size() >= 2 && token[0] == U';' &&
+      FoldAscii(token[1]) == U'k';
+}
+
 RuntimeSnippetMatcher::RuntimeSnippetMatcher(
     const RuntimeSnippetProfile& profile) noexcept
     : profile_(&profile) {
@@ -235,8 +241,8 @@ void RuntimeSnippetMatcher::Reset() noexcept {
 std::vector<const RuntimeSnippetDefinition*>
 RuntimeSnippetMatcher::Suggestions(std::size_t maximum) const {
   std::vector<const RuntimeSnippetDefinition*> suggestions;
-  if (profile_ == nullptr || maximum == 0 || token_.size() < 2 ||
-      token_[0] != U';' || FoldAscii(token_[1]) != U'k') {
+  if (profile_ == nullptr || maximum == 0 ||
+      !IsRuntimeSnippetSuggestionPrefix(token_)) {
     return suggestions;
   }
 

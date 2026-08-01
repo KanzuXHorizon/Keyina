@@ -31,6 +31,23 @@ RuntimeSnippetDefinition Definition(
 
 }  // namespace
 
+KEYINA_TEST(runtime_snippet_suggestion_prefix_is_case_insensitive_and_exact) {
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::IsRuntimeSnippetSuggestionPrefix(U""));
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::IsRuntimeSnippetSuggestionPrefix(U";"));
+  KEYINA_EXPECT_TRUE(
+      keyina::windows::IsRuntimeSnippetSuggestionPrefix(U";k"));
+  KEYINA_EXPECT_TRUE(
+      keyina::windows::IsRuntimeSnippetSuggestionPrefix(U";K"));
+  KEYINA_EXPECT_TRUE(
+      keyina::windows::IsRuntimeSnippetSuggestionPrefix(U";kdate"));
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::IsRuntimeSnippetSuggestionPrefix(U";other"));
+  KEYINA_EXPECT_TRUE(
+      !keyina::windows::IsRuntimeSnippetSuggestionPrefix(U"k;"));
+}
+
 KEYINA_TEST(runtime_snippet_matcher_exposes_bounded_k_prefix_suggestions) {
   RuntimeSnippetProfile profile{};
   profile.entries.push_back(Definition(U";kdate", u"${date}"));
