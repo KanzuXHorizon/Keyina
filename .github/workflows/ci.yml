@@ -18,8 +18,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -27,7 +27,7 @@ jobs:
             **/packages.lock.json
             **/*.csproj
             global.json
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -86,7 +86,7 @@ jobs:
           .\build\windows-msvc-release\benchmarks\Release\keyina_bench.exe |
             Out-File -Encoding utf8 benchmark-result.json
           python -m json.tool benchmark-result.json | Out-Null
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-performance-evidence
           path: |
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake --preset linux-clang-asan
       - name: Build
