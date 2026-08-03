@@ -21,7 +21,7 @@
       "keyina.host.windows": {
         "type": "Project",
         "dependencies": {
-          "Keyina.Host.Core": "[0.1.7, )",
+          "Keyina.Host.Core": "[0.1.8, )",
           "NAudio.Wasapi": "[2.3.0, )"
         }
       },

@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and the project intends to use Semantic
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-08-03
+
+### Added
+
+- Adaptive keystroke overlay positions, including centered presentation layouts and cleaner composition snapshots.
+- Regression coverage for Chromium erase-only Backspace delivery.
+
+### Changed
+
+- GitHub Actions checkout, .NET, Python, and artifact actions now use their current supported major releases.
+- Windows and Linux CI paths are hardened for current runner images, managed benchmark artifacts, and deterministic native self-tests.
+
+### Fixed
+
+- Backspace in Chromium-based text fields no longer leaves the previous composition selected when an edit only removes text.
+- Native resource, focus, clipboard, callback-latency, and overlay tests now avoid false failures caused by contaminated process state or transient foreground changes.
+
 ## [0.1.6] - 2026-07-31
 
 ### Added

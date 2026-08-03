@@ -93,6 +93,28 @@ KEYINA_TEST(native_chromium_replacement_selects_text_before_inserting_unicode) {
                    static_cast<DWORD>(KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
 }
 
+KEYINA_TEST(native_chromium_erase_only_replacement_uses_backspace_without_selection) {
+  keyina::windows::InputDecision decision{};
+  decision.suppress = true;
+  decision.backspace_count = 2;
+  std::array<INPUT, 8> inputs{};
+
+  const auto count = keyina::windows::BuildSelectionReplacementSequence(
+      decision, inputs);
+
+  KEYINA_EXPECT_EQ(count, std::size_t{4});
+  for (std::size_t index = 0; index < count; ++index) {
+    KEYINA_EXPECT_EQ(inputs[index].type, static_cast<DWORD>(INPUT_KEYBOARD));
+    KEYINA_EXPECT_EQ(inputs[index].ki.wVk, static_cast<WORD>(VK_BACK));
+    KEYINA_EXPECT_EQ(inputs[index].ki.dwExtraInfo,
+                     keyina::windows::kKeyinaInjectionMarker);
+    const DWORD expected_flags = (index & 1u) == 0
+        ? 0
+        : static_cast<DWORD>(KEYEVENTF_KEYUP);
+    KEYINA_EXPECT_EQ(inputs[index].ki.dwFlags, expected_flags);
+  }
+}
+
 KEYINA_TEST(native_partial_input_recovery_releases_only_unmatched_keys) {
   keyina::windows::InputDecision decision{};
   decision.suppress = true;

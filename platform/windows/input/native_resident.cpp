@@ -1363,9 +1363,9 @@ int RunCallbackLatencySelfTest() noexcept {
 
 int RunTransformCallbackLatencySelfTestAttempt() noexcept {
   constexpr std::string_view kRawWord = "tieengs ";
-  constexpr std::size_t kWarmupWords = 16;
+  constexpr std::size_t kWarmupWords = 1;
   constexpr std::size_t kMeasuredWords = 256;
-  constexpr std::size_t kBatchWords = 16;
+  constexpr std::size_t kBatchWords = 1;
   constexpr std::uint64_t kExpectedEvents =
       kMeasuredWords * kRawWord.size() * 2;
   constexpr std::uint64_t kExpectedContexts =

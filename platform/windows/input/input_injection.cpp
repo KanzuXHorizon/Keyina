@@ -147,10 +147,12 @@ std::size_t BuildSelectionReplacementSequence(
   if (decision.insert_units > decision.insert.size()) {
     return 0;
   }
-  const std::size_t required =
-      (decision.backspace_count == 0 ? 0 : 2) +
-      (static_cast<std::size_t>(decision.backspace_count) * 2) +
-      (static_cast<std::size_t>(decision.insert_units) * 2);
+  const bool erase_only = decision.insert_units == 0;
+  const std::size_t required = erase_only
+      ? static_cast<std::size_t>(decision.backspace_count) * 2
+      : (decision.backspace_count == 0 ? 0 : 2) +
+          (static_cast<std::size_t>(decision.backspace_count) * 2) +
+          (static_cast<std::size_t>(decision.insert_units) * 2);
   if (required > destination.size()) {
     return 0;
   }
@@ -165,6 +167,15 @@ std::size_t BuildSelectionReplacementSequence(
     input.ki.dwExtraInfo = kKeyinaInjectionMarker;
     destination[count++] = input;
   };
+
+  if (erase_only) {
+    for (std::uint16_t index = 0;
+         index < decision.backspace_count; ++index) {
+      append(VK_BACK, 0, 0);
+      append(VK_BACK, 0, KEYEVENTF_KEYUP);
+    }
+    return count;
+  }
 
   if (decision.backspace_count != 0) {
     append(VK_SHIFT, 0, 0);
