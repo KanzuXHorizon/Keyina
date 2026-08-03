@@ -179,7 +179,7 @@ KEYINA_TEST(restores_tone_keys_embedded_in_latin_tokens) {
   }
 }
 
-KEYINA_TEST(restores_common_latin_tokens_without_dictionary_autocorrection) {
+KEYINA_TEST(restores_common_latin_tokens_at_boundary_without_dictionary_autocorrection) {
   constexpr std::array<TelexCase, 26> cases = {{
       {U"process", U"process"},
       {U"deep", U"deep"},
@@ -213,23 +213,25 @@ KEYINA_TEST(restores_common_latin_tokens_without_dictionary_autocorrection) {
     keyina::Engine engine({
         .restore_invalid_word = true,
     });
-    const auto actual = TypeSequence(engine, test.raw);
-    if (actual != test.expected) {
+    auto actual = TypeSequence(engine, test.raw);
+    const auto boundary = engine.Process(
+        {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
+    if (boundary.consumed) {
+      actual.erase(actual.size() - boundary.erase_codepoints);
+      actual.append(boundary.insert);
+    } else {
+      actual.push_back(U' ');
+    }
+
+    std::u32string expected{test.expected};
+    expected.push_back(U' ');
+    if (actual != expected) {
       std::string raw;
       raw.reserve(test.raw.size());
       for (const char32_t value : test.raw) {
         raw.push_back(static_cast<char>(value));
       }
-      std::string actual_codepoints;
-      for (const char32_t value : actual) {
-        if (!actual_codepoints.empty()) {
-          actual_codepoints.push_back(',');
-        }
-        actual_codepoints.append(std::to_string(static_cast<std::uint32_t>(value)));
-      }
-      throw std::runtime_error(
-          "failed literal Latin case: " + raw +
-          "; actual code points: " + actual_codepoints);
+      throw std::runtime_error("failed committed Latin case: " + raw);
     }
   }
 }
@@ -277,6 +279,72 @@ KEYINA_TEST(invalid_checked_tone_can_still_be_replaced_before_commit) {
   });
   KEYINA_EXPECT_EQ(TypeSequence(engine, U"catfs"),
                    std::u32string{U"cát"});
+}
+
+KEYINA_TEST(keeps_checked_coda_shape_visible_until_the_tone_key_arrives) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  std::u32string external;
+  constexpr std::array<TelexCase, 5> prefixes = {{
+      {U"h", U"h"},
+      {U"he", U"he"},
+      {U"hee", U"hê"},
+      {U"heet", U"hêt"},
+      {U"heets", U"hết"},
+  }};
+
+  std::size_t consumed = 0;
+  for (const auto& prefix : prefixes) {
+    while (consumed < prefix.raw.size()) {
+      const auto edit = engine.Process({keyina::KeyKind::Character,
+                                        prefix.raw[consumed], false, false,
+                                        false});
+      KEYINA_EXPECT_TRUE(edit.consumed);
+      external.erase(external.size() - edit.erase_codepoints);
+      external.append(edit.insert);
+      ++consumed;
+    }
+    KEYINA_EXPECT_EQ(external, std::u32string{prefix.expected});
+  }
+}
+
+KEYINA_TEST(restores_unfinished_checked_coda_to_literal_text_at_boundary) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  auto external = TypeSequence(engine, U"meet");
+  KEYINA_EXPECT_EQ(external, std::u32string{U"mêt"});
+
+  const auto boundary = engine.Process(
+      {keyina::KeyKind::CommitBoundary, U' ', false, false, false});
+  KEYINA_EXPECT_TRUE(boundary.consumed);
+  external.erase(external.size() - boundary.erase_codepoints);
+  external.append(boundary.insert);
+  KEYINA_EXPECT_EQ(external, std::u32string{U"meet "});
+}
+
+KEYINA_TEST(repeated_vowel_modifier_does_not_cross_separate_vowel_runs) {
+  for (const bool restore_invalid_word : {false, true}) {
+    keyina::Engine literal({
+        .restore_invalid_word = restore_invalid_word,
+    });
+    keyina::Engine valid({
+        .restore_invalid_word = restore_invalid_word,
+    });
+    keyina::Engine tone({
+        .restore_invalid_word = restore_invalid_word,
+    });
+
+    KEYINA_EXPECT_EQ(TypeSequence(literal, U"telee"),
+                     std::u32string{U"telee"});
+    KEYINA_EXPECT_EQ(TypeSequence(valid, U"lex"),
+                     std::u32string{U"lẽ"});
+    if (restore_invalid_word) {
+      KEYINA_EXPECT_EQ(TypeSequence(tone, U"telex"),
+                       std::u32string{U"telex"});
+    }
+  }
 }
 
 KEYINA_TEST(keeps_latin_tokens_literal_while_they_are_still_being_typed) {

@@ -239,6 +239,23 @@ KEYINA_TEST(resident_input_controller_composes_telex_without_heap_output) {
   KEYINA_EXPECT_TRUE(controller.pointer_observation_required());
 }
 
+KEYINA_TEST(resident_input_controller_keeps_checked_coda_editable_and_restores_literal_on_space) {
+  ResidentInputController vietnamese(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(vietnamese, visible, U"heet");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"hêt"});
+  Type(vietnamese, visible, U"s ");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"hết "});
+
+  ResidentInputController latin(
+      keyina::windows::DefaultRuntimeInputProfile());
+  visible.clear();
+  Type(latin, visible, U"meet ");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"meet "});
+}
+
 KEYINA_TEST(resident_input_controller_keeps_embedded_tone_keys_literal_in_latin_tokens) {
   ResidentInputController controller(
       keyina::windows::DefaultRuntimeInputProfile());
