@@ -179,9 +179,19 @@ bool FocusTestControl(HWND window, HWND edit) noexcept {
 
   constexpr int kMaximumFocusAttempts = 12;
   const DWORD current_thread = GetCurrentThreadId();
+  RECT work_area{};
+  if (SystemParametersInfoW(
+          SPI_GETWORKAREA, 0, &work_area, 0) == FALSE) {
+    work_area = {0, 0, 480, 180};
+  }
   ShowWindow(window, SW_RESTORE);
   SetWindowPos(
-      window, HWND_TOPMOST, -1200, 100, 480, 180,
+      window,
+      HWND_TOPMOST,
+      work_area.left + 16,
+      work_area.top + 16,
+      480,
+      180,
       SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
 
   for (int attempt = 0; attempt < kMaximumFocusAttempts; ++attempt) {
@@ -1948,7 +1958,8 @@ int RunKeystrokeOverlaySelfTest() {
         state,
         placement,
         keyina::windows::ResolveKeystrokeOverlayMotion({}),
-        preferences);
+        preferences,
+        96);
     window.HideAndReleaseTransientState();
   }
   const bool timer_active_after_hide = window.HasActiveAnimationForTesting();

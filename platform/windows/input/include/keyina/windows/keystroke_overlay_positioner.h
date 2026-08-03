@@ -48,6 +48,14 @@ struct KeystrokeOverlayPlacement {
   bool placed_above{};
 };
 
+[[nodiscard]] int ScaleKeystrokeOverlayMetric(
+    int value_at_96_dpi,
+    std::uint32_t dpi) noexcept;
+
+[[nodiscard]] bool DidKeystrokeOverlayMonitorChange(
+    std::uintptr_t previous_monitor,
+    std::uintptr_t current_monitor) noexcept;
+
 [[nodiscard]] KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(
     const KeystrokeOverlayPlacementInput& input) noexcept;
 

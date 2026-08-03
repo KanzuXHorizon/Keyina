@@ -37,6 +37,7 @@ target_link_libraries(keyina_windows_input PUBLIC
 keyina_configure_target(keyina_windows_input)
 
 add_executable(KeyinaInput WIN32
+  KeyinaInput.manifest
   native_resident.cpp
   win32_input_runtime.cpp
 )

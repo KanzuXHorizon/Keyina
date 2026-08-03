@@ -143,4 +143,8 @@ struct KeystrokeOverlayMotionDecision {
 [[nodiscard]] KeystrokeOverlayMotionDecision ResolveKeystrokeOverlayMotion(
     const KeystrokeOverlayMotionContext& context) noexcept;
 
+[[nodiscard]] bool ShouldShowKeystrokeOverlayCompositionText(
+    std::u16string_view composition,
+    bool transformed) noexcept;
+
 }  // namespace keyina::windows

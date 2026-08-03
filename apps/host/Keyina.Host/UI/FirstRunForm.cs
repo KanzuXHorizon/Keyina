@@ -110,7 +110,7 @@ public sealed class FirstRunForm : Form
 
     private FluentCard CreateTypingChecklistItem()
     {
-        var card = CreateChecklistCard("firstRunTypingCard");
+        var card = CreateChecklistCard("firstRunTyping");
         var layout = CreateChecklistLayout();
         card.Controls.Add(layout);
 

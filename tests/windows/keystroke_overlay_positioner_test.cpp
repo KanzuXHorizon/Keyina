@@ -19,6 +19,13 @@ KeystrokeOverlayPlacementInput BaseInput() {
 
 }  // namespace
 
+KEYINA_TEST(keystroke_overlay_metrics_scale_from_96_dpi) {
+  KEYINA_EXPECT_EQ(ScaleKeystrokeOverlayMetric(12, 0), 12);
+  KEYINA_EXPECT_EQ(ScaleKeystrokeOverlayMetric(12, 96), 12);
+  KEYINA_EXPECT_EQ(ScaleKeystrokeOverlayMetric(12, 144), 18);
+  KEYINA_EXPECT_EQ(ScaleKeystrokeOverlayMetric(56, 192), 112);
+}
+
 KEYINA_TEST(keystroke_overlay_positioner_prefers_below_caret) {
   const auto placement = ResolveKeystrokeOverlayPlacement(BaseInput());
   KEYINA_EXPECT_TRUE(!placement.used_fallback);
@@ -72,6 +79,13 @@ KEYINA_TEST(keystroke_overlay_positioner_reuses_stable_anchor) {
   input.caret.right += 20;
   const auto moved = ResolveKeystrokeOverlayPlacement(input);
   KEYINA_EXPECT_TRUE(moved.stable_anchor.x != first.stable_anchor.x);
+}
+
+KEYINA_TEST(keystroke_overlay_monitor_change_requires_two_distinct_monitors) {
+  KEYINA_EXPECT_TRUE(!DidKeystrokeOverlayMonitorChange(0, 100));
+  KEYINA_EXPECT_TRUE(!DidKeystrokeOverlayMonitorChange(100, 100));
+  KEYINA_EXPECT_TRUE(!DidKeystrokeOverlayMonitorChange(100, 0));
+  KEYINA_EXPECT_TRUE(DidKeystrokeOverlayMonitorChange(100, 200));
 }
 
 KEYINA_TEST(keystroke_overlay_positioner_discards_anchor_on_monitor_change) {

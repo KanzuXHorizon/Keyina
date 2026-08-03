@@ -16,6 +16,8 @@ public sealed partial class SettingsForm
     private NumericUpDown keystrokeOverlaySoundVolume = null!;
     private FluentButton previewKeystrokeOverlay = null!;
     private Label keystrokeOverlayPreviewText = null!;
+    private System.Windows.Forms.Timer keystrokeOverlayPreviewTimer = null!;
+    private int keystrokeOverlayPreviewStage;
 
     private void InitializeKeystrokeOverlayControls()
     {
@@ -71,6 +73,13 @@ public sealed partial class SettingsForm
             LabelRole.Heading);
         keystrokeOverlayPreviewText.TextAlign = ContentAlignment.MiddleCenter;
         keystrokeOverlayPreviewText.Dock = DockStyle.Fill;
+        keystrokeOverlayPreviewText.AccessibleDescription =
+            "Mô phỏng quá trình phím thô chuyển thành chữ tiếng Việt hoàn chỉnh.";
+        keystrokeOverlayPreviewTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 140,
+        };
+        keystrokeOverlayPreviewTimer.Tick += (_, _) => AdvanceKeystrokeOverlayPreview();
     }
 
     private FluentCard CreateKeystrokeOverlayCard()
@@ -145,18 +154,59 @@ public sealed partial class SettingsForm
         keystrokeOverlayHideDelay.ValueChanged += (_, _) => SaveKeystrokeOverlayPreferences();
         keystrokeOverlaySoundToggle.CheckedChanged += (_, _) => SaveKeystrokeOverlayPreferences();
         keystrokeOverlaySoundVolume.ValueChanged += (_, _) => SaveKeystrokeOverlayPreferences();
-        previewKeystrokeOverlay.Click += (_, _) =>
+        previewKeystrokeOverlay.Click += (_, _) => StartKeystrokeOverlayPreview();
+    }
+
+    private void StartKeystrokeOverlayPreview()
+    {
+        keystrokeOverlayPreviewTimer.Stop();
+        keystrokeOverlayPreviewStage = 0;
+        previewKeystrokeOverlay.Enabled = false;
+        previewKeystrokeOverlay.Text = "Đang xem…";
+        keystrokeOverlayPreviewText.Text = "n   g   u   y   e   n";
+        keystrokeOverlayPreviewText.AccessibleName = "Đang mô phỏng các phím n g u y e n";
+
+        if (keystrokeOverlayMotion.SelectedIndex ==
+            (int)KeystrokeOverlayMotionLevel.Off)
         {
-            keystrokeOverlayPreviewText.Text = "n   g   u   y   e   n";
-            BeginInvoke(() =>
-            {
-                if (!IsDisposed)
-                {
-                    keystrokeOverlayPreviewText.Text = "nguyễn";
-                    actions.PreviewKeystrokeOverlay();
-                }
-            });
-        };
+            CompleteKeystrokeOverlayPreview();
+            return;
+        }
+        keystrokeOverlayPreviewTimer.Interval =
+            keystrokeOverlayMotion.SelectedIndex ==
+                (int)KeystrokeOverlayMotionLevel.Reduced
+                ? 160
+                : 110;
+        keystrokeOverlayPreviewTimer.Start();
+    }
+
+    private void AdvanceKeystrokeOverlayPreview()
+    {
+        if (IsDisposed || Disposing)
+        {
+            keystrokeOverlayPreviewTimer.Stop();
+            return;
+        }
+
+        if (keystrokeOverlayPreviewStage++ == 0)
+        {
+            keystrokeOverlayPreviewText.Text = "nguyen";
+            keystrokeOverlayPreviewText.AccessibleName =
+                "Đang ghép các phím thành từ nguyen";
+            return;
+        }
+        CompleteKeystrokeOverlayPreview();
+    }
+
+    private void CompleteKeystrokeOverlayPreview()
+    {
+        keystrokeOverlayPreviewTimer.Stop();
+        keystrokeOverlayPreviewText.Text = "nguyễn";
+        keystrokeOverlayPreviewText.AccessibleName =
+            "Kết quả xem trước: nguyễn";
+        previewKeystrokeOverlay.Text = "Xem thử";
+        previewKeystrokeOverlay.Enabled = true;
+        actions.PreviewKeystrokeOverlay();
     }
 
     private void ApplyKeystrokeOverlaySnapshot(KeystrokeOverlayPreferences preferences)

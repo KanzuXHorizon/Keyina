@@ -328,6 +328,8 @@ class Win32InputRuntime {
   KeystrokeOverlayEvent pending_keystroke_overlay_event_{};
   BoundedKeystrokeOverlayText keystroke_overlay_composition_{};
   OverlayPoint keystroke_overlay_stable_anchor_{};
+  HMONITOR keystroke_overlay_monitor_{nullptr};
+  std::uint32_t keystroke_overlay_dpi_{96};
   std::uint64_t keystroke_overlay_generation_{};
   UINT_PTR keystroke_overlay_hide_timer_{};
   bool keystroke_overlay_update_posted_{false};

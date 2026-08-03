@@ -28,13 +28,17 @@ class KeystrokeOverlayWindow {
   void Present(const KeystrokeOverlayState& state,
                const KeystrokeOverlayPlacement& placement,
                const KeystrokeOverlayMotionDecision& motion,
-               const KeystrokeOverlayPreferences& preferences) noexcept;
+               const KeystrokeOverlayPreferences& preferences,
+               std::uint32_t dpi) noexcept;
   void HideAndReleaseTransientState() noexcept;
   void Shutdown() noexcept;
 
   [[nodiscard]] bool IsVisibleForTesting() const noexcept;
   [[nodiscard]] bool HasActiveAnimationForTesting() const noexcept;
   [[nodiscard]] HWND window_for_testing() const noexcept { return window_; }
+  [[nodiscard]] std::uint32_t CurrentDpiForTesting() const noexcept {
+    return current_dpi_;
+  }
   void SimulateDeviceLossForTesting() noexcept;
 
  private:
@@ -46,6 +50,7 @@ class KeystrokeOverlayWindow {
                                            LPARAM l_param) noexcept;
   LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param) noexcept;
   [[nodiscard]] bool EnsureDeviceResources() noexcept;
+  [[nodiscard]] bool EnsureTextFormat(std::uint32_t dpi) noexcept;
   void ReleaseDeviceResources() noexcept;
   void Render() noexcept;
   void TickAnimation() noexcept;
@@ -65,6 +70,8 @@ class KeystrokeOverlayWindow {
   KeystrokeOverlayMotionDecision motion_{};
   KeystrokeOverlayPreferences preferences_{};
   std::uint64_t animation_started_tick_{};
+  std::uint32_t current_dpi_{96};
+  float current_translation_y_{};
   std::uint8_t current_alpha_{};
   bool visible_{};
   bool animation_active_{};
