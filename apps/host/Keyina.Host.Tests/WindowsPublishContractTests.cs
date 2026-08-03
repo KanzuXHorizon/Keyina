@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace Keyina.Host.Tests;
@@ -171,12 +172,10 @@ internal static class WindowsPublishContractTests
             "verify-release.ps1"));
 
         AssertEx.True(
-            rootCmake.Contains(
-                "KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS",
-                StringComparison.Ordinal) &&
-            rootCmake.Contains(
-                "foreground focus and SendInput\"\n  OFF",
-                StringComparison.Ordinal),
+            Regex.IsMatch(
+                rootCmake,
+                @"option\s*\(\s*KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS\b[\s\S]*?\bOFF\s*\)",
+                RegexOptions.CultureInvariant),
             "Interactive desktop CMake option is not default-off.");
         AssertEx.True(
             inputCmake.Contains(
