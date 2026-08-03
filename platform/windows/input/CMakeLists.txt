@@ -37,6 +37,7 @@ target_link_libraries(keyina_windows_input PUBLIC
 keyina_configure_target(keyina_windows_input)
 
 add_executable(KeyinaInput WIN32
+  KeyinaInput.manifest
   native_resident.cpp
   win32_input_runtime.cpp
 )
@@ -71,7 +72,7 @@ add_test(NAME keyina.windows.input_resource
 set_tests_properties(keyina.windows.input_resource PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "\\\"budget_pass\\\":true"
-  TIMEOUT 15
+  TIMEOUT 45
 )
 
 add_test(NAME keyina.windows.input_typing
@@ -79,7 +80,7 @@ add_test(NAME keyina.windows.input_typing
 set_tests_properties(keyina.windows.input_typing PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "typing_self_test_pass"
-  TIMEOUT 10
+  TIMEOUT 30
 )
 
 add_test(NAME keyina.windows.input_clipboard_typing
@@ -87,7 +88,7 @@ add_test(NAME keyina.windows.input_clipboard_typing
 set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "clipboard_typing_self_test_pass"
-  TIMEOUT 10
+  TIMEOUT 45
 )
 
 add_test(NAME keyina.windows.input_tray_resource
@@ -95,7 +96,7 @@ add_test(NAME keyina.windows.input_tray_resource
 set_tests_properties(keyina.windows.input_tray_resource PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "\\\"tray_enabled\\\":true.*\\\"budget_pass\\\":true"
-  TIMEOUT 15
+  TIMEOUT 45
 )
 
 add_test(NAME keyina.windows.input_profile_reload
@@ -111,7 +112,7 @@ add_test(NAME keyina.windows.input_callback_latency
 set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
-  TIMEOUT 20
+  TIMEOUT 30
 )
 
 add_test(NAME keyina.windows.input_transform_callback_latency

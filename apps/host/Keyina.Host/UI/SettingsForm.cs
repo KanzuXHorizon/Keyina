@@ -862,6 +862,8 @@ public sealed partial class SettingsForm : Form
             SystemEvents.UserPreferenceChanged -= SystemEventsUserPreferenceChanged;
             typingDiagnosticTimer.Stop();
             typingDiagnosticTimer.Dispose();
+            keystrokeOverlayPreviewTimer.Stop();
+            keystrokeOverlayPreviewTimer.Dispose();
             navigationToolTip.Dispose();
             TypingDiagnosticTrace.ClearAndDisable();
             lifetime.Cancel();

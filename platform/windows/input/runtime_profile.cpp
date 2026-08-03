@@ -10,14 +10,20 @@ namespace {
 constexpr std::array<std::byte, 4> kMagic{
     std::byte{'K'}, std::byte{'I'}, std::byte{'R'}, std::byte{'P'}};
 constexpr std::uint8_t kLegacyFormatVersion = 2;
-constexpr std::uint8_t kFormatVersion = 3;
+constexpr std::uint8_t kPreviousFormatVersion = 3;
+constexpr std::uint8_t kFormatVersion = 4;
 constexpr std::uint8_t kBindingCount = 6;
 constexpr std::size_t kLegacyChecksumOffset = 32;
 constexpr std::size_t kChecksumOffset = 36;
 constexpr std::uint8_t kOverlayEnabledFlag = 1u << 0u;
 constexpr std::uint8_t kOverlayMotionMask = 0b00000110u;
-constexpr std::uint8_t kOverlayCornerMask = 0b00011000u;
-constexpr std::uint8_t kOverlayPresentationFlag = 1u << 5u;
+constexpr std::uint8_t kPreviousOverlayCornerMask = 0b00011000u;
+constexpr std::uint8_t kPreviousOverlayPresentationFlag = 1u << 5u;
+constexpr std::uint8_t kPreviousKnownOverlayFlags =
+    kOverlayEnabledFlag | kOverlayMotionMask | kPreviousOverlayCornerMask |
+    kPreviousOverlayPresentationFlag;
+constexpr std::uint8_t kOverlayCornerMask = 0b00111000u;
+constexpr std::uint8_t kOverlayPresentationFlag = 1u << 6u;
 constexpr std::uint8_t kKnownOverlayFlags =
     kOverlayEnabledFlag | kOverlayMotionMask | kOverlayCornerMask |
     kOverlayPresentationFlag;
@@ -193,7 +199,8 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
 
   const auto version = ByteAt(bytes, 4);
   const bool legacy = version == kLegacyFormatVersion;
-  if (!legacy && version != kFormatVersion) {
+  const bool previous = version == kPreviousFormatVersion;
+  if (!legacy && !previous && version != kFormatVersion) {
     result.error = RuntimeInputProfileError::UnsupportedVersion;
     return result;
   }
@@ -240,18 +247,28 @@ RuntimeInputProfileResult DecodeRuntimeInputProfile(
 
   if (!legacy) {
     const auto overlay_flags = ByteAt(bytes, 26);
-    if ((overlay_flags & ~kKnownOverlayFlags) != 0) {
+    const auto known_overlay_flags = previous
+        ? kPreviousKnownOverlayFlags
+        : kKnownOverlayFlags;
+    if ((overlay_flags & ~known_overlay_flags) != 0) {
       result.error = RuntimeInputProfileError::InvalidHeader;
       return result;
     }
+    const auto corner_mask = previous
+        ? kPreviousOverlayCornerMask
+        : kOverlayCornerMask;
+    const auto presentation_flag = previous
+        ? kPreviousOverlayPresentationFlag
+        : kOverlayPresentationFlag;
     result.profile.keystroke_overlay.enabled =
         (overlay_flags & kOverlayEnabledFlag) != 0;
     result.profile.keystroke_overlay.motion =
         static_cast<KeystrokeOverlayMotionLevel>((overlay_flags >> 1u) & 0x03u);
     result.profile.keystroke_overlay.fallback_corner =
-        static_cast<KeystrokeOverlayFallbackCorner>((overlay_flags >> 3u) & 0x03u);
+        static_cast<KeystrokeOverlayFallbackCorner>(
+            (overlay_flags & corner_mask) >> 3u);
     result.profile.keystroke_overlay.presentation_mode =
-        (overlay_flags & kOverlayPresentationFlag) != 0;
+        (overlay_flags & presentation_flag) != 0;
     result.profile.keystroke_overlay.size_percent = ByteAt(bytes, 27);
     result.profile.keystroke_overlay.opacity_percent = ByteAt(bytes, 32);
     result.profile.keystroke_overlay.hide_delay_milliseconds =

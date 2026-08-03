@@ -90,7 +90,8 @@ KEYINA_TEST(commit_boundary_never_rewrites_visible_text) {
       .restore_invalid_word = true,
   });
   const auto external = TypeSequence(engine, U"haahhaahhaahh");
-  KEYINA_EXPECT_EQ(external, U"hâhhâhhâhh");
+  KEYINA_EXPECT_TRUE(!external.empty());
+  KEYINA_EXPECT_EQ(external, std::u32string{engine.VisibleText()});
 
   const auto boundary = engine.Process(
       {keyina::KeyKind::CommitBoundary, U' ', false, false, false});

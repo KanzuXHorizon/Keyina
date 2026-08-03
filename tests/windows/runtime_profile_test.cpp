@@ -10,6 +10,7 @@
 
 namespace {
 
+using keyina::windows::KeystrokeOverlayFallbackCorner;
 using keyina::windows::RuntimeHotkeyGesture;
 using keyina::windows::RuntimeInputProfileError;
 
@@ -21,12 +22,20 @@ constexpr std::array<std::uint8_t, 36> kLegacyDefaultVector{
     0xB6, 0xCD, 0x5D, 0xCA,
 };
 
-constexpr std::array<std::uint8_t, 40> kDefaultVector{
+constexpr std::array<std::uint8_t, 40> kPreviousDefaultVector{
     0x4B, 0x49, 0x52, 0x50, 0x03, 0x28, 0x11, 0x06,
     0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
     0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
     0x00, 0x1B, 0x00, 0x64, 0x01, 0x00, 0x00, 0x00,
     0x5C, 0x84, 0x03, 0x1E, 0xE6, 0x8F, 0xA6, 0xBC,
+};
+
+constexpr std::array<std::uint8_t, 40> kDefaultVector{
+    0x4B, 0x49, 0x52, 0x50, 0x04, 0x28, 0x11, 0x06,
+    0x02, 0x03, 0x00, 0x01, 0x05, 0x20, 0x00, 0x05,
+    0x56, 0x00, 0x05, 0x54, 0x00, 0x05, 0x5A, 0x00,
+    0x00, 0x1B, 0x00, 0x64, 0x01, 0x00, 0x00, 0x00,
+    0x5C, 0x84, 0x03, 0x1E, 0xB9, 0x97, 0x01, 0xEA,
 };
 
 template <std::size_t Size>
@@ -71,6 +80,30 @@ KEYINA_TEST(runtime_input_profile_decodes_legacy_managed_vector) {
   KEYINA_EXPECT_EQ(result.profile.keystroke_overlay.size_percent, 100);
 }
 
+KEYINA_TEST(runtime_input_profile_decodes_previous_managed_default_vector) {
+  const auto result = keyina::windows::DecodeRuntimeInputProfile(
+      AsBytes(kPreviousDefaultVector));
+
+  KEYINA_EXPECT_EQ(result.error, RuntimeInputProfileError::None);
+  KEYINA_EXPECT_TRUE(!result.profile.keystroke_overlay.enabled);
+  KEYINA_EXPECT_EQ(result.profile.keystroke_overlay.size_percent, 100);
+}
+
+KEYINA_TEST(runtime_input_profile_preserves_previous_overlay_flags) {
+  auto previous = kPreviousDefaultVector;
+  previous[26] = 0x39;
+  RewriteChecksum(previous);
+
+  const auto result = keyina::windows::DecodeRuntimeInputProfile(
+      AsBytes(previous));
+  KEYINA_EXPECT_EQ(result.error, RuntimeInputProfileError::None);
+  KEYINA_EXPECT_TRUE(result.profile.keystroke_overlay.enabled);
+  KEYINA_EXPECT_TRUE(result.profile.keystroke_overlay.presentation_mode);
+  KEYINA_EXPECT_EQ(
+      result.profile.keystroke_overlay.fallback_corner,
+      KeystrokeOverlayFallbackCorner::TopLeft);
+}
+
 KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   const auto result = keyina::windows::DecodeRuntimeInputProfile(
       AsBytes(kDefaultVector));
@@ -100,6 +133,21 @@ KEYINA_TEST(runtime_input_profile_decodes_managed_default_vector) {
   KEYINA_EXPECT_EQ(result.profile.hotkeys[5].gesture,
                    RuntimeHotkeyGesture::Press);
   KEYINA_EXPECT_EQ(result.profile.hotkeys[5].virtual_key, 0x1B);
+}
+
+KEYINA_TEST(runtime_input_profile_decodes_center_overlay_positions) {
+  auto centered = kDefaultVector;
+  centered[26] = 0x69;
+  RewriteChecksum(centered);
+
+  const auto result = keyina::windows::DecodeRuntimeInputProfile(
+      AsBytes(centered));
+  KEYINA_EXPECT_EQ(result.error, RuntimeInputProfileError::None);
+  KEYINA_EXPECT_TRUE(result.profile.keystroke_overlay.enabled);
+  KEYINA_EXPECT_TRUE(result.profile.keystroke_overlay.presentation_mode);
+  KEYINA_EXPECT_EQ(
+      result.profile.keystroke_overlay.fallback_corner,
+      KeystrokeOverlayFallbackCorner::TopCenter);
 }
 
 KEYINA_TEST(runtime_input_profile_decodes_quick_telex_flag) {

@@ -62,20 +62,26 @@ jobs:
 
       - name: Build and verify release candidate
         shell: powershell
+        env:
+          KEYINA_RELEASE_VERSION: ${{ inputs.version }}
+          KEYINA_RELEASE_SIGN: ${{ inputs.sign }}
         run: |
+          $version = $env:KEYINA_RELEASE_VERSION
+          $signRequested = $env:KEYINA_RELEASE_SIGN -eq 'true'
+
           $arguments = @('-File', 'scripts/windows/build-release.ps1')
-          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.version }}')) {
-            $arguments += @('-Version', '${{ inputs.version }}')
+          if (-not [string]::IsNullOrWhiteSpace($version)) {
+            $arguments += @('-Version', $version)
           }
-          if ('${{ inputs.sign }}' -eq 'true') {
+          if ($signRequested) {
             $arguments += @('-Sign', '-RequireSignature')
           }
           powershell -NoProfile -ExecutionPolicy Bypass @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $verifyArguments = @('-File', 'scripts/windows/verify-release.ps1')
-          if (-not [string]::IsNullOrWhiteSpace('${{ inputs.version }}')) {
-            $verifyArguments += @('-Version', '${{ inputs.version }}')
+          if (-not [string]::IsNullOrWhiteSpace($version)) {
+            $verifyArguments += @('-Version', $version)
           }
           powershell -NoProfile -ExecutionPolicy Bypass @verifyArguments
           exit $LASTEXITCODE

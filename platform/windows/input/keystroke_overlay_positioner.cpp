@@ -1,7 +1,9 @@
 #include <keyina/windows/keystroke_overlay_positioner.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 namespace keyina::windows {
 namespace {
@@ -20,6 +22,8 @@ OverlayPoint ResolveFallbackAnchor(
   const int right = area.right - input.margin - input.overlay_size.width;
   const int top = area.top + input.margin;
   const int bottom = area.bottom - input.margin - input.overlay_size.height;
+  const int center = area.left +
+      (area.Width() - input.overlay_size.width) / 2;
 
   switch (input.fallback_corner) {
     case KeystrokeOverlayFallbackCorner::BottomLeft:
@@ -28,6 +32,10 @@ OverlayPoint ResolveFallbackAnchor(
       return {right, top};
     case KeystrokeOverlayFallbackCorner::TopLeft:
       return {left, top};
+    case KeystrokeOverlayFallbackCorner::BottomCenter:
+      return {center, bottom};
+    case KeystrokeOverlayFallbackCorner::TopCenter:
+      return {center, top};
     case KeystrokeOverlayFallbackCorner::BottomRight:
     default:
       return {right, bottom};
@@ -41,6 +49,27 @@ bool IsNear(OverlayPoint first, OverlayPoint second, int threshold) noexcept {
 
 }  // namespace
 
+int ScaleKeystrokeOverlayMetric(
+    int value_at_96_dpi,
+    std::uint32_t dpi) noexcept {
+  if (value_at_96_dpi <= 0) {
+    return value_at_96_dpi;
+  }
+  const std::uint32_t effective_dpi = dpi == 0 ? 96 : dpi;
+  const std::int64_t scaled =
+      (static_cast<std::int64_t>(value_at_96_dpi) * effective_dpi + 48) / 96;
+  return static_cast<int>(std::min<std::int64_t>(
+      scaled,
+      std::numeric_limits<int>::max()));
+}
+
+bool DidKeystrokeOverlayMonitorChange(
+    std::uintptr_t previous_monitor,
+    std::uintptr_t current_monitor) noexcept {
+  return previous_monitor != 0 && current_monitor != 0 &&
+      previous_monitor != current_monitor;
+}
+
 KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(
     const KeystrokeOverlayPlacementInput& input) noexcept {
   KeystrokeOverlayPlacement placement{};
@@ -51,7 +80,8 @@ KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(
 
   OverlayPoint anchor{};
   bool placed_above = false;
-  bool fallback = !input.caret_reliable || !input.caret.IsValid();
+  bool fallback = input.force_fallback ||
+      !input.caret_reliable || !input.caret.IsValid();
 
   if (fallback) {
     anchor = ResolveFallbackAnchor(input);

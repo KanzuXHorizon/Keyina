@@ -3,15 +3,104 @@
 #include <algorithm>
 
 namespace keyina::windows {
+namespace {
+
+bool IsHighSurrogate(char16_t value) noexcept {
+  return value >= 0xD800 && value <= 0xDBFF;
+}
+
+bool IsLowSurrogate(char16_t value) noexcept {
+  return value >= 0xDC00 && value <= 0xDFFF;
+}
+
+char32_t DecodeCodePoint(
+    std::u16string_view value,
+    std::size_t offset,
+    std::size_t& units) noexcept {
+  units = 1;
+  const char16_t first = value[offset];
+  if (!IsHighSurrogate(first) || offset + 1 >= value.size() ||
+      !IsLowSurrogate(value[offset + 1])) {
+    return first;
+  }
+  units = 2;
+  return 0x10000 +
+      ((static_cast<char32_t>(first) - 0xD800) << 10) +
+      (static_cast<char32_t>(value[offset + 1]) - 0xDC00);
+}
+
+bool IsRegionalIndicator(char32_t value) noexcept {
+  return value >= 0x1F1E6 && value <= 0x1F1FF;
+}
+
+bool IsGraphemeExtension(char32_t value) noexcept {
+  return (value >= 0x0300 && value <= 0x036F) ||
+      (value >= 0x1AB0 && value <= 0x1AFF) ||
+      (value >= 0x1DC0 && value <= 0x1DFF) ||
+      (value >= 0x20D0 && value <= 0x20FF) ||
+      (value >= 0xFE00 && value <= 0xFE0F) ||
+      (value >= 0xFE20 && value <= 0xFE2F) ||
+      (value >= 0x1F3FB && value <= 0x1F3FF) ||
+      (value >= 0xE0020 && value <= 0xE007F) ||
+      (value >= 0xE0100 && value <= 0xE01EF);
+}
+
+std::size_t LeadingGraphemeLength(std::u16string_view value) noexcept {
+  if (value.empty()) {
+    return 0;
+  }
+
+  std::size_t first_units = 0;
+  const char32_t first = DecodeCodePoint(value, 0, first_units);
+  std::size_t offset = first_units;
+  if (IsRegionalIndicator(first) && offset < value.size()) {
+    std::size_t next_units = 0;
+    const char32_t next = DecodeCodePoint(value, offset, next_units);
+    if (IsRegionalIndicator(next)) {
+      offset += next_units;
+    }
+  }
+  while (offset < value.size()) {
+    std::size_t units = 0;
+    const char32_t code_point = DecodeCodePoint(value, offset, units);
+    if (IsGraphemeExtension(code_point)) {
+      offset += units;
+      continue;
+    }
+    if (code_point != 0x200D || offset + units >= value.size()) {
+      break;
+    }
+    offset += units;
+    std::size_t joined_units = 0;
+    static_cast<void>(DecodeCodePoint(value, offset, joined_units));
+    offset += joined_units;
+  }
+  return offset;
+}
+
+std::size_t CompletePrefixLength(
+    std::u16string_view value,
+    std::size_t capacity) noexcept {
+  std::size_t offset = 0;
+  while (offset < value.size()) {
+    const std::size_t cluster = LeadingGraphemeLength(value.substr(offset));
+    if (cluster == 0 || cluster > capacity - offset) {
+      break;
+    }
+    offset += cluster;
+    if (offset == capacity) {
+      break;
+    }
+  }
+  return offset;
+}
+
+}  // namespace
 
 void BoundedKeystrokeOverlayText::Assign(
     std::u16string_view value,
     bool force_truncated) noexcept {
-  std::size_t bounded = std::min(value.size(), storage_.size());
-  if (bounded != 0 && value[bounded - 1] >= 0xD800 &&
-      value[bounded - 1] <= 0xDBFF) {
-    --bounded;
-  }
+  const std::size_t bounded = CompletePrefixLength(value, storage_.size());
   if (bounded != 0) {
     std::copy_n(value.begin(), bounded, storage_.begin());
   }
@@ -25,10 +114,9 @@ void BoundedKeystrokeOverlayText::Clear() noexcept {
 }
 
 bool BoundedKeystrokeOverlayText::Append(char16_t value) noexcept {
-  const bool high_surrogate = value >= 0xD800 && value <= 0xDBFF;
-  const bool low_surrogate = value >= 0xDC00 && value <= 0xDFFF;
-  if (size_ != 0 && storage_[size_ - 1] >= 0xD800 &&
-      storage_[size_ - 1] <= 0xDBFF) {
+  const bool high_surrogate = IsHighSurrogate(value);
+  const bool low_surrogate = IsLowSurrogate(value);
+  if (size_ != 0 && IsHighSurrogate(storage_[size_ - 1])) {
     if (low_surrogate && size_ < storage_.size()) {
       storage_[size_++] = value;
       return true;
@@ -40,16 +128,26 @@ bool BoundedKeystrokeOverlayText::Append(char16_t value) noexcept {
     return false;
   }
   if (high_surrogate) {
-    if (size_ + 2 > storage_.size()) {
+    while (size_ + 2 > storage_.size()) {
+      const std::size_t discard = LeadingGraphemeLength(View());
+      if (discard == 0 || discard > size_) {
+        truncated_ = true;
+        return false;
+      }
+      std::move(storage_.begin() + discard, storage_.begin() + size_,
+                storage_.begin());
+      size_ = static_cast<std::uint8_t>(size_ - discard);
       truncated_ = true;
-      return false;
     }
     storage_[size_++] = value;
     return true;
   }
   if (size_ >= storage_.size()) {
+    const std::size_t discard = LeadingGraphemeLength(View());
+    std::move(storage_.begin() + discard, storage_.begin() + size_,
+              storage_.begin());
+    size_ = static_cast<std::uint8_t>(size_ - discard);
     truncated_ = true;
-    return false;
   }
   storage_[size_++] = value;
   return true;
@@ -61,8 +159,7 @@ void BoundedKeystrokeOverlayText::EraseLast(std::size_t count) noexcept {
     return;
   }
   size_ = static_cast<std::uint8_t>(size_ - count);
-  if (size_ != 0 && storage_[size_ - 1] >= 0xD800 &&
-      storage_[size_ - 1] <= 0xDBFF) {
+  if (size_ != 0 && IsHighSurrogate(storage_[size_ - 1])) {
     --size_;
   }
 }
@@ -72,7 +169,7 @@ bool KeystrokeOverlayPreferences::IsValid() const noexcept {
              static_cast<std::uint8_t>(KeystrokeOverlayMotionLevel::Off) &&
       static_cast<std::uint8_t>(fallback_corner) <=
           static_cast<std::uint8_t>(
-              KeystrokeOverlayFallbackCorner::TopLeft) &&
+              KeystrokeOverlayFallbackCorner::TopCenter) &&
       size_percent >= 75 && size_percent <= 150 &&
       opacity_percent >= 25 && opacity_percent <= 100 &&
       hide_delay_milliseconds >= 500 &&
@@ -102,8 +199,30 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
   }
 
   if (event.kind == KeystrokeOverlayEventKind::Token) {
+    if (!event.text.empty()) {
+      const auto snapshot = event.text.View();
+      const std::size_t offset = snapshot.size() > kMaximumOverlayTokens
+          ? snapshot.size() - kMaximumOverlayTokens
+          : 0;
+      const std::size_t count = snapshot.size() - offset;
+      next.tokens.fill(0);
+      if (count != 0) {
+        std::copy_n(snapshot.begin() + offset, count, next.tokens.begin());
+      }
+      next.token_count = count;
+      next.text.Clear();
+      next.truncated = event.text.truncated() || offset != 0;
+      next.visible = count != 0;
+      return next;
+    }
     if (event.token == 0) {
       return next;
+    }
+    if (current.transition != KeystrokeOverlayEventKind::Token) {
+      next.tokens.fill(0);
+      next.token_count = 0;
+      next.text.Clear();
+      next.truncated = false;
     }
     if (next.token_count < kMaximumOverlayTokens) {
       next.tokens[next.token_count++] = event.token;
@@ -119,6 +238,8 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
     return next;
   }
 
+  next.tokens.fill(0);
+  next.token_count = 0;
   next.text = event.text;
   next.truncated = next.text.truncated();
   next.visible = !next.text.empty();
@@ -143,19 +264,57 @@ KeystrokeOverlayMotionDecision ResolveKeystrokeOverlayMotion(
 
   if (context.level == KeystrokeOverlayMotionLevel::Reduced ||
       context.system_reduced_motion) {
-    return {std::chrono::milliseconds(80), false, false};
+    return {std::chrono::milliseconds(120), false, false};
   }
 
   if (context.low_power) {
-    return {std::chrono::milliseconds(70), false, false};
+    return {std::chrono::milliseconds(100), false, false};
   }
 
   if (context.level == KeystrokeOverlayMotionLevel::Adaptive &&
       context.rapid_input) {
-    return {std::chrono::milliseconds(65), true, false};
+    return {std::chrono::milliseconds(110), true, false};
   }
 
-  return {std::chrono::milliseconds(120), true, true};
+  return {std::chrono::milliseconds(200), true, true};
+}
+
+bool ShouldShowKeystrokeOverlayCompositionText(
+    std::u16string_view composition,
+    bool transformed) noexcept {
+  return transformed ||
+      std::any_of(composition.begin(), composition.end(), [](char16_t unit) {
+        return unit > 0x7F;
+      });
+}
+
+bool ShouldClearKeystrokeOverlayComposition(
+    std::uint16_t virtual_key,
+    bool control,
+    bool alt,
+    bool windows) noexcept {
+  if (control || alt || windows) {
+    return true;
+  }
+
+  switch (virtual_key) {
+    case 0x09:  // Tab
+    case 0x0D:  // Enter
+    case 0x1B:  // Escape
+    case 0x21:  // Page Up
+    case 0x22:  // Page Down
+    case 0x23:  // End
+    case 0x24:  // Home
+    case 0x25:  // Left
+    case 0x26:  // Up
+    case 0x27:  // Right
+    case 0x28:  // Down
+    case 0x2D:  // Insert
+    case 0x2E:  // Delete
+      return true;
+    default:
+      return false;
+  }
 }
 
 }  // namespace keyina::windows

@@ -10,8 +10,11 @@ internal static class RuntimeInputProfileTests
     private static readonly byte[] LegacyDefaultVector = Convert.FromHexString(
         "4B4952500224110602030001052000055600055400055A00001B000001000000B6CD5DCA");
 
-    private static readonly byte[] DefaultVector = Convert.FromHexString(
+    private static readonly byte[] PreviousDefaultVector = Convert.FromHexString(
         "4B4952500328110602030001052000055600055400055A00001B0064010000005C84031EE68FA6BC");
+
+    private static readonly byte[] DefaultVector = Convert.FromHexString(
+        "4B4952500428110602030001052000055600055400055A00001B0064010000005C84031EB99701EA");
 
     [KeyinaTest("runtime input profile encodes the exact default cross-language vector")]
     private static void DefaultProfileMatchesExactVector()
@@ -30,6 +33,20 @@ internal static class RuntimeInputProfileTests
         AssertEx.Equal(
             KeystrokeOverlayPreferences.Default,
             RuntimeInputProfileCodec.Decode(LegacyDefaultVector).KeystrokeOverlay);
+        AssertEx.Equal(
+            KeystrokeOverlayPreferences.Default,
+            RuntimeInputProfileCodec.Decode(PreviousDefaultVector).KeystrokeOverlay);
+
+        var previousConfigured = PreviousDefaultVector.ToArray();
+        previousConfigured[26] = 0x39;
+        RewriteChecksum(previousConfigured);
+        var previousOverlay = RuntimeInputProfileCodec.Decode(
+            previousConfigured).KeystrokeOverlay;
+        AssertEx.True(previousOverlay.Enabled, "The version-three overlay enabled bit was lost.");
+        AssertEx.True(previousOverlay.PresentationMode, "The version-three presentation bit was lost.");
+        AssertEx.Equal(
+            KeystrokeOverlayFallbackCorner.TopLeft,
+            previousOverlay.FallbackCorner);
     }
 
     [KeyinaTest("runtime input profile round trips configured state and hotkeys")]
@@ -51,7 +68,7 @@ internal static class RuntimeInputProfileTests
                 SizePercent = 125,
                 OpacityPercent = 80,
                 HideDelayMilliseconds = 1_250,
-                FallbackCorner = KeystrokeOverlayFallbackCorner.TopLeft,
+                FallbackCorner = KeystrokeOverlayFallbackCorner.TopCenter,
                 PresentationMode = true,
             },
             Hotkeys = HotkeyPreferences.Default

@@ -91,33 +91,49 @@ bool KeystrokeOverlayWindow::Initialize(HINSTANCE instance) noexcept {
     dwrite_factory_ = nullptr;
   }
 
-  if (dwrite_factory_ != nullptr) {
-    HRESULT text_result = dwrite_factory_->CreateTextFormat(
-        L"Segoe UI Variable Text",
+  static_cast<void>(EnsureTextFormat(current_dpi_));
+  ApplyAlpha(0);
+  return true;
+}
+
+bool KeystrokeOverlayWindow::EnsureTextFormat(std::uint32_t dpi) noexcept {
+  const std::uint32_t effective_dpi = dpi == 0 ? 96 : dpi;
+  if (text_format_ != nullptr && current_dpi_ == effective_dpi) {
+    return true;
+  }
+  SafeReleaseTyped(text_format_);
+  current_dpi_ = effective_dpi;
+  if (dwrite_factory_ == nullptr) {
+    return false;
+  }
+
+  const float font_size = 18.0F *
+      static_cast<float>(current_dpi_) / 96.0F;
+  HRESULT text_result = dwrite_factory_->CreateTextFormat(
+      L"Segoe UI Variable Text",
+      nullptr,
+      DWRITE_FONT_WEIGHT_SEMI_BOLD,
+      DWRITE_FONT_STYLE_NORMAL,
+      DWRITE_FONT_STRETCH_NORMAL,
+      font_size,
+      L"vi-VN",
+      &text_format_);
+  if (FAILED(text_result)) {
+    text_result = dwrite_factory_->CreateTextFormat(
+        L"Segoe UI",
         nullptr,
         DWRITE_FONT_WEIGHT_SEMI_BOLD,
         DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL,
-        18.0F,
+        font_size,
         L"vi-VN",
         &text_format_);
-    if (FAILED(text_result)) {
-      text_result = dwrite_factory_->CreateTextFormat(
-          L"Segoe UI",
-          nullptr,
-          DWRITE_FONT_WEIGHT_SEMI_BOLD,
-          DWRITE_FONT_STYLE_NORMAL,
-          DWRITE_FONT_STRETCH_NORMAL,
-          18.0F,
-          L"vi-VN",
-          &text_format_);
-    }
-    if (SUCCEEDED(text_result) && text_format_ != nullptr) {
-      text_format_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-      text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    }
   }
-  ApplyAlpha(0);
+  if (FAILED(text_result) || text_format_ == nullptr) {
+    return false;
+  }
+  text_format_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+  text_format_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
   return true;
 }
 
@@ -125,7 +141,8 @@ void KeystrokeOverlayWindow::Present(
     const KeystrokeOverlayState& state,
     const KeystrokeOverlayPlacement& placement,
     const KeystrokeOverlayMotionDecision& motion,
-    const KeystrokeOverlayPreferences& preferences) noexcept {
+    const KeystrokeOverlayPreferences& preferences,
+    std::uint32_t dpi) noexcept {
   if (window_ == nullptr || !state.visible || !placement.bounds.IsValid()) {
     HideAndReleaseTransientState();
     return;
@@ -133,18 +150,27 @@ void KeystrokeOverlayWindow::Present(
 
   preferences_ = preferences;
   motion_ = motion;
+  static_cast<void>(EnsureTextFormat(dpi));
   UpdateDisplayText(state);
   if (display_text_.empty()) {
     HideAndReleaseTransientState();
     return;
   }
 
+  const bool was_visible = visible_;
   const auto& bounds = placement.bounds;
   SetWindowPos(window_, HWND_TOPMOST, bounds.left, bounds.top,
                bounds.Width(), bounds.Height(),
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
   visible_ = true;
-  current_alpha_ = motion.duration.count() > 0 ? 1 : preferences.opacity_percent;
+  current_alpha_ = !was_visible && motion.duration.count() > 0
+      ? 1
+      : preferences.opacity_percent;
+  current_translation_y_ = motion.translate
+      ? static_cast<float>(ScaleKeystrokeOverlayMetric(
+            was_visible ? 4 : 7,
+            current_dpi_))
+      : 0.0F;
   ApplyAlpha(current_alpha_);
   animation_started_tick_ = GetTickCount64();
   animation_active_ = motion.duration.count() > 0;
@@ -165,6 +191,7 @@ void KeystrokeOverlayWindow::HideAndReleaseTransientState() noexcept {
   animation_active_ = false;
   visible_ = false;
   current_alpha_ = 0;
+  current_translation_y_ = 0.0F;
   display_text_.clear();
   ReleaseDeviceResources();
 }
@@ -234,6 +261,25 @@ LRESULT KeystrokeOverlayWindow::HandleMessage(
         render_target_->Resize(D2D1::SizeU(width, height));
       }
       return 0;
+    case WM_DPICHANGED: {
+      const std::uint32_t dpi = HIWORD(w_param) != 0
+          ? static_cast<std::uint32_t>(HIWORD(w_param))
+          : 96;
+      static_cast<void>(EnsureTextFormat(dpi));
+      const auto* suggested = reinterpret_cast<const RECT*>(l_param);
+      if (suggested != nullptr) {
+        SetWindowPos(
+            window_,
+            nullptr,
+            suggested->left,
+            suggested->top,
+            suggested->right - suggested->left,
+            suggested->bottom - suggested->top,
+            SWP_NOACTIVATE | SWP_NOZORDER);
+      }
+      InvalidateRect(window_, nullptr, FALSE);
+      return 0;
+    }
     case WM_TIMER:
       if (w_param == kAnimationTimerId) {
         TickAnimation();
@@ -304,28 +350,65 @@ void KeystrokeOverlayWindow::Render() noexcept {
       DeleteObject(surface);
       SetBkMode(dc, TRANSPARENT);
       SetTextColor(dc, RGB(245, 247, 252));
+      HFONT font = CreateFontW(
+          -ScaleKeystrokeOverlayMetric(18, current_dpi_),
+          0,
+          0,
+          0,
+          FW_SEMIBOLD,
+          FALSE,
+          FALSE,
+          FALSE,
+          DEFAULT_CHARSET,
+          OUT_DEFAULT_PRECIS,
+          CLIP_DEFAULT_PRECIS,
+          CLEARTYPE_QUALITY,
+          DEFAULT_PITCH | FF_DONTCARE,
+          L"Segoe UI");
+      HGDIOBJ previous_font = nullptr;
+      if (font != nullptr) {
+        previous_font = SelectObject(dc, font);
+      }
       DrawTextW(dc,
                 reinterpret_cast<const wchar_t*>(display_text_.data()),
                 static_cast<int>(display_text_.size()),
                 &bounds,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+      if (previous_font != nullptr) {
+        SelectObject(dc, previous_font);
+      }
+      if (font != nullptr) {
+        DeleteObject(font);
+      }
       ReleaseDC(window_, dc);
     }
     return;
   }
   const float width = static_cast<float>(bounds.right - bounds.left);
   const float height = static_cast<float>(bounds.bottom - bounds.top);
-  const float radius = std::clamp(height * 0.24F, 10.0F, 16.0F);
+  const float scale = static_cast<float>(current_dpi_) / 96.0F;
+  const float edge = 0.5F * scale;
+  const float radius = std::clamp(
+      height * 0.24F,
+      10.0F * scale,
+      16.0F * scale);
 
   render_target_->BeginDraw();
   render_target_->Clear(D2D1::ColorF(0, 0.0F));
   const auto rounded = D2D1::RoundedRect(
-      D2D1::RectF(0.5F, 0.5F, width - 0.5F, height - 0.5F),
+      D2D1::RectF(edge, edge, width - edge, height - edge),
       radius, radius);
   render_target_->FillRoundedRectangle(rounded, surface_brush_);
 
-  const auto text_bounds = D2D1::RectF(16.0F, 2.0F, width - 16.0F,
-                                      height - 2.0F);
+  const float horizontal_padding = 16.0F * scale;
+  const float vertical_padding = 2.0F * scale;
+  const auto text_bounds = D2D1::RectF(
+      horizontal_padding,
+      vertical_padding,
+      width - horizontal_padding,
+      height - vertical_padding);
+  render_target_->SetTransform(D2D1::Matrix3x2F::Translation(
+      0.0F, current_translation_y_));
   render_target_->DrawTextW(
       reinterpret_cast<const wchar_t*>(display_text_.data()),
       static_cast<UINT32>(display_text_.size()),
@@ -333,6 +416,7 @@ void KeystrokeOverlayWindow::Render() noexcept {
       text_bounds,
       text_brush_,
       D2D1_DRAW_TEXT_OPTIONS_CLIP);
+  render_target_->SetTransform(D2D1::Matrix3x2F::Identity());
 
   HRESULT result = render_target_->EndDraw();
   if (simulate_device_loss_) {
@@ -359,12 +443,19 @@ void KeystrokeOverlayWindow::TickAnimation() noexcept {
       0.0,
       1.0);
   const double eased = 1.0 - std::pow(1.0 - progress, 3.0);
-  current_alpha_ = static_cast<std::uint8_t>(std::clamp(
-      static_cast<int>(std::lround(
-          eased * static_cast<double>(preferences_.opacity_percent))),
-      1,
-      100));
-  ApplyAlpha(current_alpha_);
+  if (current_alpha_ < preferences_.opacity_percent) {
+    current_alpha_ = static_cast<std::uint8_t>(std::clamp(
+        static_cast<int>(std::lround(
+            eased * static_cast<double>(preferences_.opacity_percent))),
+        1,
+        100));
+    ApplyAlpha(current_alpha_);
+  }
+  current_translation_y_ = motion_.translate
+      ? static_cast<float>((1.0 - eased) *
+            ScaleKeystrokeOverlayMetric(7, current_dpi_))
+      : 0.0F;
+  InvalidateRect(window_, nullptr, FALSE);
   if (progress >= 1.0) {
     KillTimer(window_, kAnimationTimerId);
     animation_active_ = false;

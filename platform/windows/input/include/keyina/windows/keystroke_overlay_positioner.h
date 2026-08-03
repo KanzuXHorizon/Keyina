@@ -37,6 +37,7 @@ struct KeystrokeOverlayPlacementInput {
   int margin{12};
   int stability_threshold{8};
   bool caret_reliable{};
+  bool force_fallback{};
   bool has_last_stable_anchor{};
   bool monitor_changed{};
 };
@@ -47,6 +48,14 @@ struct KeystrokeOverlayPlacement {
   bool used_fallback{};
   bool placed_above{};
 };
+
+[[nodiscard]] int ScaleKeystrokeOverlayMetric(
+    int value_at_96_dpi,
+    std::uint32_t dpi) noexcept;
+
+[[nodiscard]] bool DidKeystrokeOverlayMonitorChange(
+    std::uintptr_t previous_monitor,
+    std::uintptr_t current_monitor) noexcept;
 
 [[nodiscard]] KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(
     const KeystrokeOverlayPlacementInput& input) noexcept;

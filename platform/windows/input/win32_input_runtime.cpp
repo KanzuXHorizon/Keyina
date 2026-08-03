@@ -1170,6 +1170,7 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
       if (reset) {
         ++pointer_reset_count_;
         controller_.OnPointerReset();
+        ClearKeystrokeOverlay();
         pointer_registration_desired_ = false;
         ApplyPointerRegistration();
       }
@@ -1216,6 +1217,7 @@ LRESULT Win32InputRuntime::HandleWindowMessage(
           profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
           controller_.ApplyProfile(profile_);
           RequestPointerRegistration(false);
+          ClearKeystrokeOverlay();
           UpdateTray();
           static_cast<void>(QueueManagedCommand(
               profile_.vietnamese_enabled
@@ -1351,6 +1353,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     }
 
     TypingContext context{};
+    bool typing_context_changed = false;
     {
       NativeCallbackLatencyScope context_latency(
           stage_histogram(NativeCallbackLatencyStage::TypingContext),
@@ -1360,6 +1363,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
     if (key_down) {
       if (last_key_down_context_known_ && last_key_down_context_ != context) {
         ++context_change_count_;
+        typing_context_changed = true;
       }
       last_key_down_context_ = context;
       last_key_down_context_known_ = true;
@@ -1373,6 +1377,9 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       NativeCallbackLatencyScope controller_latency(
           stage_histogram(NativeCallbackLatencyStage::ControllerProcess),
           performance_counter_frequency_);
+      if (typing_context_changed) {
+        ClearKeystrokeOverlay();
+      }
       decision = controller_.Process(event, context);
       if (key_down) {
         RequestSnippetOverlayUpdate();
@@ -1435,6 +1442,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         if (decision.suppress) {
           controller_.Reset();
           RequestPointerRegistration(false);
+          ClearKeystrokeOverlay();
           RequestSnippetOverlayUpdate();
         }
         return 1;
@@ -1442,6 +1450,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       ++failed_injection_count_;
       controller_.Reset();
       RequestPointerRegistration(false);
+      ClearKeystrokeOverlay();
       deferred_clipboard_queue_->CancelProducer();
       return CallNextHookEx(nullptr, code, message, data);
     }
@@ -1467,6 +1476,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         ++failed_injection_count_;
         controller_.Reset();
         RequestPointerRegistration(false);
+        ClearKeystrokeOverlay();
         return CallNextHookEx(nullptr, code, message, data);
       }
       ++successful_injection_count_;
@@ -1495,6 +1505,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
         ++failed_injection_count_;
         controller_.Reset();
         RequestPointerRegistration(false);
+        ClearKeystrokeOverlay();
         deferred_clipboard_queue_->CancelProducer();
         return CallNextHookEx(nullptr, code, message, data);
       }
@@ -1505,6 +1516,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       ++failed_injection_count_;
       controller_.Reset();
       RequestPointerRegistration(false);
+      ClearKeystrokeOverlay();
       return CallNextHookEx(nullptr, code, message, data);
     }
 
@@ -1532,6 +1544,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
       ++failed_injection_count_;
       controller_.Reset();
       RequestPointerRegistration(false);
+      ClearKeystrokeOverlay();
       external_command_queue_.CancelProducer();
       return CallNextHookEx(nullptr, code, message, data);
     }
@@ -1541,6 +1554,7 @@ LRESULT Win32InputRuntime::HandleKeyboardEvent(
   } catch (...) {
     controller_.Reset();
     RequestPointerRegistration(false);
+    ClearKeystrokeOverlay();
     return CallNextHookEx(nullptr, code, message, data);
   }
 }
@@ -2000,6 +2014,7 @@ void Win32InputRuntime::ProcessToggleGesture(
       profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
       controller_.ApplyProfile(profile_);
       RequestPointerRegistration(false);
+      ClearKeystrokeOverlay();
       RequestTrayUpdate();
       static_cast<void>(QueueManagedCommand(
           profile_.vietnamese_enabled
@@ -2039,6 +2054,14 @@ void Win32InputRuntime::RequestKeystrokeOverlayUpdate() noexcept {
   }
 }
 
+void Win32InputRuntime::ClearKeystrokeOverlay() noexcept {
+  keystroke_overlay_composition_.Clear();
+  KeystrokeOverlayEvent event{};
+  event.kind = KeystrokeOverlayEventKind::Cleared;
+  event.generation = ++keystroke_overlay_generation_;
+  PublishKeystrokeOverlayEvent(event);
+}
+
 void Win32InputRuntime::SuppressKeystrokeOverlay() noexcept {
   keystroke_overlay_composition_.Clear();
   KeystrokeOverlayEvent event{};
@@ -2067,7 +2090,12 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     SuppressKeystrokeOverlay();
     return;
   }
-  if (event.control || event.alt || event.windows) {
+  if (ShouldClearKeystrokeOverlayComposition(
+          event.virtual_key,
+          event.control,
+          event.alt,
+          event.windows)) {
+    ClearKeystrokeOverlay();
     return;
   }
 
@@ -2097,7 +2125,7 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     update.kind = keystroke_overlay_composition_.empty()
                       ? KeystrokeOverlayEventKind::Cleared
                       : KeystrokeOverlayEventKind::CompositionUpdated;
-    update.SetText(keystroke_overlay_composition_.View());
+    update.text = keystroke_overlay_composition_;
     update.generation = ++keystroke_overlay_generation_;
     PublishKeystrokeOverlayEvent(update);
     return;
@@ -2115,7 +2143,7 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     if (!keystroke_overlay_composition_.empty()) {
       KeystrokeOverlayEvent committed{};
       committed.kind = KeystrokeOverlayEventKind::CompositionCommitted;
-      committed.SetText(keystroke_overlay_composition_.View());
+      committed.text = keystroke_overlay_composition_;
       committed.generation = ++keystroke_overlay_generation_;
       PublishKeystrokeOverlayEvent(committed);
       keystroke_overlay_composition_.Clear();
@@ -2138,16 +2166,20 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
     append_unit(static_cast<char16_t>(event.character));
   }
 
+  const auto composition = keystroke_overlay_composition_.View();
+  const bool show_composed_text =
+      ShouldShowKeystrokeOverlayCompositionText(
+          composition,
+          decision.suppress);
+
   KeystrokeOverlayEvent update{};
-  update.kind = decision.suppress
+  update.kind = show_composed_text
                     ? KeystrokeOverlayEventKind::CompositionUpdated
                     : KeystrokeOverlayEventKind::Token;
   update.token = event.character <= 0xFFFF
                      ? static_cast<char16_t>(event.character)
                      : 0;
-  if (decision.suppress) {
-    update.SetText(keystroke_overlay_composition_.View());
-  }
+  update.text = keystroke_overlay_composition_;
   update.generation = ++keystroke_overlay_generation_;
   PublishKeystrokeOverlayEvent(update);
 }
@@ -2155,23 +2187,16 @@ void Win32InputRuntime::UpdateKeystrokeOverlayComposition(
 KeystrokeOverlayPlacement
 Win32InputRuntime::ResolveKeystrokeOverlayPlacementForCurrentContext() noexcept {
   KeystrokeOverlayPlacementInput input{};
-  input.overlay_size.width =
-      (120 + static_cast<int>(std::min<std::size_t>(
-                 32, std::max(keystroke_overlay_state_.text.size(),
-                              keystroke_overlay_state_.token_count))) * 11) *
-      profile_.keystroke_overlay.size_percent / 100;
-  input.overlay_size.height =
-      56 * profile_.keystroke_overlay.size_percent / 100;
   input.fallback_corner = profile_.keystroke_overlay.fallback_corner;
-  input.margin = 12;
-  input.stability_threshold = 8;
+  input.force_fallback = profile_.keystroke_overlay.presentation_mode;
   input.has_last_stable_anchor = keystroke_overlay_has_stable_anchor_;
   input.last_stable_anchor = keystroke_overlay_stable_anchor_;
 
+  HWND anchor_window = nullptr;
   GUITHREADINFO gui{};
   gui.cbSize = sizeof(gui);
   if (GetGUIThreadInfo(0, &gui) != FALSE) {
-    HWND anchor_window = gui.hwndCaret != nullptr ? gui.hwndCaret : gui.hwndFocus;
+    anchor_window = gui.hwndCaret != nullptr ? gui.hwndCaret : gui.hwndFocus;
     POINT top_left{gui.rcCaret.left, gui.rcCaret.top};
     POINT bottom_right{gui.rcCaret.right, gui.rcCaret.bottom};
     if (anchor_window != nullptr &&
@@ -2183,6 +2208,27 @@ Win32InputRuntime::ResolveKeystrokeOverlayPlacementForCurrentContext() noexcept 
     }
   }
 
+  std::uint32_t dpi = 96;
+  if (anchor_window != nullptr) {
+    const UINT window_dpi = GetDpiForWindow(anchor_window);
+    if (window_dpi != 0) {
+      dpi = window_dpi;
+    }
+  }
+  keystroke_overlay_dpi_ = dpi;
+  const int content_units = static_cast<int>(std::min<std::size_t>(
+      32,
+      std::max(keystroke_overlay_state_.text.size(),
+               keystroke_overlay_state_.token_count)));
+  input.overlay_size.width =
+      ScaleKeystrokeOverlayMetric(120 + content_units * 11, dpi) *
+      profile_.keystroke_overlay.size_percent / 100;
+  input.overlay_size.height =
+      ScaleKeystrokeOverlayMetric(56, dpi) *
+      profile_.keystroke_overlay.size_percent / 100;
+  input.margin = ScaleKeystrokeOverlayMetric(12, dpi);
+  input.stability_threshold = ScaleKeystrokeOverlayMetric(8, dpi);
+
   POINT monitor_point{};
   if (input.caret_reliable) {
     monitor_point = {input.caret.left, input.caret.top};
@@ -2190,6 +2236,9 @@ Win32InputRuntime::ResolveKeystrokeOverlayPlacementForCurrentContext() noexcept 
     monitor_point = {0, 0};
   }
   const HMONITOR monitor = MonitorFromPoint(monitor_point, MONITOR_DEFAULTTONEAREST);
+  input.monitor_changed = DidKeystrokeOverlayMonitorChange(
+      reinterpret_cast<std::uintptr_t>(keystroke_overlay_monitor_),
+      reinterpret_cast<std::uintptr_t>(monitor));
   MONITORINFO monitor_info{};
   monitor_info.cbSize = sizeof(monitor_info);
   if (GetMonitorInfoW(monitor, &monitor_info) != FALSE) {
@@ -2207,6 +2256,7 @@ Win32InputRuntime::ResolveKeystrokeOverlayPlacementForCurrentContext() noexcept 
   if (placement.bounds.IsValid()) {
     keystroke_overlay_stable_anchor_ = placement.stable_anchor;
     keystroke_overlay_has_stable_anchor_ = !placement.used_fallback;
+    keystroke_overlay_monitor_ = monitor;
   }
   return placement;
 }
@@ -2246,7 +2296,8 @@ void Win32InputRuntime::UpdateKeystrokeOverlay() noexcept {
       keystroke_overlay_state_,
       placement,
       ResolveKeystrokeOverlayMotion(motion_context),
-      profile_.keystroke_overlay);
+      profile_.keystroke_overlay,
+      keystroke_overlay_dpi_);
 
   if (keystroke_overlay_hide_timer_ != 0) {
     KillTimer(window_, keystroke_overlay_hide_timer_);
@@ -2685,6 +2736,7 @@ void Win32InputRuntime::HandleDeferredClipboardInjections() noexcept {
             result == TargetInjectionResult::FailedBeforeMutation;
         controller_.Reset();
         RequestPointerRegistration(false);
+        ClearKeystrokeOverlay();
         RequestSnippetOverlayUpdate();
         if (pressed_keys_.Get(item->source_virtual_key)) {
           owned_text_keys_.Set(item->source_virtual_key, true);
@@ -2829,6 +2881,7 @@ void Win32InputRuntime::ExecuteSnippetAction(
       profile_.vietnamese_enabled = !profile_.vietnamese_enabled;
       controller_.ApplyProfile(profile_);
       RequestPointerRegistration(false);
+      ClearKeystrokeOverlay();
       UpdateTray();
       static_cast<void>(QueueManagedCommand(
           profile_.vietnamese_enabled
@@ -3230,6 +3283,7 @@ void Win32InputRuntime::ReloadProfileIfChanged() noexcept {
   toggle_chord_active_ = false;
   toggle_chord_contaminated_ = false;
   RequestPointerRegistration(false);
+  ClearKeystrokeOverlay();
   UpdateTray();
 }
 

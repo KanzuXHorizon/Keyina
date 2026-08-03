@@ -18,6 +18,25 @@ bool OpenClipboardForTest() noexcept {
   return false;
 }
 
+bool GetOleClipboardForTest(IDataObject** data_object) noexcept {
+  if (data_object == nullptr) {
+    return false;
+  }
+  *data_object = nullptr;
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    const HRESULT result = OleGetClipboard(data_object);
+    if (SUCCEEDED(result)) {
+      return true;
+    }
+    if (*data_object != nullptr) {
+      (*data_object)->Release();
+      *data_object = nullptr;
+    }
+    Sleep(5);
+  }
+  return false;
+}
+
 class ClipboardRestoreGuard {
  public:
   explicit ClipboardRestoreGuard(
@@ -26,7 +45,7 @@ class ClipboardRestoreGuard {
     const HRESULT initialized = OleInitialize(nullptr);
     ole_initialized_ = SUCCEEDED(initialized);
     if (ole_initialized_) {
-      ready_ = SUCCEEDED(OleGetClipboard(&previous_));
+      ready_ = GetOleClipboardForTest(&previous_);
     }
   }
 
@@ -208,7 +227,7 @@ KEYINA_TEST(private_clipboard_data_object_advertises_privacy_formats) {
   open_guard.Close();
 
   IDataObject* inner = nullptr;
-  KEYINA_EXPECT_TRUE(SUCCEEDED(OleGetClipboard(&inner)) && inner != nullptr);
+  KEYINA_EXPECT_TRUE(GetOleClipboardForTest(&inner) && inner != nullptr);
   IDataObject* wrapper =
       keyina::windows::CreatePrivateClipboardDataObject(inner, formats);
   inner->Release();

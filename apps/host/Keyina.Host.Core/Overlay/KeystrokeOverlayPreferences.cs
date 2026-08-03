@@ -14,6 +14,8 @@ public enum KeystrokeOverlayFallbackCorner
     BottomLeft,
     TopRight,
     TopLeft,
+    BottomCenter,
+    TopCenter,
 }
 
 public sealed record KeystrokeOverlayPreferences(

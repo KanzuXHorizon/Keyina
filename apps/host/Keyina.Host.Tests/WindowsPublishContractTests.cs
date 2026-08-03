@@ -36,6 +36,43 @@ internal static class WindowsPublishContractTests
         }
     }
 
+    [KeyinaTest("native resident declares per-monitor-v2 DPI awareness")]
+    private static void NativeResidentDeclaresPerMonitorV2DpiAwareness()
+    {
+        var manifestPath = Path.Combine(
+            RepositoryPaths.Root,
+            "platform",
+            "windows",
+            "input",
+            "KeyinaInput.manifest");
+        AssertEx.True(File.Exists(manifestPath),
+            "Native resident manifest was missing.");
+
+        var manifest = XDocument.Load(manifestPath);
+        var settings = manifest.Descendants()
+            .Where(element => element.Name.LocalName is "dpiAware" or "dpiAwareness")
+            .Select(element => element.Value.Trim())
+            .ToArray();
+        AssertEx.True(
+            settings.Contains("true/pm", StringComparer.OrdinalIgnoreCase),
+            "Legacy Windows DPI awareness fallback was not per-monitor aware.");
+        AssertEx.True(
+            settings.Any(value => value.Contains(
+                "PerMonitorV2",
+                StringComparison.OrdinalIgnoreCase)),
+            "Native resident did not request PerMonitorV2 DPI awareness.");
+
+        var cmake = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "platform",
+            "windows",
+            "input",
+            "CMakeLists.txt"));
+        AssertEx.True(
+            cmake.Contains("KeyinaInput.manifest", StringComparison.Ordinal),
+            "Native resident build did not embed its DPI manifest.");
+    }
+
     [KeyinaTest("Windows release pipeline packages and verifies the native resident")]
     private static void ReleasePipelineContainsNativeResidentContract()
     {
@@ -78,6 +115,26 @@ internal static class WindowsPublishContractTests
                 verifyScript.Contains(required, StringComparison.Ordinal),
                 $"Release verification omitted native resident contract token: {required}.");
         }
+    }
+
+    [KeyinaTest("release restores managed dependencies before cleaning outputs")]
+    private static void ReleaseRestoresBeforeClean()
+    {
+        var releaseScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-release.ps1"));
+        var restore = releaseScript.IndexOf(
+            "@('restore', 'Keyina.slnx')",
+            StringComparison.Ordinal);
+        var clean = releaseScript.IndexOf(
+            "@('clean', 'Keyina.slnx', '-c', 'Release')",
+            StringComparison.Ordinal);
+
+        AssertEx.True(
+            restore >= 0 && clean > restore,
+            "Release must restore managed packages and runtime packs before dotnet clean.");
     }
 
     [KeyinaTest("release packaging publishes from an isolated staging directory")]

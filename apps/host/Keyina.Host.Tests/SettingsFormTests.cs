@@ -112,12 +112,15 @@ internal static class SettingsFormTests
             "DeepL Free privacy warning must mention sensitive content.");
 
         var vietnamese = (CheckBox)form.Controls.Find("vietnameseToggle", true).Single();
-        var traditional = (CheckBox)form.Controls.Find("traditionalTonePlacementToggle", true).Single();
+        var modernTonePlacement = (CheckBox)form.Controls.Find(
+            "traditionalTonePlacementToggle", true).Single();
         var quickTelex = (CheckBox)form.Controls.Find("quickTelexLettersToggle", true).Single();
         var standaloneW = (CheckBox)form.Controls.Find("standaloneWToUHornToggle", true).Single();
         var startup = (CheckBox)form.Controls.Find("startupToggle", true).Single();
         AssertEx.True(vietnamese.Checked, "Vietnamese input should be enabled in the sample state.");
-        AssertEx.False(traditional.Checked, "Modern tone placement should be the safe default.");
+        AssertEx.True(
+            modernTonePlacement.Checked,
+            "Modern tone placement should be the safe default.");
         AssertEx.False(quickTelex.Checked, "Quick Telex brackets should be opt in.");
         AssertEx.True(standaloneW.Checked, "Standalone W should preserve the existing default behavior.");
         AssertEx.True(startup.Checked, "Startup should be enabled in the sample state.");
@@ -208,7 +211,7 @@ internal static class SettingsFormTests
             SizePercent: 125,
             OpacityPercent: 80,
             HideDelayMilliseconds: 1_400,
-            FallbackCorner: KeystrokeOverlayFallbackCorner.TopLeft,
+            FallbackCorner: KeystrokeOverlayFallbackCorner.TopCenter,
             PresentationMode: true,
             PerKeySoundEnabled: true,
             SoundVolumePercent: 35);
@@ -220,10 +223,12 @@ internal static class SettingsFormTests
             Location = new Point(-1200, 100),
         };
 
+        var positionSelector = (ComboBox)form.Controls.Find(
+            "keystrokeOverlayCorner", true).Single();
+        AssertEx.Equal(6, positionSelector.Items.Count);
         AssertEx.Equal(
-            (int)KeystrokeOverlayFallbackCorner.TopLeft,
-            ((ComboBox)form.Controls.Find(
-                "keystrokeOverlayCorner", true).Single()).SelectedIndex);
+            (int)KeystrokeOverlayFallbackCorner.TopCenter,
+            positionSelector.SelectedIndex);
         ((NumericUpDown)form.Controls.Find(
             "keystrokeOverlaySize", true).Single()).Value = 130;
 
@@ -231,7 +236,7 @@ internal static class SettingsFormTests
         AssertEx.Equal(130, saved[^1].SizePercent);
         AssertEx.Equal(KeystrokeOverlayMotionLevel.Reduced, saved[^1].Motion);
         AssertEx.Equal(
-            KeystrokeOverlayFallbackCorner.TopLeft,
+            KeystrokeOverlayFallbackCorner.TopCenter,
             saved[^1].FallbackCorner);
         AssertEx.True(
             saved[^1].PresentationMode,
@@ -242,14 +247,19 @@ internal static class SettingsFormTests
         AssertEx.Equal(35, saved[^1].SoundVolumePercent);
 
         form.Show();
+        var previewText = (Label)form.Controls.Find(
+            "keystrokeOverlayPreviewText", true).Single();
         InvokeClick((Button)form.Controls.Find(
             "previewKeystrokeOverlay", true).Single());
         Application.DoEvents();
-        AssertEx.Equal(1, previews);
-        AssertEx.Equal(
-            "nguyễn",
-            ((Label)form.Controls.Find(
-                "keystrokeOverlayPreviewText", true).Single()).Text);
+        AssertEx.Equal(0, previews);
+        AssertEx.True(
+            previewText.Text.Contains("n   g", StringComparison.Ordinal),
+            "Visual typing preview skipped the observable keystroke phase.");
+        AssertEx.True(
+            PumpMessagesUntil(() => previews == 1),
+            "Visual typing preview did not finish its bounded animation.");
+        AssertEx.Equal("nguyễn", previewText.Text);
     }
 
     [KeyinaTest("credential setup opens and focuses the requested secure input")]
@@ -781,6 +791,24 @@ internal static class SettingsFormTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private static bool PumpMessagesUntil(
+        Func<bool> condition,
+        int timeoutMilliseconds = 1_000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMilliseconds;
+        while (Environment.TickCount64 < deadline)
+        {
+            Application.DoEvents();
+            if (condition())
+            {
+                return true;
+            }
+            Thread.Sleep(10);
+        }
+        Application.DoEvents();
+        return condition();
     }
 
     private static void InvokeClick(Button button)

@@ -47,6 +47,7 @@ bool ApplyShape(VietnameseLetter& letter, VowelShape shape) noexcept {
 }
 
 bool HasVowelAfter(std::u32string_view visible, std::size_t index) noexcept;
+bool HasSeparatedVowelRuns(std::u32string_view visible) noexcept;
 std::optional<Tone> ToneFromKey(char32_t key) noexcept;
 
 bool IsIrrecoverablyInvalid(SyllableError error) noexcept {
@@ -185,7 +186,7 @@ bool ApplyRepeatedVowelModifier(std::u32string& visible,
     if (!ReplaceLetter(visible, index, *letter)) {
       return false;
     }
-    if (index + 1 < visible.size()) {
+    if (index + 1 < visible.size() || HasSeparatedVowelRuns(visible)) {
       const auto analysis = AnalyzeVietnameseSyllable(visible);
       if (analysis.status != SyllableStatus::Valid &&
           analysis.error != SyllableError::InvalidTone) {
@@ -550,6 +551,29 @@ TextEditView Engine::ProcessView(const KeyEvent& event) {
     return {};
   }
   if (event.kind == KeyKind::CommitBoundary) {
+    // A checked coda is only valid with an acute or dot tone. Keep the shaped
+    // vowel visible while the user may still type that final tone key, but if
+    // the token ends at a real separator, restore its canonical literal keys.
+    // This lets `heet` progress through `hêt` to `hết` without turning an
+    // unfinished English `meet` into committed Vietnamese-looking text.
+    if (config_.restore_invalid_word && !raw_keys_.empty() &&
+        event.character != U'\0' && visible_text_ != literal_text_buffer_) {
+      const auto analysis = AnalyzeVietnameseSyllable(visible_text_);
+      if (analysis.status == SyllableStatus::Impossible &&
+          analysis.error == SyllableError::InvalidTone) {
+        const std::size_t erase_codepoints = visible_text_.size();
+        edit_buffer_.assign(literal_text_buffer_);
+        edit_buffer_.push_back(event.character);
+        ResetCompositionState();
+        return {
+            erase_codepoints,
+            edit_buffer_,
+            true,
+            false,
+        };
+      }
+    }
+
     // Ordinary separators only commit the current composition. Technical
     // separators are different: together with the raw keys they can reveal
     // that the token is an identifier, path, URL, email, version, or shell
@@ -672,6 +696,7 @@ void Engine::BuildVisibleForRaw() {
           HasSuspiciousToneBeforeNewVowel(raw_keys_);
       const bool repeated_ascii_vowel_before_trailing_character =
           analysis.status != SyllableStatus::Valid &&
+          analysis.error != SyllableError::InvalidTone &&
           HasRepeatedAsciiVowelBeforeTrailingCharacter(raw_keys_);
       const bool invalid_open_nucleus_after_tone =
           raw_keys_.size() >= 2 && HasTrailingToneKey(raw_keys_) &&
