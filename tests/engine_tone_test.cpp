@@ -202,6 +202,30 @@ KEYINA_TEST(repeated_tone_key_escapes_to_literal_telex) {
   }
 }
 
+KEYINA_TEST(latin_word_lossless_preserves_repeated_s) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"lossless"),
+                   std::u32string{U"lossless"});
+}
+
+KEYINA_TEST(latin_word_classless_preserves_repeated_s) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"classless"),
+                   std::u32string{U"classless"});
+}
+
+KEYINA_TEST(latin_word_assessment_preserves_repeated_s) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"assessment"),
+                   std::u32string{U"assessment"});
+}
+
 KEYINA_TEST(tone_key_without_a_vowel_remains_literal) {
   keyina::Engine engine;
   KEYINA_EXPECT_EQ(TypeSequence(engine, U"s"), std::u32string{U"s"});

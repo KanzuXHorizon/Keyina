@@ -38,7 +38,7 @@ Required on Windows:
 - .NET SDK specified by `global.json`.
 - Python 3 for vector and benchmark validation scripts.
 
-Configure and verify the native Debug build:
+Configure and verify the native Debug build. The default registry excludes foreground/`SendInput` tests so normal local verification does not steal focus or alter the active keyboard/cursor session:
 
 ```powershell
 cmake --preset windows-msvc-debug
@@ -58,7 +58,7 @@ dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-buil
 dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Debug --no-build -- --hotkey-self-test
 ```
 
-Before submitting performance-sensitive changes, also run the Release build and benchmarks documented in [README.md](README.md).
+Before submitting performance-sensitive changes, also run the Release build and benchmarks documented in [README.md](README.md). Desktop-interactive native tests require `-DKEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS=ON` and must run only on an idle disposable desktop or isolated CI runner.
 
 ## Change workflow
 

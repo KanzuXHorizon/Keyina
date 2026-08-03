@@ -1,5 +1,7 @@
 # Core Typing Correctness, Latency, Compatibility, and UX Design
 
+> **Current behavior note (2026-08-03):** Backspace recovery in this historical design refers to the core-engine oracle. Current product input paths reset composition and pass physical Backspace through, so one visible character is deleted without tone-key rollback.
+
 ## Goal
 
 Make Keyina's default native typing path reliably correct for Vietnamese Telex, mixed Vietnamese/English content, long sentences, complex Unicode, burst typing, Backspace recovery, and real applications while keeping resident CPU, memory, handles, and background activity tightly bounded.

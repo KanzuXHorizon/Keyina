@@ -78,9 +78,9 @@ The older Windows Text Services Framework implementation remains optional behind
 - Telex letter modifiers and tone keys.
 - Modern and traditional tone placement.
 - Vietnamese syllable validation with flexible recovery for practical typing.
-- Exact raw-key rollback and Backspace reconstruction.
+- Physical Backspace resets active Telex state and passes through to the target, so it deletes one visible character instead of removing a tone or vowel-shape modifier.
 - Bounded active composition and UTF-32 to validated UTF-16 translation.
-- Context transitions that recover literal identifiers, paths, URLs, and mixed-language tokens.
+- Context transitions that recover literal identifiers, paths, URLs, mixed-language tokens, and repeated Latin `ss` sequences such as `loss`, `lossless`, and `assessment`.
 - Native unit, invariant, integration, golden-vector, and latency tests.
 
 ### Windows runtime and companion
@@ -152,11 +152,13 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts/windows/verify-release.ps1
 ```
 
-Artifacts are written under `artifacts/release/<version>/`. Signing is fail-closed when `-Sign -RequireSignature` is used. Certificate-store and PFX configuration, silent installation, upgrade behavior, checksums, and versioning are documented in [`docs/releasing.md`](docs/releasing.md).
+Artifacts are written under `artifacts/release/<version>/`. Local release builds skip desktop-interactive tests by default; use `-RunDesktopInteractiveTests` only on an idle disposable desktop. Signing is fail-closed when `-Sign -RequireSignature` is used. Certificate-store and PFX configuration, silent installation, upgrade behavior, checksums, and versioning are documented in [`docs/releasing.md`](docs/releasing.md).
 
 ## Verification lanes
 
 ### Native Debug and Release
+
+The default local CTest registry excludes tests that require foreground activation or real `SendInput`. These commands do not move the cursor, steal focus, or inject keyboard input into the active desktop.
 
 ```powershell
 cmake --preset windows-msvc-debug
@@ -169,6 +171,16 @@ ctest --preset windows-msvc-release --output-on-failure
 
 python tools/check_vectors.py
 python tools/test_compare_benchmark.py
+```
+
+Desktop-interactive native tests are opt-in and intended for an idle disposable desktop or CI runner. They restore the previous foreground control and cursor position on every exit path, and clean up partially injected modifier or mouse-button state:
+
+```powershell
+cmake --preset windows-msvc-release `
+  -DKEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS=ON
+cmake --build --preset windows-msvc-release
+ctest --preset windows-msvc-release `
+  -L interactive-desktop --output-on-failure
 ```
 
 ### Host, speech, resources, and benchmarks
@@ -185,7 +197,6 @@ dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-bu
 dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build
 
 .\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --self-test
-.\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --typing-self-test
 .\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --resource-self-test
 .\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --tray-resource-self-test
 .\build\windows-msvc-release\platform\windows\input\Release\KeyinaInput.exe --profile-reload-self-test

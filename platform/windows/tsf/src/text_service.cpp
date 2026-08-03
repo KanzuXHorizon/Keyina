@@ -744,16 +744,13 @@ HRESULT TextService::ApplyRoute(ITfContext* context,
     return InsertBoundary(context, edit_cookie, route.character);
   }
 
-  if (route.kind != KeyRouteKind::Character &&
-      route.kind != KeyRouteKind::Backspace) {
+  if (route.kind != KeyRouteKind::Character) {
     return S_FALSE;
   }
 
   const std::u32string previous_visible{engine_.VisibleText()};
-  const KeyEvent event = route.kind == KeyRouteKind::Backspace
-                             ? KeyEvent{KeyKind::Backspace}
-                             : KeyEvent{KeyKind::Character, route.character};
-  const TextEdit edit = engine_.Process(event);
+  const TextEdit edit = engine_.Process(
+      KeyEvent{KeyKind::Character, route.character});
   if (!edit.consumed) {
     return S_FALSE;
   }

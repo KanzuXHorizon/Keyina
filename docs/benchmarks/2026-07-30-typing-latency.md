@@ -1,5 +1,7 @@
 # Typing latency optimization report — 2026-07-30
 
+> **Current behavior note (2026-08-03):** Backspace reconstruction measurements in this historical report cover the reusable core-engine primitive. Shipped native, managed, and optional TSF input paths now reset composition and pass physical Backspace through so it deletes one visible character rather than a Telex modifier.
+
 ## Scope
 
 This report records the local evidence for the first Keyina extreme-optimization slice:

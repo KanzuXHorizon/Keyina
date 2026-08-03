@@ -57,7 +57,7 @@ Literal spaces, tabs, and newlines are forbidden in the script field because the
 | `{SPACE}` | Commit the active composition, then pass through U+0020. |
 | `{TAB}` | Commit the active composition, then pass through U+0009. |
 | `{ENTER}` | Commit the active composition, then pass through U+000A. |
-| `{BS}` | Physical Backspace owned by the active engine composition. |
+| `{BS}` | Internal core-engine rollback event used only by the deterministic oracle; shipped input backends do not map physical Backspace to this token. |
 | `{RESET}` | Reset internal composition without editing external text. |
 | `{B:XXXX}` | Commit boundary followed by the specified valid Unicode scalar. |
 | `{L:XXXX}` | Reset the engine, then insert the specified valid scalar literally outside Telex. |
@@ -79,9 +79,9 @@ Every event-script replay verifies:
 - final external text, raw keys, and visible text match exactly;
 - diagnostics report the first differing Unicode scalar without logging arbitrary user content.
 
-The generated mixed-language stream replays more than 2,000 physical events with no sleeps, desktop input, network access, or timing assumptions.
+The generated mixed-language stream replays more than 2,000 physical events with no sleeps, desktop input, network access, or timing assumptions. The corpus includes repeated-`s` Latin words (`loss`, `lossless`, `classless`, and `assessment`) while retaining the short Telex escape contract `ass` → `as`.
 
-## Backspace reconstruction
+## Core-engine Backspace reconstruction oracle
 
 Every checked-in golden raw sequence within the active-key bound is tested in both modes:
 
@@ -90,9 +90,9 @@ restore_invalid_word = false
 restore_invalid_word = true
 ```
 
-After each Backspace, the existing engine state and visible text must equal a fresh engine replay of the remaining raw prefix. This checks every prefix rather than a small set of final words.
+After each internal `{BS}` event, the existing engine state and visible text must equal a fresh engine replay of the remaining raw prefix. This checks the reusable core primitive independently from user-facing delivery behavior.
 
-A boundary belongs to the resident controller, not the engine. The engine never claims text committed before a boundary. Controller tests separately cover deleting a boundary and restoring the previously committed composition.
+Physical Backspace in the native resident, managed fallback, and optional TSF path resets active composition and passes through to the target application. The target therefore deletes one visible character; the controller does not restore a previously committed composition or reinterpret Backspace as removal of a Telex modifier.
 
 ## Tone placement
 
@@ -105,7 +105,7 @@ The sentence corpus contains paired Modern and Traditional cases for the same ph
 3. Add the smallest test and observe it fail for the intended reason.
 4. Confirm the expected spelling and tone placement independently.
 5. Fix the earliest incorrect implementation boundary.
-6. Run focused tests, full native tests, Release benchmarks, and resource probes.
+6. Run focused tests and the default non-interactive native/managed suites. Enable `KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS=ON` only on an idle disposable desktop or isolated CI runner before running foreground/`SendInput` probes.
 7. Never widen a timeout, queue, or threshold to hide a correctness failure.
 
 Real application compatibility is a separate release matrix. Passing this corpus proves deterministic engine/controller behavior, not universal compatibility with every third-party text stack.

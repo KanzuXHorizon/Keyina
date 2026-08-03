@@ -137,6 +137,73 @@ internal static class WindowsPublishContractTests
             "Release must restore managed packages and runtime packs before dotnet clean.");
     }
 
+    [KeyinaTest("desktop interactive native tests are opt in locally and explicit in CI")]
+    private static void DesktopInteractiveTestsAreExplicit()
+    {
+        var rootCmake = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "CMakeLists.txt"));
+        var inputCmake = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "platform",
+            "windows",
+            "input",
+            "CMakeLists.txt"));
+        var ciWorkflow = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            ".github",
+            "workflows",
+            "ci.yml"));
+        var releaseWorkflow = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            ".github",
+            "workflows",
+            "release.yml"));
+        var releaseScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-release.ps1"));
+        var verifyScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "verify-release.ps1"));
+
+        AssertEx.True(
+            rootCmake.Contains(
+                "KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS",
+                StringComparison.Ordinal) &&
+            rootCmake.Contains(
+                "foreground focus and SendInput\"\n  OFF",
+                StringComparison.Ordinal),
+            "Interactive desktop CMake option is not default-off.");
+        AssertEx.True(
+            inputCmake.Contains(
+                "if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)",
+                StringComparison.Ordinal) &&
+            inputCmake.Contains(
+                "interactive-desktop",
+                StringComparison.Ordinal),
+            "Desktop tests are not conditionally registered and labeled.");
+        AssertEx.True(
+            ciWorkflow.Contains(
+                "-DKEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS=ON",
+                StringComparison.Ordinal),
+            "CI does not explicitly enable desktop-interactive tests.");
+        AssertEx.True(
+            releaseWorkflow.Contains(
+                "-RunDesktopInteractiveTests",
+                StringComparison.Ordinal) &&
+            releaseScript.Contains(
+                "desktopInteractiveTestsEnabled",
+                StringComparison.Ordinal) &&
+            verifyScript.Contains(
+                "desktopInteractiveTestsEnabled",
+                StringComparison.Ordinal),
+            "Release build or verification does not explicitly opt into desktop tests.");
+    }
+
     [KeyinaTest("release packaging publishes from an isolated staging directory")]
     private static void ReleasePackagingUsesStagingDirectory()
     {

@@ -111,10 +111,10 @@ internal static class VietnameseKeyboardHookTests
             native);
         hook.Start(enabledInitially: true);
 
-        Type(native, "user research tele fix hardcode harrdcode guitarrist ");
+        Type(native, "user research tele fix lossless assessment hardcode harrdcode guitarrist ");
 
         AssertEx.Equal(
-            "user research tele fix hardcode hardcode guitarist ",
+            "user research tele fix lossless assessment hardcode hardcode guitarist ",
             injector.Text);
     }
 
@@ -384,8 +384,8 @@ internal static class VietnameseKeyboardHookTests
         AssertEx.Equal("TIẾNG", injector.Text);
     }
 
-    [KeyinaTest("resident hook reconstructs Telex state after Backspace")]
-    private static void BackspaceReconstructsComposition()
+    [KeyinaTest("resident hook lets Backspace delete the visible character instead of a Telex modifier")]
+    private static void BackspaceDeletesVisibleCharacter()
     {
         var native = new FakeHookNativeApi();
         var injector = new TextModelInjector();
@@ -396,12 +396,11 @@ internal static class VietnameseKeyboardHookTests
             native);
         hook.Start(enabledInitially: true);
 
-        Type(native, "nguyenx");
-        AssertEx.Equal("nguyẽn", injector.Text);
-        AssertEx.True(native.SendBackspace(), "Keyina did not own composition Backspace.");
-        AssertEx.Equal("nguyen", injector.Text);
-        Type(native, "e");
-        AssertEx.Equal("nguyên", injector.Text);
+        Type(native, "nhaats");
+        AssertEx.Equal("nhất", injector.Text);
+        AssertEx.False(native.SendBackspace(), "Keyina swallowed a literal Backspace.");
+        injector.Text = injector.Text[..^1];
+        AssertEx.Equal("nhấ", injector.Text);
     }
 
     [KeyinaTest("resident hook fails open for shortcuts disabled mode and focus changes")]

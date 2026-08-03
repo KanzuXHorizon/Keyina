@@ -1,5 +1,7 @@
 # Vietnamese Typing Correctness and Performance Design
 
+> **Current behavior note (2026-08-03):** Raw-key Backspace reconstruction described here remains a core-engine test primitive only. Product input paths reset active composition and pass physical Backspace through so it deletes one visible character.
+
 ## Goal
 
 Improve practical Vietnamese Telex correctness and typing-path performance without changing unrelated behavior, stealing focus, or adding background overhead.

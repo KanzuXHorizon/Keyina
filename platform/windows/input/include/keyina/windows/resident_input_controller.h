@@ -110,9 +110,6 @@ class ResidentInputController {
   [[nodiscard]] InputDecision BuildSnippetDecision(
       const RuntimeSnippetMatch& match,
       char32_t delimiter);
-  void RememberCommittedComposition();
-  void RestoreCommittedCompositionAfterBoundaryBackspace();
-  void ClearCommittedComposition() noexcept;
   void ResetEngineState() noexcept;
 
   RuntimeInputProfile profile_{};
@@ -120,14 +117,10 @@ class ResidentInputController {
   RuntimeSnippetProfile snippet_profile_{};
   RuntimeSnippetMatcher snippet_matcher_;
   std::u16string snippet_insert_buffer_;
-  std::u32string committed_raw_keys_;
-  std::u32string committed_visible_text_;
   TypingContext context_{};
   KeyStateSet suppressed_keys_{};
   bool has_context_{false};
   bool pointer_observation_required_{false};
-  bool boundary_backspace_recovery_available_{false};
-  std::size_t post_boundary_literal_codepoints_{0};
 };
 
 }  // namespace keyina::windows

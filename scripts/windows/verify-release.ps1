@@ -2,11 +2,18 @@
 param(
     [string]$Version,
     [string]$ArtifactDirectory,
+    [switch]$RunDesktopInteractiveTests,
     [switch]$SkipDesktopInteractiveTests
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if ($RunDesktopInteractiveTests -and $SkipDesktopInteractiveTests) {
+    throw 'RunDesktopInteractiveTests and SkipDesktopInteractiveTests cannot be combined.'
+}
+$desktopInteractiveTestsEnabled =
+    [bool]$RunDesktopInteractiveTests -and -not [bool]$SkipDesktopInteractiveTests
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $installerLifecycleScript = Join-Path $repoRoot 'scripts\windows\test-installer.ps1'
@@ -185,7 +192,7 @@ foreach ($selfTest in @(
 )) {
     $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
 }
-if (-not $SkipDesktopInteractiveTests) {
+if ($desktopInteractiveTestsEnabled) {
     $null = Invoke-CheckedCapturedProcess $publishedResident '--typing-self-test' $publishDir
 }
 

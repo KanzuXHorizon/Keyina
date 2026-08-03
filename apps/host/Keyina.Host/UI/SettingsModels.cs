@@ -74,7 +74,7 @@ public sealed record SettingsSnapshot(
         SpeechCredentialConfigured: true,
         CustomSnippetCount: 3,
         StatusMessage: "Ready",
-        Version: "0.1.8-dev",
+        Version: "0.1.9-dev",
         IpcStatus: "Focused app connected",
         HotkeyStatus: "Registered",
         TsfRegistered: true,

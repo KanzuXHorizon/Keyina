@@ -7,7 +7,6 @@ namespace keyina::tsf {
 enum class KeyRouteKind {
   PassThrough,
   Character,
-  Backspace,
   Boundary,
   Reset,
 };

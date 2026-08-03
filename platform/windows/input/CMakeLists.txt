@@ -75,21 +75,23 @@ set_tests_properties(keyina.windows.input_resource PROPERTIES
   TIMEOUT 45
 )
 
-add_test(NAME keyina.windows.input_typing
-  COMMAND KeyinaInput --typing-self-test)
-set_tests_properties(keyina.windows.input_typing PROPERTIES
-  LABELS integration
-  PASS_REGULAR_EXPRESSION "typing_self_test_pass"
-  TIMEOUT 30
-)
+if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
+  add_test(NAME keyina.windows.input_typing
+    COMMAND KeyinaInput --typing-self-test)
+  set_tests_properties(keyina.windows.input_typing PROPERTIES
+    LABELS "integration;interactive-desktop"
+    PASS_REGULAR_EXPRESSION "typing_self_test_pass"
+    TIMEOUT 30
+  )
 
-add_test(NAME keyina.windows.input_clipboard_typing
-  COMMAND KeyinaInput --clipboard-typing-self-test)
-set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
-  LABELS integration
-  PASS_REGULAR_EXPRESSION "clipboard_typing_self_test_pass"
-  TIMEOUT 45
-)
+  add_test(NAME keyina.windows.input_clipboard_typing
+    COMMAND KeyinaInput --clipboard-typing-self-test)
+  set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
+    LABELS "integration;interactive-desktop"
+    PASS_REGULAR_EXPRESSION "clipboard_typing_self_test_pass"
+    TIMEOUT 45
+  )
+endif()
 
 add_test(NAME keyina.windows.input_tray_resource
   COMMAND KeyinaInput --tray-resource-self-test)
@@ -107,21 +109,23 @@ set_tests_properties(keyina.windows.input_profile_reload PROPERTIES
   TIMEOUT 10
 )
 
-add_test(NAME keyina.windows.input_callback_latency
-  COMMAND KeyinaInput --callback-latency-self-test)
-set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
-  LABELS integration
-  PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
-  TIMEOUT 30
-)
+if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
+  add_test(NAME keyina.windows.input_callback_latency
+    COMMAND KeyinaInput --callback-latency-self-test)
+  set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
+    LABELS "integration;interactive-desktop"
+    PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
+    TIMEOUT 30
+  )
 
-add_test(NAME keyina.windows.input_transform_callback_latency
-  COMMAND KeyinaInput --transform-callback-latency-self-test)
-set_tests_properties(keyina.windows.input_transform_callback_latency PROPERTIES
-  LABELS integration
-  PASS_REGULAR_EXPRESSION "transform_callback_latency_self_test_pass"
-  TIMEOUT 30
-)
+  add_test(NAME keyina.windows.input_transform_callback_latency
+    COMMAND KeyinaInput --transform-callback-latency-self-test)
+  set_tests_properties(keyina.windows.input_transform_callback_latency PROPERTIES
+    LABELS "integration;interactive-desktop"
+    PASS_REGULAR_EXPRESSION "transform_callback_latency_self_test_pass"
+    TIMEOUT 30
+  )
+endif()
 
 add_test(NAME keyina.windows.keystroke_overlay
   COMMAND KeyinaInput --keystroke-overlay-self-test)

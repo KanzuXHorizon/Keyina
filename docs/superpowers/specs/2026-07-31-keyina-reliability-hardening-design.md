@@ -1,5 +1,7 @@
 # Keyina Reliability Hardening Design
 
+> **Current behavior note (2026-08-03):** Backspace reconstruction in this historical design is no longer exposed by native, managed, or TSF input paths. Physical Backspace resets composition and is handled by the target application.
+
 ## Goal
 
 Make the default Keyina typing path reliable enough for sustained everyday use before pursuing broader feature, UI, or architectural expansion. This phase focuses on correctness, event delivery, runtime configuration consistency, performance regression gates, and evidence from the real Windows application.

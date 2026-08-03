@@ -305,9 +305,11 @@ public sealed class VietnameseKeyboardHook : IDisposable
                 if (keyboardEvent.VirtualKey == 0x08)
                 {
                     TypingTraceBuffer.Record(
-                        "backspace-compose",
+                        "backspace-pass-through",
                         keyIndex,
                         currentContext.ForegroundProcessId);
+                    ResetEngineState();
+                    return false;
                 }
             }
             finally
@@ -321,14 +323,7 @@ public sealed class VietnameseKeyboardHook : IDisposable
             }
 
             HookEdit edit;
-            if (keyboardEvent.VirtualKey == 0x08)
-            {
-                edit = engine.Process(
-                    NativeEngineKeyKind.Backspace,
-                    default);
-                SetPointerObservation(active: edit.ConsumePhysicalKey);
-            }
-            else if (keyboardEvent.VirtualKey == 0x20 ||
+            if (keyboardEvent.VirtualKey == 0x20 ||
                 IsCommitBoundaryCharacter(keyboardEvent.Character))
             {
                 var engineStartedAt = profiling ? Stopwatch.GetTimestamp() : 0;

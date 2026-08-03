@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and the project intends to use Semantic
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-08-03
+
+### Changed
+
+- Physical Backspace now resets active Telex state and passes through in the native resident, managed fallback, and optional TSF backend. It deletes one visible character instead of rolling back a tone or vowel-shape modifier.
+- Deleting a boundary or literal suffix no longer restores hidden composition state; typing after Backspace starts a fresh composition.
+- Desktop-interactive native tests are opt-in locally and remain explicit in CI/release runners, preventing normal test runs from stealing focus or injecting keyboard/mouse input into the active desktop.
+
+### Fixed
+
+- Correcting `nhấto` with Backspace now preserves `nhất` instead of allowing composition rollback to remove its tone.
+- Repeated Latin `ss` is preserved immediately in `loss`, `lossless`, `classless`, and `assessment` instead of treating the second `s` as a Telex tone escape.
+- Interactive self-tests restore the previous foreground control and cursor on every exit path and release partially injected modifier or mouse-button state.
+
 ## [0.1.8] - 2026-08-03
 
 ### Added

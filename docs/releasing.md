@@ -54,7 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Version 0.1.1
 ```
 
-The script runs native Debug-independent Release tests, managed Release tests, host self-tests, resource checks, benchmarks, self-contained publish, portable ZIP creation, installer compilation, SHA-256 generation, and manifest creation.
+The script runs native Debug-independent Release tests, managed Release tests, host self-tests, resource checks, benchmarks, self-contained publish, portable ZIP creation, installer compilation, SHA-256 generation, and manifest creation. Desktop-interactive tests are skipped by default so local packaging does not steal focus or inject keyboard/mouse input into the active desktop. Use `-RunDesktopInteractiveTests` only on an idle disposable desktop or isolated CI runner.
 
 Use `-SkipVerification` only while debugging the packaging scripts. It must not be used for an actual release.
 
@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File scripts/windows/verify-release.ps1
 ```
 
-The verification script checks every published checksum, confirms the version reported by the packaged host, reruns packaged self-tests, and verifies Authenticode signatures when the manifest declares a signed release.
+The verification script checks every published checksum, confirms the version reported by the packaged host, reruns packaged non-interactive self-tests, and verifies Authenticode signatures when the manifest declares a signed release. Pass `-RunDesktopInteractiveTests` explicitly only in an isolated desktop session.
 
 ## Authenticode signing
 

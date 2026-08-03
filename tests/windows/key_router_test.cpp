@@ -27,14 +27,14 @@ KEYINA_TEST(routes_ascii_letters_with_shift_and_caps_lock) {
   KEYINA_EXPECT_EQ(shifted_caps.character, U'a');
 }
 
-KEYINA_TEST(routes_backspace_only_for_owned_composition) {
+KEYINA_TEST(routes_backspace_as_pass_through_reset_for_owned_composition) {
   KEYINA_EXPECT_EQ(
       keyina::tsf::RouteKey({.virtual_key = VK_BACK}).kind,
       KeyRouteKind::PassThrough);
   KEYINA_EXPECT_EQ(keyina::tsf::RouteKey(
                        {.virtual_key = VK_BACK, .active_composition = true})
                        .kind,
-                   KeyRouteKind::Backspace);
+                   KeyRouteKind::Reset);
 }
 
 KEYINA_TEST(routes_whitespace_and_sentence_punctuation_as_boundaries) {

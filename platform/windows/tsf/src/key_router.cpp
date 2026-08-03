@@ -123,7 +123,7 @@ KeyRoute RouteKey(const KeyRoutingInput& input) noexcept {
 
   if (input.virtual_key == VK_BACK) {
     return input.active_composition
-               ? KeyRoute{KeyRouteKind::Backspace, U'\0'}
+               ? KeyRoute{KeyRouteKind::Reset, U'\0'}
                : PassThrough();
   }
 

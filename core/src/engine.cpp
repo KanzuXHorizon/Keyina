@@ -330,6 +330,16 @@ bool HasRepeatedTrailingLiteralS(std::u32string_view raw) noexcept {
          ToAsciiLower(raw[raw.size() - 2]) == U's';
 }
 
+bool HasRepeatedLiteralS(std::u32string_view raw) noexcept {
+  for (std::size_t index = 1; index < raw.size(); ++index) {
+    if (ToAsciiLower(raw[index - 1]) == U's' &&
+        ToAsciiLower(raw[index]) == U's') {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool HasTrailingRepeatedLetterModifierEscape(
     std::u32string_view raw) noexcept {
   if (raw.size() < 3) {
@@ -668,8 +678,10 @@ void Engine::BuildVisibleForRaw() {
         composition_buffer_.pop_back();
       }
     } else if (config_.restore_invalid_word &&
-        HasRepeatedTrailingLiteralS(raw_keys_) &&
-        HasSeparatedVowelRuns(composition_buffer_)) {
+               HasRepeatedLiteralS(raw_keys_) &&
+               (!HasRepeatedTrailingLiteralS(raw_keys_) ||
+                raw_keys_.size() >= 4 ||
+                HasSeparatedVowelRuns(composition_buffer_))) {
       composition_buffer_.assign(raw_keys_);
     } else if (config_.restore_invalid_word &&
                composition_buffer_ != literal_text_buffer_) {

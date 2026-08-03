@@ -1,5 +1,7 @@
 # Core Typing Corpus and Oracle Expansion Implementation Plan
 
+> **Current behavior note (2026-08-03):** This plan's Backspace reconstruction scope is an internal core-engine oracle. Shipped input paths no longer invoke that primitive for physical Backspace; they reset state and pass the key through.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expand Keyina's deterministic native correctness coverage for Vietnamese Telex, mixed English/technical content, long sentences, complex Unicode boundaries, and Backspace reconstruction, then fix only defects reproduced by the new corpus.

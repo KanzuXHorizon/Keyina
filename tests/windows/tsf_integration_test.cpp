@@ -472,14 +472,9 @@ int wmain(int argc, wchar_t** argv) {
       Fail(L"typing dduowngf did not produce đường");
       break;
     }
-    if (!SendKey(key_sink, context, VK_BACK) ||
-        store->Text() != L"tiếng đương") {
-      Fail(L"Backspace did not rebuild the previous composition");
-      break;
-    }
     if (!SendKey(key_sink, context, VK_SPACE) ||
         !SendRaw(key_sink, context, "as_") ||
-        store->Text() != L"tiếng đương as_") {
+        store->Text() != L"tiếng đường as_") {
       Fail(L"Context Guard did not restore raw technical-token keys");
       break;
     }
@@ -516,7 +511,7 @@ int wmain(int argc, wchar_t** argv) {
         focus_generation, empty_suffix, final_text);
     SysFreeString(empty_suffix);
     SysFreeString(final_text);
-    if (result != S_OK || store->Text() != L"tiếng đương as_ xin chào") {
+    if (result != S_OK || store->Text() != L"tiếng đường as_ xin chào") {
       Fail(L"final transcript was not inserted atomically", result);
       break;
     }
@@ -527,7 +522,7 @@ int wmain(int argc, wchar_t** argv) {
         focus_generation, stale_suffix, stale_text);
     SysFreeString(stale_suffix);
     SysFreeString(stale_text);
-    if (result != S_FALSE || store->Text() != L"tiếng đương as_ xin chào") {
+    if (result != S_FALSE || store->Text() != L"tiếng đường as_ xin chào") {
       Fail(L"stale focus generation was not rejected", result);
       break;
     }
@@ -550,7 +545,7 @@ int wmain(int argc, wchar_t** argv) {
     SysFreeString(expected_trigger);
     SysFreeString(snippet_text);
     if (result != S_OK ||
-        store->Text() != L"tiếng đương as_ xin chàoXYZ" ||
+        store->Text() != L"tiếng đường as_ xin chàoXYZ" ||
         HasActiveComposition(context, true)) {
       Fail(L"snippet trigger was not replaced atomically", result);
       break;
@@ -567,10 +562,30 @@ int wmain(int argc, wchar_t** argv) {
     if (FAILED(result) || !PumpMessagesUntil(
             [&] {
               return pipe_host.sent() &&
-                     store->Text() == L"tiếng đương as_ xin chàoXYZ pipe-final";
+                     store->Text() == L"tiếng đường as_ xin chàoXYZ pipe-final";
             },
             std::chrono::seconds(5))) {
       Fail(L"named-pipe final transcript did not reach the focused TSF context",
+           result);
+      break;
+    }
+
+    if (!SendRaw(key_sink, context, "nhaats") ||
+        !HasActiveComposition(context, true)) {
+      Fail(L"could not prepare an active composition for Backspace");
+      break;
+    }
+    const std::wstring before_backspace{store->Text()};
+    BOOL backspace_test_eaten = FALSE;
+    BOOL backspace_eaten = TRUE;
+    result = key_sink->OnTestKeyDown(
+        context, VK_BACK, 0, &backspace_test_eaten);
+    if (FAILED(result) || !backspace_test_eaten ||
+        FAILED(key_sink->OnKeyDown(
+            context, VK_BACK, 0, &backspace_eaten)) ||
+        backspace_eaten || store->Text() != before_backspace ||
+        HasActiveComposition(context, true)) {
+      Fail(L"Backspace did not reset composition and pass through safely",
            result);
       break;
     }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-set(KEYINA_VERSION "0.1.8" CACHE STRING "Keyina semantic version")
+set(KEYINA_VERSION "0.1.9" CACHE STRING "Keyina semantic version")
 project(Keyina VERSION "${KEYINA_VERSION}" LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -8,6 +8,10 @@ include(KeyinaCompilerOptions)
 
 option(KEYINA_BUILD_BENCHMARKS "Build native latency benchmarks" ON)
 option(KEYINA_BUILD_TSF "Build the optional legacy Windows TSF backend" OFF)
+option(
+  KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS
+  "Register Windows tests that temporarily require foreground focus and SendInput"
+  OFF)
 
 include(CTest)
 

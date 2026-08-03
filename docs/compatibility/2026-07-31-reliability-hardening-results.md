@@ -1,5 +1,7 @@
 # Keyina Reliability Hardening Results — 2026-07-31
 
+> **Current behavior note (2026-08-03):** Backspace reconstruction references in this historical result set describe the core engine at that time. Current product input paths reset composition and pass physical Backspace through so it deletes one visible character.
+
 ## Scope
 
 This report records verification performed against the current uncommitted checkout on Windows 10.0.26200, x64, with .NET SDK 10.0.302, MSVC 19.44, and optional TSF coverage enabled.

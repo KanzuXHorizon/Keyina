@@ -1,5 +1,7 @@
 # Keyina Hook Backend Implementation Plan
 
+> **Current behavior note (2026-08-03):** This historical plan predates the literal Backspace policy. Native, managed, and optional TSF input paths now reset composition and pass physical Backspace through instead of reconstructing raw Telex state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace TSF as Keyina's default typing path with a UniKey/EVKey-style resident keyboard-hook backend that requires no `Win + Space`, preserves the existing clean-room Telex engine, and safely falls back in incompatible contexts.

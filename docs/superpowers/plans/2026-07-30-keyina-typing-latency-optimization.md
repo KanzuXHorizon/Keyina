@@ -1,5 +1,7 @@
 # Keyina Typing Latency and Extreme Optimization Implementation Plan
 
+> **Current behavior note (2026-08-03):** Backspace reconstruction benchmarks in this historical plan remain core-engine measurements only. User-facing Backspace now resets composition and passes through to delete one visible character.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Restore a clean Release baseline, add opt-in allocation-free per-stage typing latency telemetry, display it in Diagnostics, and extend reproducible host benchmarks so later optimizations are driven by evidence.

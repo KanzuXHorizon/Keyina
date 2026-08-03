@@ -171,6 +171,99 @@ void WriteStandardOutput(std::string_view text) noexcept {
             &written, nullptr);
 }
 
+class ScopedDesktopState final {
+ public:
+  ScopedDesktopState() noexcept
+      : foreground_(GetForegroundWindow()),
+        cursor_captured_(GetCursorPos(&cursor_) != FALSE) {
+    if (foreground_ == nullptr || IsWindow(foreground_) == FALSE) {
+      foreground_ = nullptr;
+      return;
+    }
+    const DWORD foreground_thread =
+        GetWindowThreadProcessId(foreground_, nullptr);
+    GUITHREADINFO info{};
+    info.cbSize = sizeof(info);
+    if (foreground_thread != 0 &&
+        GetGUIThreadInfo(foreground_thread, &info) != FALSE &&
+        info.hwndFocus != nullptr && IsWindow(info.hwndFocus) != FALSE) {
+      focus_ = info.hwndFocus;
+    }
+  }
+
+  ScopedDesktopState(const ScopedDesktopState&) = delete;
+  ScopedDesktopState& operator=(const ScopedDesktopState&) = delete;
+
+  ~ScopedDesktopState() noexcept {
+    if (foreground_ != nullptr && IsWindow(foreground_) != FALSE) {
+      const DWORD current_thread = GetCurrentThreadId();
+      const DWORD foreground_thread =
+          GetWindowThreadProcessId(foreground_, nullptr);
+      const bool attached = foreground_thread != 0 &&
+          foreground_thread != current_thread &&
+          AttachThreadInput(
+              current_thread, foreground_thread, TRUE) != FALSE;
+      static_cast<void>(SetForegroundWindow(foreground_));
+      if (focus_ != nullptr && IsWindow(focus_) != FALSE) {
+        static_cast<void>(SetFocus(focus_));
+      }
+      if (attached) {
+        static_cast<void>(AttachThreadInput(
+            current_thread, foreground_thread, FALSE));
+      }
+    }
+    if (cursor_captured_) {
+      static_cast<void>(SetCursorPos(cursor_.x, cursor_.y));
+    }
+  }
+
+ private:
+  HWND foreground_{};
+  HWND focus_{};
+  POINT cursor_{};
+  bool cursor_captured_{};
+};
+
+void ReleaseSyntheticKey(WORD virtual_key, ULONG_PTR marker) noexcept {
+  INPUT release{};
+  release.type = INPUT_KEYBOARD;
+  release.ki.wVk = virtual_key;
+  release.ki.dwFlags = KEYEVENTF_KEYUP;
+  release.ki.dwExtraInfo = marker;
+  static_cast<void>(SendInput(1, &release, sizeof(INPUT)));
+}
+
+void ReleasePartialKeyboardSequence(
+    const INPUT* inputs,
+    UINT inserted) noexcept {
+  if (inputs == nullptr || inserted == 0) {
+    return;
+  }
+  std::array<bool, 256> pressed{};
+  std::array<ULONG_PTR, 256> markers{};
+  for (UINT index = 0; index < inserted; ++index) {
+    const INPUT& input = inputs[index];
+    if (input.type != INPUT_KEYBOARD || input.ki.wVk >= pressed.size()) {
+      continue;
+    }
+    const auto key = static_cast<std::size_t>(input.ki.wVk);
+    pressed[key] = (input.ki.dwFlags & KEYEVENTF_KEYUP) == 0;
+    markers[key] = input.ki.dwExtraInfo;
+  }
+  for (std::size_t key = 0; key < pressed.size(); ++key) {
+    if (pressed[key]) {
+      ReleaseSyntheticKey(static_cast<WORD>(key), markers[key]);
+    }
+  }
+}
+
+void ReleaseSyntheticMouseButton() noexcept {
+  INPUT release{};
+  release.type = INPUT_MOUSE;
+  release.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+  static_cast<void>(SendInput(1, &release, sizeof(INPUT)));
+}
+
 bool FocusTestControl(HWND window, HWND edit) noexcept {
   if (window == nullptr || edit == nullptr ||
       IsWindow(window) == FALSE || IsWindow(edit) == FALSE) {
@@ -232,10 +325,13 @@ bool FocusTestControl(HWND window, HWND edit) noexcept {
     unlock[0].ki.wVk = VK_MENU;
     unlock[1] = unlock[0];
     unlock[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    static_cast<void>(SendInput(
+    const UINT unlock_sent = SendInput(
         static_cast<UINT>(unlock.size()),
         unlock.data(),
-        sizeof(INPUT)));
+        sizeof(INPUT));
+    if (unlock_sent != unlock.size()) {
+      ReleaseSyntheticKey(VK_MENU, 0);
+    }
     Sleep(10);
 
     // SetForegroundWindow can still be denied on an unattended desktop even
@@ -254,10 +350,13 @@ bool FocusTestControl(HWND window, HWND edit) noexcept {
       click[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
       click[1] = click[0];
       click[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-      static_cast<void>(SendInput(
+      const UINT click_sent = SendInput(
           static_cast<UINT>(click.size()),
           click.data(),
-          sizeof(INPUT)));
+          sizeof(INPUT));
+      if (click_sent != click.size()) {
+        ReleaseSyntheticMouseButton();
+      }
       Sleep(10);
       while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&message);
@@ -300,10 +399,13 @@ std::uint32_t SendTestCharacter(char character, bool caps_lock) noexcept {
   if (shift) {
     append(VK_SHIFT, KEYEVENTF_KEYUP);
   }
-  return SendInput(
-             static_cast<UINT>(count), inputs.data(), sizeof(INPUT)) == count
-      ? static_cast<std::uint32_t>(count)
-      : 0;
+  const UINT expected = static_cast<UINT>(count);
+  const UINT inserted = SendInput(expected, inputs.data(), sizeof(INPUT));
+  if (inserted != expected) {
+    ReleasePartialKeyboardSequence(inputs.data(), inserted);
+    return 0;
+  }
+  return expected;
 }
 
 std::uint32_t SendTestTextBatch(
@@ -342,9 +444,12 @@ std::uint32_t SendTestTextBatch(
     }
   }
   const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected
-      ? expected
-      : 0;
+  const UINT inserted = SendInput(expected, inputs.data(), sizeof(INPUT));
+  if (inserted != expected) {
+    ReleasePartialKeyboardSequence(inputs.data(), inserted);
+    return 0;
+  }
+  return expected;
 }
 
 std::uint32_t SendTestVirtualKeyPair(WORD virtual_key) noexcept {
@@ -357,12 +462,13 @@ std::uint32_t SendTestVirtualKeyPair(WORD virtual_key) noexcept {
   inputs[0].ki.dwExtraInfo = kSelfTestInputMarker;
   inputs[1] = inputs[0];
   inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-  return SendInput(
-             static_cast<UINT>(inputs.size()),
-             inputs.data(),
-             sizeof(INPUT)) == inputs.size()
-      ? static_cast<std::uint32_t>(inputs.size())
-      : 0;
+  const UINT expected = static_cast<UINT>(inputs.size());
+  const UINT inserted = SendInput(expected, inputs.data(), sizeof(INPUT));
+  if (inserted != expected) {
+    ReleasePartialKeyboardSequence(inputs.data(), inserted);
+    return 0;
+  }
+  return expected;
 }
 
 std::uint32_t SendTestKeyPairBatch(std::size_t pair_count) noexcept {
@@ -384,9 +490,12 @@ std::uint32_t SendTestKeyPairBatch(std::size_t pair_count) noexcept {
     inputs[count++] = up;
   }
   const UINT expected = static_cast<UINT>(count);
-  return SendInput(expected, inputs.data(), sizeof(INPUT)) == expected
-             ? expected
-             : 0;
+  const UINT inserted = SendInput(expected, inputs.data(), sizeof(INPUT));
+  if (inserted != expected) {
+    ReleasePartialKeyboardSequence(inputs.data(), inserted);
+    return 0;
+  }
+  return expected;
 }
 
 bool WaitForProcessedKeyboardEvents(
@@ -654,7 +763,7 @@ bool RunClipboardFailOpenProbe(HWND window, HWND edit) noexcept {
 }
 
 int RunTypingSelfTestAttempt(bool clipboard_compatibility) noexcept {
-  const HWND previous_foreground = GetForegroundWindow();
+  const ScopedDesktopState desktop_state;
   const HINSTANCE instance = GetModuleHandleW(nullptr);
   HWND window = CreateWindowExW(
       WS_EX_TOOLWINDOW, L"STATIC", L"Keyina native typing self-test",
@@ -834,9 +943,6 @@ int RunTypingSelfTestAttempt(bool clipboard_compatibility) noexcept {
   DestroyWindow(window);
   if (rich_edit_module != nullptr) {
     FreeLibrary(rich_edit_module);
-  }
-  if (previous_foreground != nullptr) {
-    SetForegroundWindow(previous_foreground);
   }
   if (success) {
     std::array<char, 2048> success_json{};
@@ -1057,7 +1163,7 @@ int RunCallbackLatencySelfTestAttempt() noexcept {
   constexpr std::size_t kBatchPairs = 8;
   constexpr std::uint64_t kExpectedEvents = kIterations * 2;
 
-  const HWND previous_foreground = GetForegroundWindow();
+  const ScopedDesktopState desktop_state;
   const HINSTANCE instance = GetModuleHandleW(nullptr);
   HWND window = CreateWindowExW(
       WS_EX_TOOLWINDOW,
@@ -1265,9 +1371,6 @@ int RunCallbackLatencySelfTestAttempt() noexcept {
 
   runtime.Stop();
   DestroyWindow(window);
-  if (previous_foreground != nullptr) {
-    SetForegroundWindow(previous_foreground);
-  }
 
   std::array<char, 4096> json{};
   const int length = sprintf_s(
@@ -1362,6 +1465,7 @@ int RunCallbackLatencySelfTest() noexcept {
 }
 
 int RunTransformCallbackLatencySelfTestAttempt() noexcept {
+  const ScopedDesktopState desktop_state;
   constexpr std::string_view kRawWord = "tieengs ";
   constexpr std::size_t kWarmupWords = 1;
   constexpr std::size_t kMeasuredWords = 256;
@@ -1390,7 +1494,6 @@ int RunTransformCallbackLatencySelfTestAttempt() noexcept {
     return 1;
   }
 
-  const HWND previous_foreground = GetForegroundWindow();
   const HINSTANCE instance = GetModuleHandleW(nullptr);
   HWND window = CreateWindowExW(
       WS_EX_TOOLWINDOW,
@@ -1607,9 +1710,6 @@ int RunTransformCallbackLatencySelfTestAttempt() noexcept {
 
   runtime.Stop();
   DestroyWindow(window);
-  if (previous_foreground != nullptr) {
-    SetForegroundWindow(previous_foreground);
-  }
 
   std::array<char, 4096> json{};
   const int length = sprintf_s(
@@ -1696,13 +1796,13 @@ int RunTransformCallbackLatencySelfTest() noexcept {
 }
 
 int RunChromiumOrderingSelfTest() noexcept {
+  const ScopedDesktopState desktop_state;
   constexpr std::string_view kRawPhrase =
       "tuyf banj cuws research vaf dduwa ra huowngs toots nhaats ";
   constexpr std::wstring_view kExpectedPhrase =
       L"tuỳ bạn cứ research và đưa ra hướng tốt nhất ";
   constexpr std::array<DWORD, 3> kDelaysMilliseconds{0, 5, 10};
 
-  const HWND previous_foreground = GetForegroundWindow();
   const HINSTANCE instance = GetModuleHandleW(nullptr);
   HWND window = CreateWindowExW(
       WS_EX_TOOLWINDOW,
@@ -1865,9 +1965,6 @@ int RunChromiumOrderingSelfTest() noexcept {
       hook_running;
   runtime.Stop();
   DestroyWindow(window);
-  if (previous_foreground != nullptr) {
-    SetForegroundWindow(previous_foreground);
-  }
 
   std::array<char, 512> actual_utf8{};
   const int actual_utf8_length = actual_length <= 0

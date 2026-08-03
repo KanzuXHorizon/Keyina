@@ -9,11 +9,13 @@
 - `tone_update`: `a` is prepared outside the timed region, then `s` is measured.
 - `complete_word_tieengs` and `complete_word_Vieetj`: reset and compose complete representative Telex words.
 - `delayed_modifier_truowcs`: exercise flexible delayed modifiers.
-- `backspace_recomposition`: compose a word and reconstruct the previous state after Backspace.
+- `backspace_recomposition`: benchmark the reusable core engine's internal rollback primitive; shipped input backends do not invoke it for physical Backspace.
 - `guard_protected_url` and `guard_protected_email`: type complete protected tokens and verify literal behavior.
 - `valid_syllable_analysis`: analyze a valid Vietnamese syllable.
 - `invalid_boundary_restore`: restore a transformed impossible token at a commit boundary.
 - `context_guard_64_codepoints`: deterministic classification of the maximum active-token length.
+
+Physical Backspace is a pass-through reset in the native resident, managed fallback, and optional TSF backend, so this internal benchmark must not be interpreted as user-facing Backspace behavior.
 
 The benchmark executable overrides allocation operators only inside the benchmark process. Common typing cases have an allocation budget of zero after engine warm-up. Rare full-token restoration transitions have a budget of one owned edit allocation. Native unit tests also run a deterministic one-million-event endurance sequence covering ordinary words, delayed modifiers, Backspace, boundaries, resets, technical punctuation, direct Unicode, and maximum-token rollover.
 

@@ -8,6 +8,7 @@ param(
 
     [switch]$SkipVerification,
     [switch]$SkipBuildTests,
+    [switch]$RunDesktopInteractiveTests,
     [switch]$SkipDesktopInteractiveTests,
     [switch]$SkipInstaller,
     [switch]$Sign,
@@ -18,6 +19,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $env:MSBUILDDISABLENODEREUSE = '1'
 $env:DOTNET_CLI_USE_MSBUILD_SERVER = '0'
+
+if ($RunDesktopInteractiveTests -and $SkipDesktopInteractiveTests) {
+    throw 'RunDesktopInteractiveTests and SkipDesktopInteractiveTests cannot be combined.'
+}
+$desktopInteractiveTestsEnabled =
+    [bool]$RunDesktopInteractiveTests -and -not [bool]$SkipDesktopInteractiveTests
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $propsPath = Join-Path $repoRoot 'Directory.Build.props'
@@ -201,15 +208,17 @@ $versionProperties = @(
     "-p:FileVersion=$fileVersion"
 )
 
+$interactiveDesktopCMakeValue = if ($desktopInteractiveTestsEnabled) { 'ON' } else { 'OFF' }
 Invoke-Checked 'cmake.exe' @(
     '--preset', 'windows-msvc-release',
-    "-DKEYINA_VERSION=$Version"
+    "-DKEYINA_VERSION=$Version",
+    "-DKEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS=$interactiveDesktopCMakeValue"
 )
 Invoke-Checked 'cmake.exe' @('--build', '--preset', 'windows-msvc-release')
 
 if (-not $SkipVerification -and -not $SkipBuildTests) {
     $ctestArguments = @('--preset', 'windows-msvc-release', '--output-on-failure')
-    if ($SkipDesktopInteractiveTests) {
+    if (-not $desktopInteractiveTestsEnabled) {
         $ctestArguments += @(
             '-E',
             'keyina\.windows\.input_(typing|clipboard_typing|callback_latency|transform_callback_latency)'
@@ -296,7 +305,7 @@ foreach ($selfTest in @(
 )) {
     $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
 }
-if (-not $SkipDesktopInteractiveTests) {
+if ($desktopInteractiveTestsEnabled) {
     $null = Invoke-CheckedCapturedProcess $publishedResident '--typing-self-test' $publishDir
 }
 
@@ -403,7 +412,7 @@ $manifest = [ordered]@{
     install_scope = if ($null -ne $installerPath) { 'current_user' } else { 'portable' }
     installer_lifecycle_verified = $installerLifecycleVerified
     build_test_suites_skipped = [bool]$SkipBuildTests
-    desktop_interactive_tests_skipped = [bool]$SkipDesktopInteractiveTests
+    desktop_interactive_tests_skipped = -not $desktopInteractiveTestsEnabled
     preserved_user_data_directory = '%LOCALAPPDATA%\Keyina'
     published_file_count = $publishedFiles.Count
     published_bytes = [long](($publishedFiles | Measure-Object Length -Sum).Sum)

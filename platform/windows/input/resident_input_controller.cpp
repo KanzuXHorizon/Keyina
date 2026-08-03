@@ -208,34 +208,11 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   if (event.virtual_key == kBackspace) {
-    if (boundary_backspace_recovery_available_) {
-      if (post_boundary_literal_codepoints_ > 0) {
-        --post_boundary_literal_codepoints_;
-        engine_.Reset();
-        snippet_matcher_.Reset();
-        pointer_observation_required_ = false;
-      } else {
-        RestoreCommittedCompositionAfterBoundaryBackspace();
-      }
-      return {};
-    }
     if (snippet_matcher_.active()) {
       snippet_matcher_.ProcessBackspace();
-      engine_.Reset();
-      pointer_observation_required_ = false;
-      return {};
     }
-    if (!engine_.RawKeys().empty()) {
-      const auto edit = engine_.ProcessView(KeyEvent{
-          KeyKind::Backspace, U'\0', false, false, false});
-      auto decision = BuildDecision(edit, U'\0');
-      pointer_observation_required_ = !engine_.RawKeys().empty();
-      if (decision.suppress) {
-        suppressed_keys_.Set(event.virtual_key, true);
-      }
-      return decision;
-    }
-    ResetEngineState();
+    engine_.Reset();
+    pointer_observation_required_ = false;
     return {};
   }
 
@@ -279,9 +256,6 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   TextEditView edit{};
-  const bool quick_telex_character =
-      profile_.quick_telex_letters &&
-      IsQuickTelexCompositionCharacter(event.character);
   if (character_class == InputCharacterClass::Composition) {
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::Character,
@@ -293,7 +267,6 @@ InputDecision ResidentInputController::ProcessKeyDown(
     pointer_observation_required_ = true;
   } else if (event.virtual_key == kSpace ||
              character_class == InputCharacterClass::CommitBoundary) {
-    RememberCommittedComposition();
     edit = engine_.ProcessView(KeyEvent{
         KeyKind::CommitBoundary,
         event.virtual_key == kSpace ? U' ' : event.character,
@@ -310,25 +283,6 @@ InputDecision ResidentInputController::ProcessKeyDown(
   }
 
   auto decision = BuildDecision(edit, event.character);
-  if (character_class == InputCharacterClass::CommitBoundary &&
-      edit.consumed) {
-    ClearCommittedComposition();
-  }
-  if (boundary_backspace_recovery_available_ &&
-      (IsAsciiCompositionCharacter(event.character) ||
-       quick_telex_character)) {
-    if (IsLiteralPassThrough(edit, event.character)) {
-      constexpr std::size_t kMaximumRecoverableLiteralSuffix = 32;
-      if (post_boundary_literal_codepoints_ <
-          kMaximumRecoverableLiteralSuffix) {
-        ++post_boundary_literal_codepoints_;
-      } else {
-        ClearCommittedComposition();
-      }
-    } else {
-      ClearCommittedComposition();
-    }
-  }
   if (decision.suppress) {
     suppressed_keys_.Set(event.virtual_key, true);
   }
@@ -396,44 +350,12 @@ InputDecision ResidentInputController::BuildDecision(
   return decision;
 }
 
-void ResidentInputController::RememberCommittedComposition() {
-  committed_raw_keys_.assign(engine_.RawKeys());
-  committed_visible_text_.assign(engine_.VisibleText());
-  boundary_backspace_recovery_available_ = !committed_raw_keys_.empty();
-  post_boundary_literal_codepoints_ = 0;
-}
-
-void ResidentInputController::RestoreCommittedCompositionAfterBoundaryBackspace() {
-  boundary_backspace_recovery_available_ = false;
-  post_boundary_literal_codepoints_ = 0;
-  engine_.Reset();
-  for (const char32_t character : committed_raw_keys_) {
-    static_cast<void>(engine_.ProcessView(KeyEvent{
-        KeyKind::Character, character, false, false, false}));
-  }
-  if (engine_.VisibleText() != committed_visible_text_) {
-    engine_.Reset();
-  }
-  committed_raw_keys_.clear();
-  committed_visible_text_.clear();
-  snippet_matcher_.Reset();
-  pointer_observation_required_ = !engine_.RawKeys().empty();
-}
-
-void ResidentInputController::ClearCommittedComposition() noexcept {
-  boundary_backspace_recovery_available_ = false;
-  post_boundary_literal_codepoints_ = 0;
-  committed_raw_keys_.clear();
-  committed_visible_text_.clear();
-}
-
 void ResidentInputController::ResetEngineState() noexcept {
   engine_.Reset();
   snippet_matcher_.Reset();
   snippet_insert_buffer_.clear();
   suppressed_keys_.Clear();
   pointer_observation_required_ = false;
-  ClearCommittedComposition();
 }
 
 }  // namespace keyina::windows

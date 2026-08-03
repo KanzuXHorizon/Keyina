@@ -1,5 +1,7 @@
 # Keyina Reliability Hardening Implementation Plan
 
+> **Current behavior note (2026-08-03):** The Backspace reconstruction task below is historical. Current input backends reset composition and leave physical Backspace to the target application, preventing tone-key rollback.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the native resident typing path correct and stable for sustained Vietnamese and literal-Latin typing, with fresh Debug/Release, resource, latency, and real Windows input evidence.

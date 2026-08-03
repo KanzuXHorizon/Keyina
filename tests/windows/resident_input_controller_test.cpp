@@ -278,6 +278,18 @@ KEYINA_TEST(resident_input_controller_keeps_checked_coda_editable_and_restores_l
   KEYINA_EXPECT_EQ(visible, std::u16string{u"meet "});
 }
 
+KEYINA_TEST(resident_input_controller_preserves_double_s_in_lossless) {
+  ResidentInputController controller(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(controller, visible, U"loss");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"loss"});
+
+  Type(controller, visible, U"less");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"lossless"});
+}
+
 KEYINA_TEST(resident_input_controller_keeps_embedded_tone_keys_literal_in_latin_tokens) {
   ResidentInputController controller(
       keyina::windows::DefaultRuntimeInputProfile());
@@ -354,7 +366,37 @@ KEYINA_TEST(resident_input_controller_bypasses_injected_shortcut_and_backspace_e
   KEYINA_EXPECT_EQ(visible, std::u16string{u"as"});
 }
 
-KEYINA_TEST(resident_input_controller_recomposes_after_deleting_a_typo) {
+KEYINA_TEST(resident_input_controller_backspace_deletes_visible_typo_without_removing_tone) {
+  ResidentInputController controller(RuntimeInputProfile{});
+  std::u16string visible;
+
+  Type(controller, visible, U"nhaatso");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"nhấto"});
+
+  Backspace(controller, visible);
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"nhất"});
+
+  Type(controller, visible, U" ");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"nhất "});
+}
+
+KEYINA_TEST(resident_input_controller_backspace_deletes_visible_character_instead_of_tone_key) {
+  ResidentInputController controller(RuntimeInputProfile{});
+  std::u16string visible;
+
+  Type(controller, visible, U"nhaats");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"nhất"});
+
+  const auto down = controller.Process(BackspaceEvent(), kOrdinaryContext);
+  KEYINA_EXPECT_TRUE(!down.suppress);
+  visible.pop_back();
+  const auto up = controller.Process(BackspaceEvent(false), kOrdinaryContext);
+  KEYINA_EXPECT_TRUE(!up.suppress);
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"nhấ"});
+  KEYINA_EXPECT_TRUE(!controller.pointer_observation_required());
+}
+
+KEYINA_TEST(resident_input_controller_starts_fresh_after_deleting_a_typo) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;
 
@@ -365,10 +407,10 @@ KEYINA_TEST(resident_input_controller_recomposes_after_deleting_a_typo) {
   KEYINA_EXPECT_EQ(visible, std::u16string{u"chao"});
 
   Type(controller, visible, U"f");
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"chào"});
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"chaof"});
 }
 
-KEYINA_TEST(resident_input_controller_rebuilds_tone_after_retyping_vowels) {
+KEYINA_TEST(resident_input_controller_backspace_deletes_displayed_codepoints) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;
 
@@ -378,13 +420,13 @@ KEYINA_TEST(resident_input_controller_rebuilds_tone_after_retyping_vowels) {
   Backspace(controller, visible);
   Backspace(controller, visible);
   Backspace(controller, visible);
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"g"});
+  KEYINA_EXPECT_TRUE(visible.empty());
 
-  Type(controller, visible, U"ias");
+  Type(controller, visible, U"gias");
   KEYINA_EXPECT_EQ(visible, std::u16string{u"giá"});
 }
 
-KEYINA_TEST(resident_input_controller_repeats_composition_backspace_while_held) {
+KEYINA_TEST(resident_input_controller_repeated_backspace_remains_pass_through) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;
 
@@ -393,19 +435,19 @@ KEYINA_TEST(resident_input_controller_repeats_composition_backspace_while_held) 
 
   const auto initial = controller.Process(
       BackspaceEvent(), kOrdinaryContext);
-  ApplyDecision(visible, U'\0', initial);
-  KEYINA_EXPECT_TRUE(initial.suppress);
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"chao"});
+  KEYINA_EXPECT_TRUE(!initial.suppress);
+  visible.pop_back();
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"chà"});
 
   const auto repeated = controller.Process(
       BackspaceEvent(true, true), kOrdinaryContext);
-  ApplyDecision(visible, U'\0', repeated);
-  KEYINA_EXPECT_TRUE(repeated.suppress);
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"cha"});
+  KEYINA_EXPECT_TRUE(!repeated.suppress);
+  visible.pop_back();
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"ch"});
 
   const auto released = controller.Process(
       BackspaceEvent(false), kOrdinaryContext);
-  KEYINA_EXPECT_TRUE(released.suppress);
+  KEYINA_EXPECT_TRUE(!released.suppress);
 }
 
 KEYINA_TEST(resident_input_controller_disarms_pointer_observation_on_boundary) {
@@ -494,27 +536,20 @@ KEYINA_TEST(resident_input_controller_preserves_quick_telex_across_boundaries) {
   KEYINA_EXPECT_EQ(visible, std::u16string{u"ư/ơ"});
 }
 
-KEYINA_TEST(resident_input_controller_restores_word_after_deleting_boundary) {
+KEYINA_TEST(resident_input_controller_does_not_restore_word_after_deleting_boundary) {
   ResidentInputController controller(RuntimeInputProfile{});
   std::u16string visible;
 
   Type(controller, visible, U"ba ");
   KEYINA_EXPECT_EQ(visible, std::u16string{u"ba "});
 
-  PhysicalKeyEvent backspace{};
-  backspace.virtual_key = 0x08;
-  backspace.key_down = true;
-  const auto backspace_decision =
-      controller.Process(backspace, kOrdinaryContext);
-  KEYINA_EXPECT_TRUE(!backspace_decision.suppress);
-  visible.pop_back();
-
+  Backspace(controller, visible);
   Type(controller, visible, U"or");
 
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"bảo"});
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"baỏ"});
 }
 
-KEYINA_TEST(resident_input_controller_restores_word_after_deleting_literal_suffix_and_boundary) {
+KEYINA_TEST(resident_input_controller_does_not_restore_word_after_literal_suffix_backspace) {
   ResidentInputController controller(
       keyina::windows::DefaultRuntimeInputProfile());
   std::u16string visible;
@@ -522,39 +557,25 @@ KEYINA_TEST(resident_input_controller_restores_word_after_deleting_literal_suffi
   Type(controller, visible, U"sai x");
   KEYINA_EXPECT_EQ(visible, std::u16string{u"sai x"});
 
-  PhysicalKeyEvent backspace{};
-  backspace.virtual_key = 0x08;
-  backspace.key_down = true;
-
-  KEYINA_EXPECT_TRUE(
-      !controller.Process(backspace, kOrdinaryContext).suppress);
-  visible.pop_back();
-  KEYINA_EXPECT_TRUE(
-      !controller.Process(backspace, kOrdinaryContext).suppress);
-  visible.pop_back();
-
+  Backspace(controller, visible);
+  Backspace(controller, visible);
   Type(controller, visible, U"f");
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"sài"});
+
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"saif"});
 }
 
-KEYINA_TEST(resident_input_controller_restores_word_after_multiple_literal_suffix_characters) {
+KEYINA_TEST(resident_input_controller_does_not_restore_word_after_multiple_backspaces) {
   ResidentInputController controller(
       keyina::windows::DefaultRuntimeInputProfile());
   std::u16string visible;
 
   Type(controller, visible, U"sai xyz");
-
-  PhysicalKeyEvent backspace{};
-  backspace.virtual_key = 0x08;
-  backspace.key_down = true;
   for (int index = 0; index < 4; ++index) {
-    KEYINA_EXPECT_TRUE(
-        !controller.Process(backspace, kOrdinaryContext).suppress);
-    visible.pop_back();
+    Backspace(controller, visible);
   }
 
   Type(controller, visible, U"f");
-  KEYINA_EXPECT_EQ(visible, std::u16string{u"sài"});
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"saif"});
 }
 
 KEYINA_TEST(resident_input_controller_expands_raw_telex_sensitive_snippet_on_space) {

@@ -1,5 +1,7 @@
 # Native callback key-up fast path — 2026-08-01
 
+> **Current behavior note (2026-08-03):** The Backspace recomposition row below measures the reusable core-engine primitive. Physical Backspace in product input paths resets composition and is handled by the target application.
+
 ## Scope
 
 This slice removes focused-window context capture from ordinary physical key-up events after native hotkey routing. It preserves controller release suppression for keys whose key-down was consumed, and it adds a content-free context-capture counter enforced by the live typing self-test.

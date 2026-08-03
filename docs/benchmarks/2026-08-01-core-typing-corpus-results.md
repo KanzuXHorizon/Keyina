@@ -1,5 +1,7 @@
 # Core typing corpus and correctness results — 2026-08-01
 
+> **Current behavior note (2026-08-03):** Backspace reconstruction in this report is a core-engine oracle, not the shipped physical-key policy. Product input backends now reset composition and pass Backspace through to delete one visible character.
+
 ## Scope
 
 This slice expanded deterministic correctness evidence for Keyina's existing C++20 Telex engine. It did not promote TSF, add background work, change the Windows delivery primitive, add a dictionary, or capture real user text.
