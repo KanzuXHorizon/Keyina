@@ -117,6 +117,26 @@ internal static class WindowsPublishContractTests
         }
     }
 
+    [KeyinaTest("release restores managed dependencies before cleaning outputs")]
+    private static void ReleaseRestoresBeforeClean()
+    {
+        var releaseScript = File.ReadAllText(Path.Combine(
+            RepositoryPaths.Root,
+            "scripts",
+            "windows",
+            "build-release.ps1"));
+        var restore = releaseScript.IndexOf(
+            "@('restore', 'Keyina.slnx')",
+            StringComparison.Ordinal);
+        var clean = releaseScript.IndexOf(
+            "@('clean', 'Keyina.slnx', '-c', 'Release')",
+            StringComparison.Ordinal);
+
+        AssertEx.True(
+            restore >= 0 && clean > restore,
+            "Release must restore managed packages and runtime packs before dotnet clean.");
+    }
+
     [KeyinaTest("release packaging publishes from an isolated staging directory")]
     private static void ReleasePackagingUsesStagingDirectory()
     {

@@ -219,6 +219,7 @@ if (-not $SkipVerification -and -not $SkipBuildTests) {
     Invoke-Checked 'python.exe' @('tools/check_vectors.py')
     Invoke-Checked 'python.exe' @('tools/test_compare_benchmark.py')
 
+    Invoke-Checked 'dotnet.exe' @('restore', 'Keyina.slnx')
     Invoke-Checked 'dotnet.exe' @('clean', 'Keyina.slnx', '-c', 'Release')
     Invoke-Checked 'dotnet.exe' (@('build', 'Keyina.slnx', '-c', 'Release') + $versionProperties)
     Invoke-Checked 'dotnet.exe' @(
