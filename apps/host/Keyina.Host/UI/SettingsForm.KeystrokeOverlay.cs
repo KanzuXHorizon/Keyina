@@ -26,15 +26,15 @@ public sealed partial class SettingsForm
             "Hiển thị overlay phím gõ");
         keystrokeOverlayPresentationToggle = CreateToggle(
             "keystrokeOverlayPresentationToggle",
-            "Chế độ trình chiếu");
+            "Ghim overlay theo vị trí");
         keystrokeOverlayMotion = CreateOverlaySelector(
             "keystrokeOverlayMotion",
             "Mức chuyển động",
             ["Thích ứng — khuyến nghị", "Đầy đủ", "Giảm chuyển động", "Tắt"]);
         keystrokeOverlayCorner = CreateOverlaySelector(
             "keystrokeOverlayCorner",
-            "Góc dự phòng",
-            ["Phải dưới", "Trái dưới", "Phải trên", "Trái trên"]);
+            "Vị trí ghim hoặc dự phòng",
+            ["Phải dưới", "Trái dưới", "Phải trên", "Trái trên", "Giữa dưới", "Giữa trên"]);
         keystrokeOverlaySize = CreateOverlayNumber(
             "keystrokeOverlaySize",
             "Kích thước overlay theo phần trăm",
@@ -106,7 +106,7 @@ public sealed partial class SettingsForm
         var heading = CreateIconTextLayout(
             "\uE8D7",
             "Overlay phím gõ",
-            "Hiện token gõ rồi chuyển mượt thành chữ tiếng Việt hoàn chỉnh. Tự ẩn trong trường bảo mật và không giữ lịch sử.");
+            "Bám theo con trỏ khi gõ; có thể ghim ở giữa trên, giữa dưới hoặc các góc. Tự ẩn trong trường bảo mật và không giữ lịch sử.");
         layout.SetColumnSpan(heading, 2);
         layout.Controls.Add(heading, 0, 0);
 
@@ -120,7 +120,7 @@ public sealed partial class SettingsForm
         var hidePanel = CreateOverlayNumberPanel(keystrokeOverlayHideDelay, "ms");
         AddOverlaySetting(layout, 5, "Tự ẩn", hidePanel);
 
-        AddOverlaySetting(layout, 6, "Góc dự phòng", keystrokeOverlayCorner);
+        AddOverlaySetting(layout, 6, "Vị trí ghim / dự phòng", keystrokeOverlayCorner);
         AddOverlaySetting(layout, 7, "Âm thanh", keystrokeOverlaySoundToggle);
         var soundPanel = CreateOverlayNumberPanel(keystrokeOverlaySoundVolume, "%");
         AddOverlaySetting(layout, 8, "Âm lượng", soundPanel);

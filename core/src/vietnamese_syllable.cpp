@@ -114,7 +114,15 @@ std::u32string_view View(const std::array<char32_t, kMaximumSyllableLength>& dat
 }
 
 SyllableAnalysis Failure(SyllableError error) noexcept {
-  return {.status = SyllableStatus::Impossible, .error = error};
+  return {
+      .status = SyllableStatus::Impossible,
+      .error = error,
+      .onset = {},
+      .nucleus = {},
+      .coda = {},
+      .tone = Tone::None,
+      .tone_index = std::u32string_view::npos,
+  };
 }
 
 }  // namespace
@@ -168,6 +176,10 @@ SyllableAnalysis AnalyzeVietnameseSyllable(
           .status = SyllableStatus::RecoverablePrefix,
           .error = SyllableError::MissingNucleus,
           .onset = syllable,
+          .nucleus = {},
+          .coda = {},
+          .tone = Tone::None,
+          .tone_index = std::u32string_view::npos,
       };
     }
     return Failure(SyllableError::MissingNucleus);
@@ -240,6 +252,11 @@ SyllableAnalysis AnalyzeVietnameseSyllable(
         return {
             .status = SyllableStatus::Ambiguous,
             .error = SyllableError::InvalidCoda,
+            .onset = {},
+            .nucleus = {},
+            .coda = {},
+            .tone = Tone::None,
+            .tone_index = std::u32string_view::npos,
         };
       }
       return Failure(SyllableError::InvalidCoda);

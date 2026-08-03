@@ -211,7 +211,7 @@ internal static class SettingsFormTests
             SizePercent: 125,
             OpacityPercent: 80,
             HideDelayMilliseconds: 1_400,
-            FallbackCorner: KeystrokeOverlayFallbackCorner.TopLeft,
+            FallbackCorner: KeystrokeOverlayFallbackCorner.TopCenter,
             PresentationMode: true,
             PerKeySoundEnabled: true,
             SoundVolumePercent: 35);
@@ -223,10 +223,12 @@ internal static class SettingsFormTests
             Location = new Point(-1200, 100),
         };
 
+        var positionSelector = (ComboBox)form.Controls.Find(
+            "keystrokeOverlayCorner", true).Single();
+        AssertEx.Equal(6, positionSelector.Items.Count);
         AssertEx.Equal(
-            (int)KeystrokeOverlayFallbackCorner.TopLeft,
-            ((ComboBox)form.Controls.Find(
-                "keystrokeOverlayCorner", true).Single()).SelectedIndex);
+            (int)KeystrokeOverlayFallbackCorner.TopCenter,
+            positionSelector.SelectedIndex);
         ((NumericUpDown)form.Controls.Find(
             "keystrokeOverlaySize", true).Single()).Value = 130;
 
@@ -234,7 +236,7 @@ internal static class SettingsFormTests
         AssertEx.Equal(130, saved[^1].SizePercent);
         AssertEx.Equal(KeystrokeOverlayMotionLevel.Reduced, saved[^1].Motion);
         AssertEx.Equal(
-            KeystrokeOverlayFallbackCorner.TopLeft,
+            KeystrokeOverlayFallbackCorner.TopCenter,
             saved[^1].FallbackCorner);
         AssertEx.True(
             saved[^1].PresentationMode,

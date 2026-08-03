@@ -22,6 +22,8 @@ OverlayPoint ResolveFallbackAnchor(
   const int right = area.right - input.margin - input.overlay_size.width;
   const int top = area.top + input.margin;
   const int bottom = area.bottom - input.margin - input.overlay_size.height;
+  const int center = area.left +
+      (area.Width() - input.overlay_size.width) / 2;
 
   switch (input.fallback_corner) {
     case KeystrokeOverlayFallbackCorner::BottomLeft:
@@ -30,6 +32,10 @@ OverlayPoint ResolveFallbackAnchor(
       return {right, top};
     case KeystrokeOverlayFallbackCorner::TopLeft:
       return {left, top};
+    case KeystrokeOverlayFallbackCorner::BottomCenter:
+      return {center, bottom};
+    case KeystrokeOverlayFallbackCorner::TopCenter:
+      return {center, top};
     case KeystrokeOverlayFallbackCorner::BottomRight:
     default:
       return {right, bottom};
@@ -74,7 +80,8 @@ KeystrokeOverlayPlacement ResolveKeystrokeOverlayPlacement(
 
   OverlayPoint anchor{};
   bool placed_above = false;
-  bool fallback = !input.caret_reliable || !input.caret.IsValid();
+  bool fallback = input.force_fallback ||
+      !input.caret_reliable || !input.caret.IsValid();
 
   if (fallback) {
     anchor = ResolveFallbackAnchor(input);

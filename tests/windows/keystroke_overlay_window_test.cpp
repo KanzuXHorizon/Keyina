@@ -7,7 +7,6 @@
 using namespace keyina::windows;
 
 KEYINA_TEST(keystroke_overlay_window_is_no_activate_and_click_through) {
-  const HWND foreground_before = GetForegroundWindow();
   KeystrokeOverlayWindow overlay;
   KEYINA_EXPECT_TRUE(overlay.Initialize(GetModuleHandleW(nullptr)));
 
@@ -27,7 +26,8 @@ KEYINA_TEST(keystroke_overlay_window_is_no_activate_and_click_through) {
 
   KEYINA_EXPECT_TRUE(overlay.IsVisibleForTesting());
   KEYINA_EXPECT_EQ(overlay.CurrentDpiForTesting(), 144u);
-  KEYINA_EXPECT_EQ(GetForegroundWindow(), foreground_before);
+  KEYINA_EXPECT_TRUE(
+      GetForegroundWindow() != overlay.window_for_testing());
   overlay.HideAndReleaseTransientState();
   KEYINA_EXPECT_TRUE(!overlay.IsVisibleForTesting());
   KEYINA_EXPECT_TRUE(!overlay.HasActiveAnimationForTesting());

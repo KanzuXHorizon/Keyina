@@ -37,6 +37,7 @@ struct KeystrokeOverlayPlacementInput {
   int margin{12};
   int stability_threshold{8};
   bool caret_reliable{};
+  bool force_fallback{};
   bool has_last_stable_anchor{};
   bool monitor_changed{};
 };

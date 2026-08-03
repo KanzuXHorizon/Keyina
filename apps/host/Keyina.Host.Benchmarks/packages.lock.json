@@ -18,9 +18,9 @@
       "keyina.host": {
         "type": "Project",
         "dependencies": {
-          "Keyina.Host.Core": "[0.1.6, )",
-          "Keyina.Host.Windows": "[0.1.6, )",
-          "Keyina.Speechmatics": "[0.1.6, )"
+          "Keyina.Host.Core": "[0.1.7, )",
+          "Keyina.Host.Windows": "[0.1.7, )",
+          "Keyina.Speechmatics": "[0.1.7, )"
         }
       },
       "keyina.host.core": {
@@ -29,7 +29,7 @@
       "keyina.host.windows": {
         "type": "Project",
         "dependencies": {
-          "Keyina.Host.Core": "[0.1.6, )",
+          "Keyina.Host.Core": "[0.1.7, )",
           "NAudio.Wasapi": "[2.3.0, )"
         }
       },

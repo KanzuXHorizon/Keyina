@@ -55,6 +55,28 @@ KEYINA_TEST(keystroke_overlay_positioner_supports_fallback_corners) {
   placement = ResolveKeystrokeOverlayPlacement(input);
   KEYINA_EXPECT_EQ(placement.bounds.left, 12);
   KEYINA_EXPECT_EQ(placement.bounds.top, 12);
+
+  input.fallback_corner = KeystrokeOverlayFallbackCorner::BottomCenter;
+  placement = ResolveKeystrokeOverlayPlacement(input);
+  KEYINA_EXPECT_EQ(placement.bounds.left, 840);
+  KEYINA_EXPECT_EQ(placement.bounds.bottom, 1068);
+
+  input.fallback_corner = KeystrokeOverlayFallbackCorner::TopCenter;
+  placement = ResolveKeystrokeOverlayPlacement(input);
+  KEYINA_EXPECT_EQ(placement.bounds.left, 840);
+  KEYINA_EXPECT_EQ(placement.bounds.top, 12);
+}
+
+KEYINA_TEST(keystroke_overlay_positioner_forces_presentation_position) {
+  auto input = BaseInput();
+  input.force_fallback = true;
+  input.fallback_corner = KeystrokeOverlayFallbackCorner::BottomCenter;
+
+  const auto placement = ResolveKeystrokeOverlayPlacement(input);
+
+  KEYINA_EXPECT_TRUE(placement.used_fallback);
+  KEYINA_EXPECT_EQ(placement.bounds.left, 840);
+  KEYINA_EXPECT_EQ(placement.bounds.bottom, 1068);
 }
 
 KEYINA_TEST(keystroke_overlay_positioner_clamps_long_overlay) {

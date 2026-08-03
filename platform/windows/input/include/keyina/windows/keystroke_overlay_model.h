@@ -59,6 +59,8 @@ enum class KeystrokeOverlayFallbackCorner : std::uint8_t {
   BottomLeft,
   TopRight,
   TopLeft,
+  BottomCenter,
+  TopCenter,
 };
 
 struct KeystrokeOverlayPreferences {
@@ -146,5 +148,11 @@ struct KeystrokeOverlayMotionDecision {
 [[nodiscard]] bool ShouldShowKeystrokeOverlayCompositionText(
     std::u16string_view composition,
     bool transformed) noexcept;
+
+[[nodiscard]] bool ShouldClearKeystrokeOverlayComposition(
+    std::uint16_t virtual_key,
+    bool control,
+    bool alt,
+    bool windows) noexcept;
 
 }  // namespace keyina::windows

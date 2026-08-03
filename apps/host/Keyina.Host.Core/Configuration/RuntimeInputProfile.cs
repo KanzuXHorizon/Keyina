@@ -25,7 +25,8 @@ public static class RuntimeInputProfileCodec
 
     private const int LegacyChecksumOffset = 32;
     private const byte LegacyFormatVersion = 2;
-    private const byte FormatVersion = 3;
+    private const byte PreviousFormatVersion = 3;
+    private const byte FormatVersion = 4;
     private const byte BindingCount = 6;
     private const byte VietnameseEnabledFlag = 1 << 0;
     private const byte SpeechEnabledFlag = 1 << 1;
@@ -40,8 +41,12 @@ public static class RuntimeInputProfileCodec
     private const int OverlayMotionShift = 1;
     private const byte OverlayMotionMask = 0b0000_0110;
     private const int OverlayCornerShift = 3;
-    private const byte OverlayCornerMask = 0b0001_1000;
-    private const byte OverlayPresentationFlag = 1 << 5;
+    private const byte PreviousOverlayCornerMask = 0b0001_1000;
+    private const byte PreviousOverlayPresentationFlag = 1 << 5;
+    private const byte PreviousKnownOverlayFlags = OverlayEnabledFlag | OverlayMotionMask |
+        PreviousOverlayCornerMask | PreviousOverlayPresentationFlag;
+    private const byte OverlayCornerMask = 0b0011_1000;
+    private const byte OverlayPresentationFlag = 1 << 6;
     private const byte KnownOverlayFlags = OverlayEnabledFlag | OverlayMotionMask |
         OverlayCornerMask | OverlayPresentationFlag;
 
@@ -90,7 +95,7 @@ public static class RuntimeInputProfileCodec
         }
         var version = bytes[4];
         var expectedLength = version == LegacyFormatVersion ? LegacyEncodedLength :
-            version == FormatVersion ? EncodedLength : 0;
+            version is PreviousFormatVersion or FormatVersion ? EncodedLength : 0;
         if (expectedLength == 0)
         {
             throw new InvalidDataException($"Unsupported runtime input profile version: {version}.");
@@ -128,7 +133,7 @@ public static class RuntimeInputProfileCodec
             var flags = bytes[6];
             var overlay = version == LegacyFormatVersion
                 ? KeystrokeOverlayPreferences.Default
-                : DecodeOverlay(bytes);
+                : DecodeOverlay(bytes, version);
             return new RuntimeInputProfileSnapshot(
                 (flags & VietnameseEnabledFlag) != 0,
                 (flags & SpeechEnabledFlag) != 0,
@@ -148,21 +153,29 @@ public static class RuntimeInputProfileCodec
         }
     }
 
-    private static KeystrokeOverlayPreferences DecodeOverlay(ReadOnlySpan<byte> bytes)
+    private static KeystrokeOverlayPreferences DecodeOverlay(
+        ReadOnlySpan<byte> bytes,
+        byte version)
     {
         var flags = bytes[26];
-        if ((flags & ~KnownOverlayFlags) != 0)
+        var previousFormat = version == PreviousFormatVersion;
+        var knownFlags = previousFormat ? PreviousKnownOverlayFlags : KnownOverlayFlags;
+        if ((flags & ~knownFlags) != 0)
         {
             throw new InvalidDataException("Runtime overlay profile contains unsupported flags.");
         }
+        var cornerMask = previousFormat ? PreviousOverlayCornerMask : OverlayCornerMask;
+        var presentationFlag = previousFormat
+            ? PreviousOverlayPresentationFlag
+            : OverlayPresentationFlag;
         var preferences = new KeystrokeOverlayPreferences(
             (flags & OverlayEnabledFlag) != 0,
             (KeystrokeOverlayMotionLevel)((flags & OverlayMotionMask) >> OverlayMotionShift),
             bytes[27],
             bytes[32],
             BinaryPrimitives.ReadUInt16LittleEndian(bytes.Slice(33, sizeof(ushort))),
-            (KeystrokeOverlayFallbackCorner)((flags & OverlayCornerMask) >> OverlayCornerShift),
-            (flags & OverlayPresentationFlag) != 0,
+            (KeystrokeOverlayFallbackCorner)((flags & cornerMask) >> OverlayCornerShift),
+            (flags & presentationFlag) != 0,
             (bytes[35] & 0x80) != 0,
             bytes[35] & 0x7F);
         preferences.Validate();

@@ -169,7 +169,7 @@ bool KeystrokeOverlayPreferences::IsValid() const noexcept {
              static_cast<std::uint8_t>(KeystrokeOverlayMotionLevel::Off) &&
       static_cast<std::uint8_t>(fallback_corner) <=
           static_cast<std::uint8_t>(
-              KeystrokeOverlayFallbackCorner::TopLeft) &&
+              KeystrokeOverlayFallbackCorner::TopCenter) &&
       size_percent >= 75 && size_percent <= 150 &&
       opacity_percent >= 25 && opacity_percent <= 100 &&
       hide_delay_milliseconds >= 500 &&
@@ -199,6 +199,22 @@ KeystrokeOverlayState KeystrokeOverlayReducer::Apply(
   }
 
   if (event.kind == KeystrokeOverlayEventKind::Token) {
+    if (!event.text.empty()) {
+      const auto snapshot = event.text.View();
+      const std::size_t offset = snapshot.size() > kMaximumOverlayTokens
+          ? snapshot.size() - kMaximumOverlayTokens
+          : 0;
+      const std::size_t count = snapshot.size() - offset;
+      next.tokens.fill(0);
+      if (count != 0) {
+        std::copy_n(snapshot.begin() + offset, count, next.tokens.begin());
+      }
+      next.token_count = count;
+      next.text.Clear();
+      next.truncated = event.text.truncated() || offset != 0;
+      next.visible = count != 0;
+      return next;
+    }
     if (event.token == 0) {
       return next;
     }
@@ -270,6 +286,35 @@ bool ShouldShowKeystrokeOverlayCompositionText(
       std::any_of(composition.begin(), composition.end(), [](char16_t unit) {
         return unit > 0x7F;
       });
+}
+
+bool ShouldClearKeystrokeOverlayComposition(
+    std::uint16_t virtual_key,
+    bool control,
+    bool alt,
+    bool windows) noexcept {
+  if (control || alt || windows) {
+    return true;
+  }
+
+  switch (virtual_key) {
+    case 0x09:  // Tab
+    case 0x0D:  // Enter
+    case 0x1B:  // Escape
+    case 0x21:  // Page Up
+    case 0x22:  // Page Down
+    case 0x23:  // End
+    case 0x24:  // Home
+    case 0x25:  // Left
+    case 0x26:  // Up
+    case 0x27:  // Right
+    case 0x28:  // Down
+    case 0x2D:  // Insert
+    case 0x2E:  // Delete
+      return true;
+    default:
+      return false;
+  }
 }
 
 }  // namespace keyina::windows

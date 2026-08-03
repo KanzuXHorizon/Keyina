@@ -51,12 +51,13 @@ jobs:
           dotnet run --project apps/host/Keyina.Host/Keyina.Host.csproj -c Release --no-build -- --resource-self-test |
             Out-File -Encoding utf8 host-resource-result.json
           Get-Content host-resource-result.json -Raw | ConvertFrom-Json | Out-Null
-      - name: Run host and speech benchmarks
+      - name: Run managed benchmarks
         shell: pwsh
         run: |
-          dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build |
-            Out-File -Encoding utf8 host-benchmark-result.json
-          Get-Content host-benchmark-result.json -Raw | ConvertFrom-Json | Out-Null
+          $output = Join-Path $env:GITHUB_WORKSPACE 'artifacts\benchmarks\managed'
+          dotnet run --project apps/host/Keyina.Host.Benchmarks/Keyina.Host.Benchmarks.csproj -c Release --no-build -- --suite all --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content (Join-Path $output 'managed.json') -Raw | ConvertFrom-Json | Out-Null
       - name: Regenerate brand assets
         run: dotnet run --project tools/brand/Keyina.BrandAssets/Keyina.BrandAssets.csproj -c Release --no-build -- generate --root ${{ github.workspace }}
       - name: Verify deterministic brand tree
@@ -91,8 +92,10 @@ jobs:
           name: windows-performance-evidence
           path: |
             benchmark-result.json
-            host-benchmark-result.json
             host-resource-result.json
+            artifacts/benchmarks/managed/managed.json
+            artifacts/benchmarks/managed/managed.csv
+            artifacts/benchmarks/managed/managed.md
 
   linux-clang-sanitizers:
     runs-on: ubuntu-24.04

@@ -38,6 +38,47 @@ KEYINA_TEST(keystroke_overlay_model_retains_newest_sixteen_tokens) {
   KEYINA_EXPECT_TRUE(state.truncated);
 }
 
+KEYINA_TEST(keystroke_overlay_token_snapshot_survives_overwritten_updates) {
+  KeystrokeOverlayReducer reducer;
+  KeystrokeOverlayState state{};
+
+  KeystrokeOverlayEvent old_word{};
+  old_word.kind = KeystrokeOverlayEventKind::Token;
+  old_word.SetText(u"old");
+  old_word.token = u'd';
+  old_word.generation = 1;
+  state = reducer.Apply(state, old_word);
+
+  KeystrokeOverlayEvent new_word{};
+  new_word.kind = KeystrokeOverlayEventKind::Token;
+  new_word.SetText(u"new");
+  new_word.token = u'w';
+  new_word.generation = 4;
+  state = reducer.Apply(state, new_word);
+
+  KEYINA_EXPECT_EQ(state.token_count, std::size_t{3});
+  KEYINA_EXPECT_EQ(state.tokens[0], u'n');
+  KEYINA_EXPECT_EQ(state.tokens[1], u'e');
+  KEYINA_EXPECT_EQ(state.tokens[2], u'w');
+  KEYINA_EXPECT_TRUE(state.text.empty());
+}
+
+KEYINA_TEST(keystroke_overlay_token_snapshot_keeps_the_newest_sixteen_units) {
+  KeystrokeOverlayReducer reducer;
+  KeystrokeOverlayEvent event{};
+  event.kind = KeystrokeOverlayEventKind::Token;
+  event.SetText(u"abcdefghijklmnopqrst");
+  event.token = u't';
+  event.generation = 1;
+
+  const auto state = reducer.Apply({}, event);
+
+  KEYINA_EXPECT_EQ(state.token_count, std::size_t{16});
+  KEYINA_EXPECT_EQ(state.tokens.front(), u'e');
+  KEYINA_EXPECT_EQ(state.tokens[15], u't');
+  KEYINA_EXPECT_TRUE(state.truncated);
+}
+
 KEYINA_TEST(keystroke_overlay_composition_replaces_raw_token_history) {
   KeystrokeOverlayReducer reducer;
   KeystrokeOverlayState state{};
@@ -253,6 +294,19 @@ KEYINA_TEST(keystroke_overlay_composition_stays_in_text_mode_after_transform) {
       ShouldShowKeystrokeOverlayCompositionText(u"nguyen", true));
   KEYINA_EXPECT_TRUE(
       !ShouldShowKeystrokeOverlayCompositionText(u"nguyen", false));
+}
+
+KEYINA_TEST(keystroke_overlay_clears_on_shortcuts_and_navigation) {
+  KEYINA_EXPECT_TRUE(
+      ShouldClearKeystrokeOverlayComposition(0x2E, true, false, false));
+  KEYINA_EXPECT_TRUE(
+      ShouldClearKeystrokeOverlayComposition(0x2E, false, false, false));
+  KEYINA_EXPECT_TRUE(
+      ShouldClearKeystrokeOverlayComposition(0x25, false, false, false));
+  KEYINA_EXPECT_TRUE(
+      !ShouldClearKeystrokeOverlayComposition(0x08, false, false, false));
+  KEYINA_EXPECT_TRUE(
+      !ShouldClearKeystrokeOverlayComposition(0x41, false, false, false));
 }
 
 KEYINA_TEST(keystroke_overlay_preferences_validate_budgets) {

@@ -200,7 +200,8 @@ InputDecision ResidentInputController::ProcessKeyDown(
     return {};
   }
 
-  if (event.key_repeat && suppressed_keys_.Get(event.virtual_key)) {
+  if (event.key_repeat && event.virtual_key != kBackspace &&
+      suppressed_keys_.Get(event.virtual_key)) {
     InputDecision decision{};
     decision.suppress = true;
     return decision;
@@ -222,9 +223,19 @@ InputDecision ResidentInputController::ProcessKeyDown(
       snippet_matcher_.ProcessBackspace();
       engine_.Reset();
       pointer_observation_required_ = false;
-    } else {
-      ResetEngineState();
+      return {};
     }
+    if (!engine_.RawKeys().empty()) {
+      const auto edit = engine_.ProcessView(KeyEvent{
+          KeyKind::Backspace, U'\0', false, false, false});
+      auto decision = BuildDecision(edit, U'\0');
+      pointer_observation_required_ = !engine_.RawKeys().empty();
+      if (decision.suppress) {
+        suppressed_keys_.Set(event.virtual_key, true);
+      }
+      return decision;
+    }
+    ResetEngineState();
     return {};
   }
 

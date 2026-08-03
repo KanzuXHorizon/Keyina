@@ -246,6 +246,7 @@ class Win32InputRuntime {
       std::uint64_t generation) noexcept;
   void RequestKeystrokeOverlayUpdate() noexcept;
   void UpdateKeystrokeOverlay() noexcept;
+  void ClearKeystrokeOverlay() noexcept;
   void SuppressKeystrokeOverlay() noexcept;
   void UpdateKeystrokeOverlayComposition(
       const PhysicalKeyEvent& event,
