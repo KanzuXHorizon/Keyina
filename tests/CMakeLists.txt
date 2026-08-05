@@ -30,6 +30,7 @@ if(WIN32)
     windows/native_latency_histogram_test.cpp
     windows/pointer_input_test.cpp
     windows/resident_input_controller_test.cpp
+    windows/resource_self_test_policy_test.cpp
     windows/runtime_hotkeys_test.cpp
     windows/runtime_profile_test.cpp
     windows/runtime_snippet_matcher_test.cpp

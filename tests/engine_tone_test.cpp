@@ -202,6 +202,14 @@ KEYINA_TEST(repeated_tone_key_escapes_to_literal_telex) {
   }
 }
 
+KEYINA_TEST(latin_word_russt_preserves_repeated_s) {
+  keyina::Engine engine({
+      .restore_invalid_word = true,
+  });
+  KEYINA_EXPECT_EQ(TypeSequence(engine, U"russt"),
+                   std::u32string{U"russt"});
+}
+
 KEYINA_TEST(latin_word_lossless_preserves_repeated_s) {
   keyina::Engine engine({
       .restore_invalid_word = true,

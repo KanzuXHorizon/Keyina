@@ -1,3 +1,4 @@
+#include <keyina/windows/resource_self_test_policy.h>
 #include <keyina/windows/win32_input_runtime.h>
 
 #include <psapi.h>
@@ -12,6 +13,7 @@
 namespace {
 
 constexpr int kAlreadyRunningExitCode = 17;
+constexpr int kResourceSelfTestBlockedExitCode = 77;
 constexpr wchar_t kMutexName[] = L"Local\\Keyina.NativeInput";
 constexpr wchar_t kWindowClassName[] = L"KeyinaNativeInputWindow";
 constexpr UINT kSettingsMenuCommand = 1002;
@@ -19,6 +21,15 @@ constexpr UINT kExitMenuCommand = 1003;
 constexpr DWORD kCommandForwardTimeoutMilliseconds = 2'000;
 constexpr ULONG_PTR kSelfTestInputMarker =
     static_cast<ULONG_PTR>(0x4B455954455354ULL);
+
+bool ExistingResidentIsRunning() noexcept {
+  HANDLE existing = OpenMutexW(SYNCHRONIZE, FALSE, kMutexName);
+  if (existing != nullptr) {
+    CloseHandle(existing);
+    return true;
+  }
+  return GetLastError() == ERROR_ACCESS_DENIED;
+}
 
 bool ForwardCommandToExistingResident(UINT command) noexcept {
   const ULONGLONG deadline =
@@ -2230,6 +2241,20 @@ int RunResourceSelfTest(bool enable_tray) noexcept {
   constexpr std::string_view kPassMarker = "\"budget_pass\":true";
   constexpr std::string_view kContaminatedMarker =
       "\"contaminated_by_input\":true";
+  constexpr std::string_view kRuntimeStartFailureMarker =
+      "\"error\":\"runtime_start_failed\"";
+
+  if (keyina::windows::ClassifyResourceSelfTestAttempt(
+          ExistingResidentIsRunning(),
+          true,
+          false,
+          false) ==
+      keyina::windows::ResourceSelfTestDisposition::BlockedByExistingResident) {
+    WriteStandardOutput(
+        "{\"error\":\"resource_self_test_blocked_by_existing_resident\"}\n");
+    return kResourceSelfTestBlockedExitCode;
+  }
+
   for (int attempt = 0; attempt < kMaximumAttempts; ++attempt) {
     const auto child = RunResourceSelfTestChild(enable_tray);
     if (!child.launched || child.timed_out) {
@@ -2241,14 +2266,25 @@ int RunResourceSelfTest(bool enable_tray) noexcept {
     }
     const std::string_view output(child.output.data(), child.output_size);
     WriteStandardOutput(output);
-    if (child.exit_code == 0 && output.find(kPassMarker) !=
-                                    std::string_view::npos) {
-      return 0;
+    const auto disposition =
+        keyina::windows::ClassifyResourceSelfTestAttempt(
+            false,
+            output.find(kRuntimeStartFailureMarker) == std::string_view::npos,
+            output.find(kContaminatedMarker) != std::string_view::npos,
+            child.exit_code == 0 &&
+                output.find(kPassMarker) != std::string_view::npos);
+    switch (disposition) {
+      case keyina::windows::ResourceSelfTestDisposition::Pass:
+        return 0;
+      case keyina::windows::ResourceSelfTestDisposition::RetryContaminated:
+        Sleep(200);
+        break;
+      case keyina::windows::ResourceSelfTestDisposition::BlockedByExistingResident:
+        return kResourceSelfTestBlockedExitCode;
+      case keyina::windows::ResourceSelfTestDisposition::FailBudget:
+      case keyina::windows::ResourceSelfTestDisposition::FailRuntime:
+        return 1;
     }
-    if (output.find(kContaminatedMarker) == std::string_view::npos) {
-      return 1;
-    }
-    Sleep(200);
   }
   return 1;
 }

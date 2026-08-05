@@ -126,6 +126,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         runtimeSnippetProfileStore = new RuntimeSnippetProfileStore(
             options.ResolveRuntimeSnippetProfilePath());
         configuration = LoadConfiguration();
+        FluentTheme.SetPreference(configuration.Theme);
         this.applicationExclusions.Update(configuration.Applications);
         if (translationProvider is null)
         {
@@ -838,6 +839,19 @@ public sealed class KeyinaApplicationContext : ApplicationContext
     private void SetSpeechEnabled(bool enabled)
     {
         configuration = configuration with { SpeechEnabled = enabled };
+        _ = SaveConfigurationSafelyAsync();
+        RefreshVisualState();
+    }
+
+    private void SetTheme(KeyinaTheme theme)
+    {
+        if (!Enum.IsDefined(theme))
+        {
+            throw new ArgumentOutOfRangeException(nameof(theme), theme, null);
+        }
+
+        configuration = configuration with { Theme = theme };
+        FluentTheme.SetPreference(theme);
         _ = SaveConfigurationSafelyAsync();
         RefreshVisualState();
     }
@@ -1811,6 +1825,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
 
     private void ApplyImportedConfigurationToRuntime()
     {
+        FluentTheme.SetPreference(configuration.Theme);
         state = HostReducer.Reduce(
             state,
             new InputModeChanged(configuration.VietnameseEnabled));
@@ -1871,6 +1886,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
         SetFeedbackMode,
         PreviewFeedback)
     {
+        SetTheme = SetTheme,
         SetSpeechLanguage = SetSpeechLanguage,
         SetTranslationEnabled = SetTranslationEnabled,
         SetTranslationTargetLanguage = SetTranslationTargetLanguage,
@@ -2070,6 +2086,7 @@ public sealed class KeyinaApplicationContext : ApplicationContext
             configuration.Feedback?.Mode ?? FeedbackMode.Automatic)
         {
             Health = health,
+            Theme = configuration.Theme,
             SpeechLanguage = configuration.SpeechLanguage,
             TranslationEnabled = configuration.TranslationEnabled,
             TranslationCredentialConfigured = translationCredentialConfigured,

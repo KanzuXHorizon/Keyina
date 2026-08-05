@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "environment": {
+    "os": "windows",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "compiler": "msvc-1944",
+    "build_type": "release",
+    "warmup_iterations": 20000,
+    "measured_iterations": 100000
+  },
+  "cases": [
+    {"name": "ascii_pass_through", "median_ns": 100, "p95_ns": 100, "p99_ns": 200, "max_ns": 64700, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "letter_modifier", "median_ns": 100, "p95_ns": 200, "p99_ns": 300, "max_ns": 93800, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "tone_update", "median_ns": 200, "p95_ns": 200, "p99_ns": 300, "max_ns": 130600, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "complete_word_tieengs", "median_ns": 1700, "p95_ns": 2400, "p99_ns": 3100, "max_ns": 174600, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "complete_word_Vieetj", "median_ns": 1500, "p95_ns": 2100, "p99_ns": 2700, "max_ns": 86200, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "delayed_modifier_truowcs", "median_ns": 2700, "p95_ns": 4300, "p99_ns": 6300, "max_ns": 183300, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "backspace_recomposition", "median_ns": 1900, "p95_ns": 2800, "p99_ns": 4100, "max_ns": 146400, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "guard_protected_url", "median_ns": 1000, "p95_ns": 1800, "p99_ns": 2100, "max_ns": 359400, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "guard_protected_email", "median_ns": 7400, "p95_ns": 13100, "p99_ns": 21500, "max_ns": 1.3041e+07, "allocations_per_operation": 0, "allocation_budget": 1, "budget_pass": true},
+    {"name": "guard_protected_ipv6", "median_ns": 100, "p95_ns": 200, "p99_ns": 300, "max_ns": 3.3239e+06, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "valid_syllable_analysis", "median_ns": 700, "p95_ns": 1100, "p99_ns": 1200, "max_ns": 3.0087e+06, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true},
+    {"name": "invalid_boundary_restore", "median_ns": 22900, "p95_ns": 39800, "p99_ns": 220300, "max_ns": 1.03566e+07, "allocations_per_operation": 0, "allocation_budget": 1, "budget_pass": true},
+    {"name": "context_guard_64_codepoints", "median_ns": 200, "p95_ns": 300, "p99_ns": 300, "max_ns": 667100, "allocations_per_operation": 0, "allocation_budget": 0, "budget_pass": true}
+  ],
+  "checksum": 22880000
+}

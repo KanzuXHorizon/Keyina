@@ -26,7 +26,9 @@ function Invoke-CheckedCapturedProcess {
         [Parameter()]
         [string]$Arguments = '',
         [Parameter()]
-        [string]$WorkingDirectory = $repoRoot
+        [string]$WorkingDirectory = $repoRoot,
+        [Parameter()]
+        [int[]]$AllowedExitCodes = @(0)
     )
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -52,10 +54,11 @@ function Invoke-CheckedCapturedProcess {
         if (-not [string]::IsNullOrWhiteSpace($standardError)) {
             Write-Host $standardError.TrimEnd() -ForegroundColor DarkYellow
         }
-        if ($process.ExitCode -ne 0) {
+        if ($AllowedExitCodes -notcontains $process.ExitCode) {
             throw "$FilePath failed with exit code $($process.ExitCode)."
         }
         return [pscustomobject]@{
+            ExitCode = $process.ExitCode
             StandardOutput = $standardOutput
             StandardError = $standardError
         }
@@ -184,13 +187,19 @@ if ($reportedVersion -ne [string]$manifest.version) {
 foreach ($selfTest in @('--self-test', '--speech-self-test', '--hotkey-self-test')) {
     $null = Invoke-CheckedCapturedProcess $publishedHost $selfTest $publishDir
 }
-foreach ($selfTest in @(
-    '--self-test',
-    '--resource-self-test',
-    '--tray-resource-self-test',
-    '--profile-reload-self-test'
-)) {
+foreach ($selfTest in @('--self-test', '--profile-reload-self-test')) {
     $null = Invoke-CheckedCapturedProcess $publishedResident $selfTest $publishDir
+}
+$resourceSelfTestBlockedMarker =
+    '{"error":"resource_self_test_blocked_by_existing_resident"}'
+foreach ($selfTest in @('--resource-self-test', '--tray-resource-self-test')) {
+    $result = Invoke-CheckedCapturedProcess -FilePath $publishedResident -Arguments $selfTest -WorkingDirectory $publishDir -AllowedExitCodes @(0, 77)
+    if ($result.ExitCode -eq 77) {
+        if ($result.StandardOutput.Trim() -ne $resourceSelfTestBlockedMarker) {
+            throw "$selfTest returned the blocked exit code without the expected marker."
+        }
+        Write-Host "[SKIP] ${selfTest}: an installed resident is already running."
+    }
 }
 if ($desktopInteractiveTestsEnabled) {
     $null = Invoke-CheckedCapturedProcess $publishedResident '--typing-self-test' $publishDir

@@ -56,11 +56,27 @@ internal static class SettingsResponsiveTests
         var diagnostics = (FluentNavigationButton)form.Controls.Find("navDiagnostics", true).Single();
         overview.Select();
         _ = overview.Focus();
+        AssertEx.Equal(AccessibleRole.PageTab, overview.AccessibleRole);
+        AssertEx.True(
+            overview.AccessibleDescription?.Contains(
+                "đang chọn",
+                StringComparison.OrdinalIgnoreCase) == true,
+            "Selected navigation item did not expose its state to accessibility clients.");
 
         var down = InvokeKeyDown(overview, Keys.Down);
         Application.DoEvents();
         AssertEx.True(typing.Selected && typing.Focused,
             "Down did not select and focus the next Settings section.");
+        AssertEx.True(
+            typing.AccessibleDescription?.Contains(
+                "đang chọn",
+                StringComparison.OrdinalIgnoreCase) == true,
+            "Keyboard navigation did not announce the newly selected section.");
+        AssertEx.False(
+            overview.AccessibleDescription?.Contains(
+                "đang chọn",
+                StringComparison.OrdinalIgnoreCase) == true,
+            "Previously selected navigation item kept a stale selected announcement.");
         AssertEx.True(down.Handled && down.SuppressKeyPress,
             "Handled navigation key was not suppressed.");
 

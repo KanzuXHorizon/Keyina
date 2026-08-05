@@ -278,6 +278,15 @@ KEYINA_TEST(resident_input_controller_keeps_checked_coda_editable_and_restores_l
   KEYINA_EXPECT_EQ(visible, std::u16string{u"meet "});
 }
 
+KEYINA_TEST(resident_input_controller_preserves_double_s_in_russt) {
+  ResidentInputController controller(
+      keyina::windows::DefaultRuntimeInputProfile());
+  std::u16string visible;
+
+  Type(controller, visible, U"russt");
+  KEYINA_EXPECT_EQ(visible, std::u16string{u"russt"});
+}
+
 KEYINA_TEST(resident_input_controller_preserves_double_s_in_lossless) {
   ResidentInputController controller(
       keyina::windows::DefaultRuntimeInputProfile());

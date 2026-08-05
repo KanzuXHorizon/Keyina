@@ -1,4 +1,5 @@
 using System.Security;
+using Keyina.Host.Core.Configuration;
 using Microsoft.Win32;
 
 namespace Keyina.Host.UI.Fluent;
@@ -49,6 +50,8 @@ public static class FluentTheme
     private const string PersonalizeKey =
         @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
+    private static int preference = (int)KeyinaTheme.System;
+
     private static readonly FluentThemePalette DarkPalette = new(
         FluentThemeMode.Dark,
         Window: Color.FromArgb(32, 32, 32),
@@ -93,24 +96,53 @@ public static class FluentTheme
         Error: Color.FromArgb(196, 43, 61),
         Focus: Color.FromArgb(0, 95, 184));
 
-    public static FluentThemePalette Current
-    {
-        get
-        {
-            if (SystemInformation.HighContrast)
-            {
-                return CreateHighContrastPalette();
-            }
+    public static KeyinaTheme Preference =>
+        (KeyinaTheme)Volatile.Read(ref preference);
 
-            return IsSystemDarkMode() ? DarkPalette : LightPalette;
+    public static FluentThemePalette Current => Resolve(
+        Preference,
+        SystemInformation.HighContrast,
+        IsSystemDarkMode());
+
+    public static void SetPreference(KeyinaTheme value)
+    {
+        if (!Enum.IsDefined(value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), value, null);
         }
+
+        Volatile.Write(ref preference, (int)value);
+    }
+
+    public static FluentThemePalette Resolve(
+        KeyinaTheme preference,
+        bool highContrast,
+        bool systemDark)
+    {
+        if (highContrast)
+        {
+            return CreateHighContrastPalette();
+        }
+
+        return preference switch
+        {
+            KeyinaTheme.Light => LightPalette,
+            KeyinaTheme.Dark => DarkPalette,
+            KeyinaTheme.System => systemDark ? DarkPalette : LightPalette,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(preference),
+                preference,
+                null),
+        };
     }
 
     public static string SystemThemeDescription => Current.Mode switch
     {
-        FluentThemeMode.Dark => "Tối · theo Windows",
-        FluentThemeMode.Light => "Sáng · theo Windows",
         FluentThemeMode.HighContrast => "Tương phản cao · theo Windows",
+        FluentThemeMode.Dark when Preference == KeyinaTheme.System => "Tối · theo Windows",
+        FluentThemeMode.Light when Preference == KeyinaTheme.System => "Sáng · theo Windows",
+        FluentThemeMode.Dark => "Tối · theo Keyina",
+        FluentThemeMode.Light => "Sáng · theo Keyina",
         _ => "Theo Windows",
     };
 

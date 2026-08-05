@@ -1,5 +1,6 @@
 using System.Reflection;
 using Keyina.Host.Core.Applications;
+using Keyina.Host.Core.Configuration;
 using Keyina.Host.Core.Feedback;
 using Keyina.Host.Core.Hotkeys;
 using Keyina.Host.Core.Overlay;
@@ -53,6 +54,45 @@ internal static class SettingsFormTests
         AssertEx.Equal("CƠ BẢN", ((Label)form.Controls.Find("navGroupCore", true).Single()).Text);
         AssertEx.Equal("CÔNG CỤ", ((Label)form.Controls.Find("navGroupTools", true).Single()).Text);
         AssertEx.Equal("HỆ THỐNG", ((Label)form.Controls.Find("navGroupSystem", true).Single()).Text);
+    }
+
+    [KeyinaTest("theme preference is visible accessible and persists from settings")]
+    private static void ThemePreferenceIsBound()
+    {
+        var previousTheme = Keyina.Host.UI.Fluent.FluentTheme.Preference;
+        try
+        {
+            var selectedThemes = new List<KeyinaTheme>();
+            var actions = SettingsActions.NoOp with
+            {
+                SetTheme = selectedThemes.Add,
+            };
+            using var form = new SettingsForm(
+                SettingsSnapshot.Sample with { Theme = KeyinaTheme.Dark },
+                actions);
+
+            var selector = (ComboBox)form.Controls.Find("themeSelector", true).Single();
+            AssertEx.Equal(3, selector.Items.Count);
+            AssertEx.Equal(2, selector.SelectedIndex);
+            AssertEx.Equal("Tối", selector.Text);
+            AssertEx.Equal(
+                KeyinaTheme.Dark,
+                Keyina.Host.UI.Fluent.FluentTheme.Preference);
+            AssertEx.Equal("Chủ đề giao diện", selector.AccessibleName);
+            AssertEx.True(
+                selector.AccessibleDescription?.Contains("Windows", StringComparison.Ordinal) == true,
+                "Theme selector did not explain the system-theme option.");
+            AssertEx.True(selector.TabStop, "Theme selector must remain keyboard reachable.");
+
+            selector.SelectedIndex = 1;
+
+            AssertEx.Equal(1, selectedThemes.Count);
+            AssertEx.Equal(KeyinaTheme.Light, selectedThemes[0]);
+        }
+        finally
+        {
+            Keyina.Host.UI.Fluent.FluentTheme.SetPreference(previousTheme);
+        }
     }
 
     [KeyinaTest("overview status cards fill their grid cells without horizontal overflow")]

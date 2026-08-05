@@ -8,6 +8,7 @@ add_library(keyina_windows_input STATIC
   native_latency_histogram.cpp
   pointer_input.cpp
   resident_input_controller.cpp
+  resource_self_test_policy.cpp
   runtime_hotkeys.cpp
   runtime_profile.cpp
   runtime_snippet_matcher.cpp
@@ -72,6 +73,8 @@ add_test(NAME keyina.windows.input_resource
 set_tests_properties(keyina.windows.input_resource PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "\\\"budget_pass\\\":true"
+  RESOURCE_LOCK keyina_windows_desktop_input
+  SKIP_RETURN_CODE 77
   TIMEOUT 45
 )
 
@@ -81,6 +84,7 @@ if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
   set_tests_properties(keyina.windows.input_typing PROPERTIES
     LABELS "integration;interactive-desktop"
     PASS_REGULAR_EXPRESSION "typing_self_test_pass"
+    RESOURCE_LOCK keyina_windows_desktop_input
     TIMEOUT 30
   )
 
@@ -89,6 +93,7 @@ if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
   set_tests_properties(keyina.windows.input_clipboard_typing PROPERTIES
     LABELS "integration;interactive-desktop"
     PASS_REGULAR_EXPRESSION "clipboard_typing_self_test_pass"
+    RESOURCE_LOCK keyina_windows_desktop_input
     TIMEOUT 45
   )
 endif()
@@ -98,6 +103,8 @@ add_test(NAME keyina.windows.input_tray_resource
 set_tests_properties(keyina.windows.input_tray_resource PROPERTIES
   LABELS integration
   PASS_REGULAR_EXPRESSION "\\\"tray_enabled\\\":true.*\\\"budget_pass\\\":true"
+  RESOURCE_LOCK keyina_windows_desktop_input
+  SKIP_RETURN_CODE 77
   TIMEOUT 45
 )
 
@@ -115,6 +122,7 @@ if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
   set_tests_properties(keyina.windows.input_callback_latency PROPERTIES
     LABELS "integration;interactive-desktop"
     PASS_REGULAR_EXPRESSION "callback_latency_self_test_pass"
+    RESOURCE_LOCK keyina_windows_desktop_input
     TIMEOUT 30
   )
 
@@ -123,6 +131,7 @@ if(KEYINA_ENABLE_INTERACTIVE_DESKTOP_TESTS)
   set_tests_properties(keyina.windows.input_transform_callback_latency PROPERTIES
     LABELS "integration;interactive-desktop"
     PASS_REGULAR_EXPRESSION "transform_callback_latency_self_test_pass"
+    RESOURCE_LOCK keyina_windows_desktop_input
     TIMEOUT 30
   )
 endif()

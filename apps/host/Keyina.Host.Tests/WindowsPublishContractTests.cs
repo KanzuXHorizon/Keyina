@@ -97,6 +97,8 @@ internal static class WindowsPublishContractTests
                      "--typing-self-test",
                      "--tray-resource-self-test",
                      "--profile-reload-self-test",
+                     "resource_self_test_blocked_by_existing_resident",
+                     "@(0, 77)",
                  })
         {
             AssertEx.True(
@@ -110,6 +112,8 @@ internal static class WindowsPublishContractTests
                      "--typing-self-test",
                      "--tray-resource-self-test",
                      "--profile-reload-self-test",
+                     "resource_self_test_blocked_by_existing_resident",
+                     "@(0, 77)",
                  })
         {
             AssertEx.True(

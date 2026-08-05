@@ -274,6 +274,46 @@ internal static class KeyinaApplicationContextTests
         AssertEx.Equal("Ctrl+Shift+D", menuItem.ShortcutKeyDisplayString);
     }
 
+    [KeyinaTest("resident settings load and persist the selected application theme")]
+    private static void RuntimePersistsThemePreference()
+    {
+        using var directory = new TemporaryDirectory();
+        var configurationPath = Path.Combine(directory.Path, "settings.json");
+        new AtomicConfigurationStore(configurationPath)
+            .SaveAsync(
+                KeyinaConfiguration.Default with
+                {
+                    Theme = KeyinaTheme.Dark,
+                    FirstRunCompleted = true,
+                },
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var options = KeyinaRuntimeOptions.CreateSelfTest(
+            configurationPath,
+            $"Keyina.Tests.{Guid.NewGuid():N}");
+
+        using var context = new KeyinaApplicationContext(options);
+        AssertEx.Equal(KeyinaTheme.Dark, context.CurrentSettingsSnapshot.Theme);
+        var method = typeof(KeyinaApplicationContext).GetMethod(
+            "SetTheme",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("SetTheme method was not found.");
+
+        _ = method.Invoke(context, [KeyinaTheme.Light]);
+
+        AssertEx.Equal(KeyinaTheme.Light, context.CurrentSettingsSnapshot.Theme);
+        var waitForSave = typeof(KeyinaApplicationContext).GetMethod(
+            "WaitForPendingConfigurationSave",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "Pending configuration save waiter was not found.");
+        _ = waitForSave.Invoke(context, null);
+        var persisted = new AtomicConfigurationStore(configurationPath)
+            .LoadAsync(CancellationToken.None)
+            .GetAwaiter().GetResult();
+        AssertEx.Equal(KeyinaTheme.Light, persisted.Theme);
+    }
+
     [KeyinaTest("resident context persists custom shortcuts after successful runtime application")]
     private static void RuntimePersistsCustomShortcut()
     {

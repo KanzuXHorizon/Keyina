@@ -55,19 +55,20 @@ inline void ExpectTrue(bool value, std::string_view expression,
 inline int RunAll() {
   int failures = 0;
   for (const auto& test : Registry()) {
+    std::cout << "[RUN] " << test.name << std::endl;
     try {
       test.function();
-      std::cout << "[PASS] " << test.name << '\n';
+      std::cout << "[PASS] " << test.name << std::endl;
     } catch (const std::exception& error) {
       ++failures;
-      std::cerr << "[FAIL] " << test.name << ": " << error.what() << '\n';
+      std::cerr << "[FAIL] " << test.name << ": " << error.what() << std::endl;
     } catch (...) {
       ++failures;
-      std::cerr << "[FAIL] " << test.name << ": unknown exception\n";
+      std::cerr << "[FAIL] " << test.name << ": unknown exception" << std::endl;
     }
   }
   std::cout << Registry().size() - static_cast<std::size_t>(failures) << '/'
-            << Registry().size() << " tests passed\n";
+            << Registry().size() << " tests passed" << std::endl;
   return failures == 0 ? 0 : 1;
 }
 

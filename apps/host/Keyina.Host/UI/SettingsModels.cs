@@ -31,6 +31,8 @@ public sealed record SettingsSnapshot(
 {
     public KeyinaHealthSnapshot Health { get; init; } = KeyinaHealthSnapshot.Healthy;
 
+    public KeyinaTheme Theme { get; init; } = KeyinaTheme.System;
+
     public string SpeechLanguage { get; init; } = "auto";
 
     public bool TranslationEnabled { get; init; }
@@ -114,6 +116,8 @@ public sealed record SettingsActions(
     Action<FeedbackMode> SetFeedbackMode,
     Action PreviewFeedback)
 {
+    public Action<KeyinaTheme> SetTheme { get; init; } = _ => { };
+
     public Action<string> SetSpeechLanguage { get; init; } = _ => { };
 
     public Action<bool> SetTranslationEnabled { get; init; } = _ => { };

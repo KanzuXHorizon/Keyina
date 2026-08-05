@@ -229,6 +229,9 @@ public sealed class FluentNavigationButton : Button
         Cursor = Cursors.Hand;
         Height = 42;
         Margin = new Padding(0, 0, 0, 4);
+        AccessibleRole = AccessibleRole.PageTab;
+        AccessibleDefaultActionDescription = "Mở mục cài đặt";
+        AccessibleDescription = "Mục điều hướng.";
         TabStop = true;
     }
 
@@ -256,7 +259,15 @@ public sealed class FluentNavigationButton : Button
         get => selected;
         set
         {
+            if (selected == value)
+            {
+                return;
+            }
+
             selected = value;
+            AccessibleDescription = selected
+                ? "Mục điều hướng đang chọn."
+                : "Mục điều hướng.";
             Invalidate();
         }
     }

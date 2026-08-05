@@ -39,14 +39,8 @@ bool GetOleClipboardForTest(IDataObject** data_object) noexcept {
 
 class ClipboardRestoreGuard {
  public:
-  explicit ClipboardRestoreGuard(
-      keyina::windows::ClipboardPrivacyFormats formats) noexcept
-      : formats_(formats) {
-    const HRESULT initialized = OleInitialize(nullptr);
-    ole_initialized_ = SUCCEEDED(initialized);
-    if (ole_initialized_) {
-      ready_ = GetOleClipboardForTest(&previous_);
-    }
+  ClipboardRestoreGuard() noexcept {
+    ready_ = GetOleClipboardForTest(&previous_);
   }
 
   [[nodiscard]] bool ready() const noexcept { return ready_; }
@@ -57,37 +51,19 @@ class ClipboardRestoreGuard {
       if (previous_ != nullptr) {
         previous_->Release();
       }
-      if (ole_initialized_) {
-        OleUninitialize();
-      }
       return;
     }
     if (previous_ != nullptr) {
-      IDataObject* private_previous =
-          keyina::windows::CreatePrivateClipboardDataObject(
-              previous_, formats_);
-      IDataObject* restore =
-          private_previous == nullptr ? previous_ : private_previous;
-      if (SUCCEEDED(OleSetClipboard(restore))) {
-        static_cast<void>(OleFlushClipboard());
-      }
-      if (private_previous != nullptr) {
-        private_previous->Release();
-      }
+      static_cast<void>(OleSetClipboard(previous_));
       previous_->Release();
     } else if (OpenClipboardForTest()) {
       static_cast<void>(EmptyClipboard());
       CloseClipboard();
     }
-    if (ole_initialized_) {
-      OleUninitialize();
-    }
   }
 
  private:
-  keyina::windows::ClipboardPrivacyFormats formats_{};
   IDataObject* previous_{};
-  bool ole_initialized_{false};
   bool ready_{false};
   bool mutated_{false};
 };
@@ -142,7 +118,7 @@ KEYINA_TEST(private_clipboard_text_excludes_history_and_cloud_sync) {
   const auto formats =
       keyina::windows::RegisterClipboardPrivacyFormats();
   KEYINA_EXPECT_TRUE(static_cast<bool>(formats));
-  ClipboardRestoreGuard restore(formats);
+  ClipboardRestoreGuard restore;
   KEYINA_EXPECT_TRUE(restore.ready());
   const bool opened = OpenClipboardForTest();
   KEYINA_EXPECT_TRUE(opened);
@@ -187,7 +163,7 @@ KEYINA_TEST(private_clipboard_supports_an_empty_restorable_text_value) {
   const auto formats =
       keyina::windows::RegisterClipboardPrivacyFormats();
   KEYINA_EXPECT_TRUE(static_cast<bool>(formats));
-  ClipboardRestoreGuard restore(formats);
+  ClipboardRestoreGuard restore;
   KEYINA_EXPECT_TRUE(restore.ready());
   const bool opened = OpenClipboardForTest();
   KEYINA_EXPECT_TRUE(opened);
@@ -212,7 +188,7 @@ KEYINA_TEST(private_clipboard_data_object_advertises_privacy_formats) {
   const auto formats =
       keyina::windows::RegisterClipboardPrivacyFormats();
   KEYINA_EXPECT_TRUE(static_cast<bool>(formats));
-  ClipboardRestoreGuard restore(formats);
+  ClipboardRestoreGuard restore;
   KEYINA_EXPECT_TRUE(restore.ready());
   const bool opened = OpenClipboardForTest();
   KEYINA_EXPECT_TRUE(opened);

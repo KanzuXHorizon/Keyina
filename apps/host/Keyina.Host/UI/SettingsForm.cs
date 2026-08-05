@@ -84,6 +84,7 @@ public sealed partial class SettingsForm : Form
     private readonly TextBox typingDiagnosticLog;
     private readonly System.Windows.Forms.Timer typingDiagnosticTimer;
     private readonly ComboBox feedbackMode;
+    private readonly ComboBox themeSelector;
     private readonly FluentButton previewFeedback;
     private readonly ComboBox speechLanguage;
     private readonly TextBox speechApiKey;
@@ -126,6 +127,8 @@ public sealed partial class SettingsForm : Form
         ArgumentNullException.ThrowIfNull(snapshot);
         this.actions = actions ?? throw new ArgumentNullException(nameof(actions));
         currentSnapshot = snapshot;
+        FluentTheme.SetPreference(snapshot.Theme);
+        palette = FluentTheme.Current;
 
         Text = "Keyina";
         AccessibleName = "Cài đặt Keyina";
@@ -241,6 +244,7 @@ public sealed partial class SettingsForm : Form
         };
         InitializeKeystrokeOverlayControls();
         feedbackMode = CreateFeedbackModeSelector();
+        themeSelector = CreateThemeSelector();
         previewFeedback = CreateButton(
             "previewFeedback",
             "Thử phản hồi",
@@ -575,6 +579,16 @@ public sealed partial class SettingsForm : Form
                 actions.SetTypingLatencyEnabled(typingLatencyToggle.Checked);
             }
         };
+        themeSelector.SelectedIndexChanged += (_, _) =>
+        {
+            if (!applyingSnapshot && themeSelector.SelectedItem is ThemeOption option)
+            {
+                currentSnapshot = currentSnapshot with { Theme = option.Value };
+                FluentTheme.SetPreference(option.Value);
+                ApplySystemTheme();
+                actions.SetTheme(option.Value);
+            }
+        };
         feedbackMode.SelectedIndexChanged += (_, _) =>
         {
             if (!applyingSnapshot && feedbackMode.SelectedIndex >= 0)
@@ -693,9 +707,11 @@ public sealed partial class SettingsForm : Form
             currentSnapshot.Snippets,
             snapshot.Snippets);
         currentSnapshot = snapshot;
+        FluentTheme.SetPreference(snapshot.Theme);
         applyingSnapshot = true;
         try
         {
+            themeSelector.SelectedIndex = ThemeToIndex(snapshot.Theme);
             vietnameseToggle.Checked = snapshot.VietnameseEnabled;
             traditionalTonePlacementToggle.Checked = !snapshot.TraditionalTonePlacement;
             quickTelexLettersToggle.Checked = snapshot.QuickTelexLetters;
@@ -846,6 +862,7 @@ public sealed partial class SettingsForm : Form
         {
             applyingSnapshot = false;
         }
+        ApplySystemTheme();
     }
 
     protected override void OnHandleCreated(EventArgs eventArgs)
@@ -1254,6 +1271,12 @@ public sealed partial class SettingsForm : Form
             ipcStatus,
             "Chèn trực tiếp vào ô đang nhập"), 1, 1);
         stack.Controls.Add(statusGrid);
+        stack.Controls.Add(CreateSelectionSettingRow(
+            "themePreferenceRow",
+            "\uE790",
+            "Chủ đề giao diện",
+            "Theo Windows hoặc cố định giao diện sáng/tối cho toàn bộ Keyina. Tương phản cao của Windows luôn được ưu tiên.",
+            themeSelector));
 
         var privacyCard = CreateCard("privacyCard", 120);
         var privacyLayout = CreateIconTextLayout(
@@ -2689,6 +2712,47 @@ public sealed partial class SettingsForm : Form
         return card;
     }
 
+    private FluentCard CreateSelectionSettingRow(
+        string name,
+        string glyph,
+        string title,
+        string description,
+        ComboBox selector)
+    {
+        var card = CreateCard(name, 96);
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 2,
+            Padding = Padding.Empty,
+            Margin = Padding.Empty,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 228F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        card.Controls.Add(layout);
+
+        var icon = CreateIconLabel(name + "Icon", glyph, 14F);
+        icon.Dock = DockStyle.Fill;
+        layout.SetRowSpan(icon, 2);
+        layout.Controls.Add(icon, 0, 0);
+        var titleLabel = CreateLabel(name + "Title", title, LabelRole.Heading);
+        titleLabel.Dock = DockStyle.Fill;
+        titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+        layout.Controls.Add(titleLabel, 1, 0);
+        var descriptionLabel = CreateLabel(name + "Description", description, LabelRole.Secondary);
+        descriptionLabel.Dock = DockStyle.Fill;
+        layout.Controls.Add(descriptionLabel, 1, 1);
+        selector.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        selector.Margin = new Padding(12, 8, 0, 0);
+        layout.SetRowSpan(selector, 2);
+        layout.Controls.Add(selector, 2, 0);
+        return card;
+    }
+
     private FluentCard CreateEditableShortcutRow(
         string name,
         string glyph,
@@ -3401,6 +3465,39 @@ public sealed partial class SettingsForm : Form
         return textBox;
     }
 
+    private ComboBox CreateThemeSelector()
+    {
+        var selector = new ComboBox
+        {
+            Name = "themeSelector",
+            AccessibleName = "Chủ đề giao diện",
+            AccessibleDescription =
+                "Chọn theo giao diện Windows hoặc cố định giao diện sáng hay tối. Tương phản cao của Windows luôn được ưu tiên.",
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font(Font.FontFamily, 9.5F, FontStyle.Regular),
+            Height = 36,
+            IntegralHeight = false,
+            DropDownHeight = 116,
+            TabStop = true,
+        };
+        selector.Items.AddRange(
+        [
+            new ThemeOption(KeyinaTheme.System, "Theo Windows"),
+            new ThemeOption(KeyinaTheme.Light, "Sáng"),
+            new ThemeOption(KeyinaTheme.Dark, "Tối"),
+        ]);
+        return selector;
+    }
+
+    private static int ThemeToIndex(KeyinaTheme theme) => theme switch
+    {
+        KeyinaTheme.System => 0,
+        KeyinaTheme.Light => 1,
+        KeyinaTheme.Dark => 2,
+        _ => throw new ArgumentOutOfRangeException(nameof(theme), theme, null),
+    };
+
     private ComboBox CreateFeedbackModeSelector()
     {
         var selector = new ComboBox
@@ -3973,6 +4070,11 @@ public sealed partial class SettingsForm : Form
         Tertiary,
         Caption,
         Icon,
+    }
+
+    private sealed record ThemeOption(KeyinaTheme Value, string DisplayName)
+    {
+        public override string ToString() => DisplayName;
     }
 
     private sealed record SnippetRow(
